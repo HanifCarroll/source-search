@@ -190,3 +190,12 @@ test('oversized native mail pages retry smaller without skipping provider contin
     const second=(await runtime.search_sources({queries:[{source:'mail-personal',query:'fixture',limit:25,cursor:first.nextCursor}]})).results[0];
     expect(second.items[0].ref.id).toBe('m'+first.items.length);
 });
+test('loader applies dependency-only upgrades when the lockfile changes',async()=>{
+ const root=await folder(),entry=join(root,'api.ts'),dep=join(root,'node_modules','fixture-parser');await mkdir(dep,{recursive:true});
+ await writeFile(join(dep,'package.json'),JSON.stringify({name:'fixture-parser',type:'module',main:'index.js'}));
+ await writeFile(entry,'import {version} from "fixture-parser";export async function invoke(){return {revision:version};}');
+ await writeFile(join(dep,'index.js'),'export const version=1;');await writeFile(join(root,'bun.lock'),'fixture version 1');const load=runtimeLoader(entry);
+ expect(await (await load()).invoke('list_sources',{})).toMatchObject({revision:1});
+ await writeFile(join(dep,'index.js'),'export const version=2;');await writeFile(join(root,'bun.lock'),'fixture version 2');
+ expect(await (await load()).invoke('list_sources',{})).toMatchObject({revision:2});
+});

@@ -90,3 +90,7 @@ WhatsApp poll receipt envelopes use a small protobuf.js schema for the question 
 ZIP archives use file-backed BlobReader access, streamed archive/compressed hashes, strict local-header and overlap checks, CRC verification, and bounded output. Original entry identities remain path-based. MBOX entry bytes are still bounded and buffered; MailParser drains decoded attachments without retaining them. These changes do not implement a streaming MBOX archive iterator.
 
 Parser versions invalidate archive and WhatsApp projections. Saved mail responses are reformatted locally without fetching every message again. Regression tests cover checksums, ZIP64, unsafe paths, size limits, source changes, MIME charsets and attachments, calendar DST/custom zones, contact variants, poll decoding, and cache upgrades. All test records are invented.
+
+The file-backed ZIP adapter was also checked against a generated 128 MiB ZIP64 archive with four independently hashed payloads. This exposed a Bun 1.3.14 sliced-Blob stream stall; fingerprints now use bounded Node file streams. A 64 MiB, two-entry subprocess regression test catches the stall and verifies read completion.
+
+Zod is pinned to 4.6.6 for both the application and MCP SDK, resolving [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5). Runtime reloads fingerprint the dependency manifest and lockfile as well as source files. Existing MCP transports require one reconnect after dependency updates.

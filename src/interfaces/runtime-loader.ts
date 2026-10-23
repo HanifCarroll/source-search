@@ -27,6 +27,11 @@ export function runtimeLoader(entry = join(import.meta.dir, "../application/api.
                 }
             }
             await walk(entry === join(import.meta.dir, "../application/api.ts") ? join(import.meta.dir, "..") : dirname(entry));
+            const packageRoot=entry===join(import.meta.dir,"../application/api.ts") ? join(import.meta.dir,"../..") : dirname(entry);
+            for(const name of ["package.json","bun.lock"]){
+                try{digest.update(name);digest.update(await readFile(join(packageRoot,name)));}
+                catch(error){if((error as NodeJS.ErrnoException).code!=="ENOENT")throw error;}
+            }
             const current = digest.digest("hex");
             if (module && current === revision)
                 return module;
