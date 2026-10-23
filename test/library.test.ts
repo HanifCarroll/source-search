@@ -49,6 +49,21 @@ test("hybrid never silently ignores exact filters or switches provider syntax",(
  for(const option of [{from:"2026-01-01T00:00:00Z"},{roles:["user"]},{sections:["primary"]},{folders:["inbox"]}])expect(()=>validateOptions(querySchema.parse({source:"library",query:"idea",...option}))).toThrow("exact filters");
 });
 
+test("embedding coverage warnings follow the selected source",async()=>{
+ const root=await mkdtemp(join(tmpdir(),"ss-library-scope-")),c={...defaultConfig(),libraryRoot:root,libraryEnabled:true,libraryDatabase:join(root,"qmd.sqlite")};
+ try{
+  await publish(c,"whatsapp",[rec("1","Indexed fixture")],{}, {state:"ready"});
+  await publish(c,"calls",[{...rec("2","Pending fixture"),ref:{source:"calls",id:"2",version:"2"}}],{}, {state:"ready"});
+  const manifest=libraryDB(c),rows=manifest.query("SELECT id,hash,source FROM chunks").all() as {id:string,hash:string,source:string}[];manifest.close();
+  const db=new Database(c.libraryDatabase);db.exec("CREATE TABLE documents(collection,path,hash,active);CREATE TABLE content_vectors(hash)");
+  for(const row of rows){db.query("INSERT INTO documents VALUES(?,?,?,1)").run("ss-"+row.source,row.id+".md",row.hash);if(row.source==="whatsapp")db.query("INSERT INTO content_vectors VALUES(?)").run(row.hash);}db.close();
+  const search=(source:string)=>searchLibrary(c,querySchema.parse({source,query:"fixture",mode:"lexical"}),async()=>[]);
+  const scoped=await search("whatsapp"),combined=await search("library"),pending=await search("calls");
+  expect(scoped.status).toBe("ok");expect(scoped.warnings.some(w=>w.includes("await embeddings"))).toBe(false);
+  for(const page of [combined,pending]){expect(page.status).toBe("partial");expect(page.warnings).toContain("1 selected library chunks await embeddings; semantic coverage is partial while the background job continues.");}
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test("mail maintenance resumes failures and prunes only after a complete provider inventory",async()=>{
  const {syncMail}=await import("../src/maintenance/library-sync");const {getState,setState}=await import("../src/search/library/store");
  const root=await mkdtemp(join(tmpdir(),"ss-mail-sync-")),c={...defaultConfig(),libraryRoot:root,libraryEnabled:true};await mkdir(join(root,"mail-raw"));

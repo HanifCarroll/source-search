@@ -66,3 +66,7 @@ Run `bun run check`, `bun test`, `bun run demo`, and `bun run test:python` in an
 The initial folder reorganization made the code easier to navigate but left source dispatch, context rules, provider commands, and formatting coupled. The current separation changes those interfaces and removes duplicate routing decisions. Regression tests cover provenance validation independent of formatting, projected-mail continuation policy, typed QMD execution, and download availability without record-version changes.
 
 The source adapters still own their different schemas and query semantics. We keep those differences explicit instead of imposing a generic provider framework. The catalogue remains a source-specific description of behavior, and archive formats keep their specialized parsers. Document extraction is optional and disabled unless explicitly enabled; disabling it does not remove original documents or emails.
+
+The [dependency review](dependency-review.md) identifies standards parsers that should replace handwritten parsing, with tested examples and migration boundaries.
+
+Native database projections carry a version as well as a source fingerprint. Changing how stored text is interpreted therefore refreshes unchanged databases too. WhatsApp reads include stored photo, video and GIF captions; filenames and link-preview titles are not treated as authored captions. Coverage counts distinguish entries with searchable text from entries without supported text in the local store. Library embedding warnings apply only to the selected sources.

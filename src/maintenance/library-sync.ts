@@ -5,7 +5,7 @@ import { lstat, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { loadConfig, sourceEnabled, requireMaintenance, type Config } from "../platform/config";
-import { allDatabaseRecords } from "../sources/local/databases";
+import { allDatabaseRecords, databaseProjectionVersion } from "../sources/local/databases";
 import { allMessageRecords } from "../sources/messages/index";
 import { archiveSources, exportPaths, archiveSignature, exportProjectionVersion } from "../sources/archives/originals";
 import { rebuildArchive } from "../sources/archives/index";
@@ -22,10 +22,11 @@ async function native(c:Config){
    try{
     if(!sourceEnabled(c,source))continue;
     const path=source==="calls"?c.muesli:source==="messages"?c.messages:c.whatsapp,paths=[path,path+"-wal"],signature=await stampPaths(paths);
-    if(getState(db,source).signature===signature && getState(db,source).state!=="error")continue;
+    const projectionVersion=source==="messages" ? 1 : databaseProjectionVersion(source);
+    if(getState(db,source).signature===signature && (getState(db,source).projectionVersion||1)===projectionVersion && getState(db,source).state!=="error")continue;
     const records=source==="messages"?await allMessageRecords(c):await allDatabaseRecords(c,source);
     if(signature!==await stampPaths(paths))throw Error("Source changed during snapshot; retaining previous projection and retrying");
-    await publish(c,source,records,{paths,signature},{signature,state:"ready",error:null,checkedAt:now(),coverage:"Current local database; absent text and phone-only history cannot be recovered"});
+    await publish(c,source,records,{paths,signature},{signature,projectionVersion,state:"ready",error:null,checkedAt:now(),coverage:"Current local database; absent text and phone-only history cannot be recovered"});
    }catch(e){setState(db,source,{...getState(db,source),state:"error",error:errorData(e),checkedAt:now()});}
   }
  }finally{db.close();}

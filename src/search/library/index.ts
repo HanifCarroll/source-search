@@ -38,7 +38,8 @@ export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>run
  const records:RecordData[]=[],warnings=["Derived search text; read returned references for provenance and verify originals before citing. Ranked candidates are not exhaustive."];
  const scopes=status.sources?.filter(s=>q.source==="library"||s.source===q.source)||[];
  if(scopes.some(s=>s.state!=="ready"))warnings.push("Some selected sources are still backfilling or have failures; list_sources reports current coverage.");
- if(status.embeddings?.pending)warnings.push(`${status.embeddings.pending} library chunks await embeddings; semantic coverage is partial while the background job continues.`);
+ const pendingEmbeddings=scopes.reduce((total,s)=>total+(s.embeddings.pending||0),0);
+ if(pendingEmbeddings)warnings.push(`${pendingEmbeddings} selected library chunks await embeddings; semantic coverage is partial while the background job continues.`);
  try{for(const r of raw.slice(0,100)){
   if(typeof r.file!=="string"||typeof r.score!=="number")fail("INVALID_PROVIDER_RESPONSE","Invalid QMD hit");
   const m=/^qmd:\/\/ss-([a-z-]+)\/([a-f0-9]{64})\.md$/.exec(r.file);

@@ -55,6 +55,6 @@ export function scanRecords(db: Database, select: string, conditions: string[], 
     const more = stopped || scanned < rows.length;
     if (more && scanned === 5000)
         warnings.push("Work limit reached; continue with nextCursor even if this page has no matches");
-    if(missingText)warnings.push(`${missingText} checked local entries have no readable text; media/system entries and missing phone history are not searched.`);
+    if(missingText)warnings.push(`${missingText} checked local entries have no searchable message text or supported caption in this store.`);
     return { source: q.source, status: warnings.length ? "partial" : "ok", items, scan:{checked:scanned,undecodable,...(missingText ? {missingText} : {}),exhausted:!more,dateSpan:{from:ascending?firstDate:lastDate,to:ascending?lastDate:firstDate},...(more && scanned===5000 ? {workLimit:"5000 candidates"} : {})}, ...(more ? { nextCursor: cursor(key, last!) } : {}), warnings: [...new Set(warnings)], observedAt: now() };
 }
