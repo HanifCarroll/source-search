@@ -7,3 +7,5 @@ CLI and MCP share the same runtime. Preserve explicit source opt-in, attribution
 Use invented data in tests. Keep credentials, local configuration, source records, indexes and live samples outside Git. Run `bun run check`, `bun test` and the Python suite after relevant changes. Never run tests against a contributor's real accounts.
 
 Do not use subagents or Compound Engineering skills unless the user asks.
+
+Keep documentation focused on lasting setup, architecture and maintenance guidance. Consolidate overlapping guides; keep one-off audits, dependency comparisons and review reports outside the repository.
