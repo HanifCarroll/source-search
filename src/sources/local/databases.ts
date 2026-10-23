@@ -1,3 +1,5 @@
+import {sourceKind} from '../../domain/source-catalog';
+import {databasePath} from '../../platform/config';
 import {whatsappStructuredText} from "./whatsapp-content";
 import { scanRecords } from "../../domain/scan";
 import type { Database } from "bun:sqlite";
@@ -11,7 +13,7 @@ function schema(db: Database, source: "whatsapp" | "calls") {
   else { requireColumns(db, "ZWAMESSAGE", ["Z_PK", "ZCHATSESSION", "ZSTANZAID", "ZMESSAGEDATE", "ZISFROMME", "ZTEXT", "ZFROMJID", "ZMEDIAITEM"]); requireColumns(db, "ZWACHATSESSION", ["Z_PK", "ZCONTACTJID", "ZPARTNERNAME"]); }
 }
 // Rebuild cached text when the native record projection changes.
-export const databaseProjectionVersion = (source: "whatsapp" | "calls") => source === "whatsapp" ? 4 : 1;
+export const databaseProjectionVersion = (source:string,config?:Config) => sourceKind(source,config)==="whatsapp"?4:1;
 function whatsappSelect(db: Database) {
   const cols = new Set((db.query("PRAGMA table_info(ZWAMESSAGE)").all() as {name:string}[]).map(c=>c.name));
   const groups = new Set((db.query("PRAGMA table_info(ZWAGROUPMEMBER)").all() as {name:string}[]).map(c=>c.name));
@@ -28,13 +30,13 @@ function whatsappSelect(db: Database) {
 function rows(db: Database, source: "whatsapp" | "calls", suffix: string, args: any[]) {
   return db.query(source === "calls" ? `SELECT id pk,title,start_time,end_time,raw_transcript,formatted_notes,manual_notes FROM meetings WHERE (deleted_at IS NULL OR deleted_at=0) ${suffix}` : whatsappSelect(db)+` WHERE 1=1 ${suffix}`).all(...args) as any[];
 }
-function record(source: "whatsapp" | "calls", row: any): RecordData {
+function record(family: "whatsapp" | "calls", row: any,source:string=family): RecordData {
   const id = String(row.pk);
-  if (source === "calls") {
+  if (family === "calls") {
     const parts = [{kind:"primary" as const,text:"Original transcript\n"+(row.raw_transcript || "")},...(row.formatted_notes ? [{kind:"generated" as const,text:"Generated meeting notes\n"+row.formatted_notes}] : []),...(row.manual_notes ? [{kind:"manual" as const,text:"Manual notes\n"+row.manual_notes}] : [])];
     const body=parts.map(p=>p.text).join("\n\n");let offset=0;
     const sections=parts.map(p=>{const start=offset;offset+=p.text.length+2;return {kind:p.kind,start,end:start+p.text.length};});
-    return versioned({ ref: { source, id }, body, sections, title: row.title || "(Untitled call)", type: "call-transcript", locator: `source-search://calls/${id}`, occurredAt: row.start_time && Number.isFinite(Date.parse(row.start_time)) ? new Date(row.start_time).toISOString() : undefined, observedAt: now(),
+    return versioned({adapter:"muesli", ref: { source, id }, body, sections, title: row.title || "(Untitled call)", type: "call-transcript", locator: `source-search://${source}/${id}`, occurredAt: row.start_time && Number.isFinite(Date.parse(row.start_time)) ? new Date(row.start_time).toISOString() : undefined, observedAt: now(),
       conversation: id, metadata: { endedAt: row.end_time, originalTranscript: !!row.raw_transcript, generatedNotesSeparate: true }, warnings: ["Stored automatic transcript may contain recognition or speaker errors; generated notes are labelled separately."] });
   }
   const group = row.chat?.endsWith("@g.us") || false;
@@ -45,46 +47,41 @@ function record(source: "whatsapp" | "calls", row: any): RecordData {
   const structured=whatsappStructuredText(row);
   const messageBody = distinctCaption ? [text, "Media caption\n" + caption].filter(Boolean).join("\n\n") : text;
   const body=[messageBody,structured.text].filter(Boolean).join("\n\n");
-  return versioned({ ref: { source, id }, body, title: row.name || row.chat || "WhatsApp message", type: "message", locator: `source-search://whatsapp/${id}`, occurredAt: row.date && Number.isFinite(Number(row.date)) ? new Date(Number(row.date) * 1000 + 978307200000).toISOString() : undefined, observedAt: now(), author: actor, conversation: row.chat,
+  return versioned({adapter:"whatsapp", ref: { source, id }, body, title: row.name || row.chat || "WhatsApp message", type: "message", locator: `source-search://${source}/${id}`, occurredAt: row.date && Number.isFinite(Number(row.date)) ? new Date(Number(row.date) * 1000 + 978307200000).toISOString() : undefined, observedAt: now(), author: actor, conversation: row.chat,
     metadata: {...(structured.origin ? {textOrigin:structured.origin} : {}), bodyStatus:body.trim() ? "text" : "text-unavailable",...(distinctCaption ? {textOrigin:text.trim() ? "message-and-caption" : "media-caption"} : {}),senderId, senderIdentity: row.outgoing === 1n ? "self" : senderId ? "native" : "unknown", nativeId: row.stanza, direction: row.outgoing === 1n ? "outgoing" : "incoming", group: row.chat?.endsWith("@g.us") || false, hasMedia: row.media != null }, warnings: [...(structured.warning ? [structured.warning] : []),...(row.media != null ? ["Attachment files are not searched; stored message text, captions, polls and contact cards are returned."] : []),...(!body.trim() ? ["This local entry has no readable text; changing search terms cannot recover absent text. It may be a media/system entry or incomplete local history; its kind is not inferred."] : [])] });
 }
-function path(config: Config, source: "whatsapp" | "calls") { return source === "whatsapp" ? config.whatsapp : config.muesli; }
-export async function databaseStatus(config: Config, source: "whatsapp" | "calls") {
-  const snap = await createSnapshot(path(config, source));
-  try { schema(snap.database, source); const count = snap.database.query(source === "calls" ? "SELECT count(*) n FROM meetings WHERE deleted_at IS NULL OR deleted_at=0" : "SELECT count(*) n FROM ZWAMESSAGE").get() as { n: bigint }; return { records: Number(count.n), originalModifiedAt: snap.sourceDatabaseModifiedAt, coverage: source === "whatsapp" ? "Local direct/group message text, captions, polls and contact cards; phone-only history and attachment contents are outside this source" : "Current nondeleted Muesli meetings, including complete stored transcripts" }; }
-  finally { await snap.close(); }
+function family(config:Config,source:string):'whatsapp'|'calls'{const kind=sourceKind(source,config);if(kind!=='whatsapp' && kind!=='muesli')fail('SOURCE_NOT_CONFIGURED','Expected WhatsApp or Muesli source');return kind==='muesli'?'calls':'whatsapp';}
+export async function databaseStatus(config:Config,source:string){
+ const kind=family(config,source),snap=await createSnapshot(databasePath(config,source));
+ try{schema(snap.database,kind);const count=snap.database.query(kind==='calls'?'SELECT count(*) n FROM meetings WHERE deleted_at IS NULL OR deleted_at=0':'SELECT count(*) n FROM ZWAMESSAGE').get() as {n:bigint};return {records:Number(count.n),originalModifiedAt:snap.sourceDatabaseModifiedAt,coverage:kind==='whatsapp'?'Local direct/group message text, captions, polls and contact cards; phone-only history and attachment contents are outside this source':'Current nondeleted Muesli meetings, including complete stored transcripts'};}finally{await snap.close();}
 }
-export async function searchDatabase(config: Config, q: Query): Promise<Page> {
-  const source = q.source as "whatsapp" | "calls", snap = await createSnapshot(path(config, source));
-  try {
-    schema(snap.database, source);
-    const conditions=source === "calls" ? ["(deleted_at IS NULL OR deleted_at=0)"] : [], values:any[]=[];
-    if(q.conversation){conditions.push(source === "calls" ? "CAST(id AS TEXT)=?" : "c.ZCONTACTJID=?");values.push(q.conversation);}
-    const select=source === "calls" ? "SELECT id pk,title,start_time,end_time,raw_transcript,formatted_notes,manual_notes FROM meetings" : whatsappSelect(snap.database);
-    const page=scanRecords(snap.database,select,conditions,values,source === "calls" ? "julianday(start_time)" : "m.ZMESSAGEDATE",source === "calls" ? "id" : "m.Z_PK",q,row=>record(source,row));
-    page.sourceWarnings=[source === "whatsapp" ? "Local message text, captions, polls and contact cards; attachment contents and phone-only history are excluded." : "Automatic transcript and generated notes are labelled separately."];
-    return page;
-  } finally { await snap.close(); }
+export async function searchDatabase(config:Config,q:Query):Promise<Page>{
+ const source=q.source,kind=family(config,source),snap=await createSnapshot(databasePath(config,source));
+ try{
+  schema(snap.database,kind);const conditions=kind==='calls'?['(deleted_at IS NULL OR deleted_at=0)']:[],values:any[]=[];
+  if(q.conversation){conditions.push(kind==='calls'?'CAST(id AS TEXT)=?':'c.ZCONTACTJID=?');values.push(q.conversation);}
+  const select=kind==='calls'?'SELECT id pk,title,start_time,end_time,raw_transcript,formatted_notes,manual_notes FROM meetings':whatsappSelect(snap.database);
+  const page=scanRecords(snap.database,select,conditions,values,kind==='calls'?'julianday(start_time)':'m.ZMESSAGEDATE',kind==='calls'?'id':'m.Z_PK',q,row=>record(kind,row,source));
+  page.sourceWarnings=[kind==='whatsapp'?'Local message text, captions, polls and contact cards; attachment contents and phone-only history are excluded.':'Automatic transcript and generated notes are labelled separately.'];return page;
+ }finally{await snap.close();}
 }
-export async function readDatabase(config: Config, ref: Ref, context: boolean) {
-  const source = ref.source as "whatsapp" | "calls";
-  if (!/^\d+$/.test(ref.id) || !Number.isSafeInteger(Number(ref.id))) fail("INVALID_REFERENCE", "Expected a safe native row identifier");
-  const snap = await createSnapshot(path(config, source));
-  try {
-    schema(snap.database, source); const list = rows(snap.database, source, `AND ${source === "whatsapp" ? "m.Z_PK" : "id"}=?`, [ref.id]);
-    if (!list.length) fail("RECORD_NOT_FOUND", "Record is absent or deleted in the current source");
-    const r = record(source, list[0]); assertVersion(ref, r.ref.version!); let neighbors: RecordData[] = [];
-    if (context && source === "whatsapp" && r.conversation) {
-      const previous = rows(snap.database, source, "AND c.ZCONTACTJID=? AND m.Z_PK<? ORDER BY m.Z_PK DESC LIMIT 5", [r.conversation, ref.id]).reverse();
-      const following = rows(snap.database, source, "AND c.ZCONTACTJID=? AND m.Z_PK>? ORDER BY m.Z_PK ASC LIMIT 5", [r.conversation, ref.id]);
-      neighbors = [...previous, ...following].map(row => record(source, row));
-    }
-    return { record: r, context: neighbors.map(({ body, ...r }) => ({ ...r, excerpt: body.slice(0, 500) })) };
-  } finally { await snap.close(); }
+export async function readDatabase(config:Config,ref:Ref,context:boolean){
+ const source=ref.source,kind=family(config,source);
+ if(!/^\d+$/.test(ref.id) || !Number.isSafeInteger(Number(ref.id)))fail('INVALID_REFERENCE','Expected a safe native row identifier');
+ const snap=await createSnapshot(databasePath(config,source));
+ try{
+  schema(snap.database,kind);const list=rows(snap.database,kind,`AND ${kind==='whatsapp'?'m.Z_PK':'id'}=?`,[ref.id]);
+  if(!list.length)fail('RECORD_NOT_FOUND','Record is absent or deleted in the current source');
+  const r=record(kind,list[0],source);assertVersion(ref,r.ref.version!);let neighbors:RecordData[]=[];
+  if(context && kind==='whatsapp' && r.conversation){
+   const previous=rows(snap.database,kind,'AND c.ZCONTACTJID=? AND m.Z_PK<? ORDER BY m.Z_PK DESC LIMIT 5',[r.conversation,ref.id]).reverse();
+   const following=rows(snap.database,kind,'AND c.ZCONTACTJID=? AND m.Z_PK>? ORDER BY m.Z_PK ASC LIMIT 5',[r.conversation,ref.id]);neighbors=[...previous,...following].map(row=>record(kind,row,source));
+  }
+  return {record:r,context:neighbors.map(({body,...r})=>({...r,excerpt:body.slice(0,500)}))};
+ }finally{await snap.close();}
 }
-
-// Maintenance-only enumeration: one consistent SQLite snapshot, no query/top-N truncation.
-export async function allDatabaseRecords(config:Config,source:"whatsapp"|"calls"){
- const snap=await createSnapshot(path(config,source));
- try{schema(snap.database,source);return rows(snap.database,source,"",[]).map(r=>record(source,r));}finally{await snap.close();}
+// One consistent SQLite snapshot for maintenance, without a search/top-N limit.
+export async function allDatabaseRecords(config:Config,source:string){
+ const kind=family(config,source),snap=await createSnapshot(databasePath(config,source));
+ try{schema(snap.database,kind);return rows(snap.database,kind,'',[]).map(row=>record(kind,row,source));}finally{await snap.close();}
 }

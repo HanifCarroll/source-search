@@ -6,7 +6,7 @@ export function contentSections(record: RecordData): TextSection[] {
   if(record.sections)return record.sections;
   const body=record.body, sections:TextSection[]=[], markers:{start:number;kind:SectionKind}[]=[{start:0,kind:"primary"}];
   if(body.startsWith("---")){const front=/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(body);if(front){markers[0]!.kind="metadata";markers.push({start:front[0].length,kind:"primary"});}}
-  const transcripts=["voice-journals","call-notes","calls"].includes(record.ref.source);
+  const transcripts=record.type.includes("transcript") || !record.adapter && ["voice-journals","call-notes","calls"].includes(record.ref.source);
   if(transcripts)for(const m of body.matchAll(/^(?:#{1,3}\s+)?(Source Metadata|Muesli Generated Notes|Original transcript|Transcript|Reviewed Transcript|Clean Transcript|Generated meeting notes|Manual notes|Review Notes|Meeting Summary|Key Discussion Points|Action Items|Decisions)(?:[^\S\r\n]*\r?\n|[^\S\r\n]*$)/gim)){
     const label=m[1]!.toLowerCase();
     markers.push({start:m.index,kind:label==="source metadata"?"metadata":label.startsWith("review notes")?"review":label==="manual notes"?"manual":/transcript/.test(label)?"primary":"generated"});

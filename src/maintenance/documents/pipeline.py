@@ -4,7 +4,7 @@ from .common import BASE, TEXT, IMAGE, MEDIA, BOOK_FORMATS, EXTRACTOR_VERSION, S
 from .inventory import inventory, mail_attachments, takeout_attachments
 
 def isolated_extract(path,cache,config):
- payload=json.dumps({'path':str(path),'cache':str(cache),'options':{k:config.get(k) for k in ('tesseractBinary','transcribeBinary','ffprobeBinary')}}).encode()
+ payload=json.dumps({'path':str(path),'cache':str(cache),'options':{k:config.get(k) for k in ('tesseractBinary','transcribeBinary','ffprobeBinary','transcriptionBackend','transcriptionModel','ocrLanguages')}}).encode()
  result=json.loads(command([sys.executable,str(Path(__file__).resolve().parents[3]/'scripts/extract-documents.py'),'--worker'],1800 if path.suffix.lower() in MEDIA else 120,input_data=payload))
  if result.get('skipped'):raise Skipped(result['skipped'])
  if result.get('error'):raise ValueError(result['error'])
@@ -32,6 +32,7 @@ def main(config):
   # Sidecar changes invalidate a reused transcript too.
   if Path(item['name']).suffix.lower() in MEDIA:
    item['signature'] += [signature(Path(item['path']).with_suffix(ext)) for ext in ('.txt','.srt','.vtt') if Path(item['path']).with_suffix(ext).is_file()]
+  item['signature'] += [{k:config.get(k) for k in ('transcriptionBackend','transcriptionModel','ocrLanguages')}]
   if prior and prior.get('signature')==item['signature'] and prior.get('record'):
    records.append(prior['record']);continue
   if prior and prior.get('extractorVersion')==EXTRACTOR_VERSION and prior.get('signature')==item['signature'] and prior.get('skipped'):

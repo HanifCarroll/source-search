@@ -28,7 +28,7 @@ export async function markManagedCache(path:string) {
 function overlaps(a:string,b:string){const rel=relative(resolve(a),resolve(b));return !rel || rel!==".." && !rel.startsWith(".."+sep) && !isAbsolute(rel);}
 export async function purgeCache(c:Config,apply=false) {
   const root=managedCacheRoot();
-  const originals=[c.journals,c.things,c.messages,c.whatsapp,c.muesli,c.voiceNotes,c.callNotes,c.cassData,...c.chromeProfiles,...c.chatgpt,...c.takeout,...c.linkedin,...c.twitter,...c.documentRoots,...Object.values(c.qmdRoots),...c.qmdModels];
+  const originals=[c.journals,c.things,c.messages,c.whatsapp,c.muesli,c.voiceNotes,c.callNotes,c.cassData,...c.chromeProfiles,...c.chatgpt,...c.takeout,...c.linkedin,...c.twitter,...c.documentRoots,...Object.values(c.qmdRoots),...c.qmdModels,...Object.values(c.sources).flatMap(s=>"root" in s?[s.root]:"database" in s?[s.database]:[])];
   if(originals.some(p=>overlaps(root,p)))fail("UNSAFE_PATH","A configured original or model is inside the cache directory; move it before purging");
   const custom=[c.index,c.libraryRoot,c.libraryDatabase,c.qmdDatabase,c.previews].filter(p=>!overlaps(root,p));
   if(custom.length)fail("CUSTOM_CACHE_PATHS","Custom cache paths require manual cleanup; purge refuses to claim complete deletion");

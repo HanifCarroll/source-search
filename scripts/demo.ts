@@ -1,13 +1,13 @@
 import {mkdtemp,writeFile,rm} from "node:fs/promises";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
-import {defaultConfig} from "../src/platform/config";
+import {configSchema} from "../src/platform/config";
 import {createRuntime} from "../src/application/runtime";
 const directory=await mkdtemp(join(tmpdir(),"source-search-demo-"));
 try {
   await writeFile(join(directory,"2024-01-01.md"),"# Invented journal\n\nThe violet comet is a synthetic example.\n",{mode:0o600});
-  const runtime=createRuntime({...defaultConfig(),enabledSources:["journals"],journals:directory});
-  const result=await runtime.search_sources({queries:[{source:"journals",query:"violet"}]});
+  const runtime=createRuntime(configSchema.parse({enabledSources:["example-notes"],sources:{"example-notes":{adapter:"markdown",root:directory}}}));
+  const result=await runtime.search_sources({queries:[{source:"example-notes",query:"violet"}]});
   const ref=result.results[0]?.items[0]?.ref;
   if(!ref)throw Error("Synthetic demo failed to retrieve its invented record");
   const read=await runtime.read_record({ref});

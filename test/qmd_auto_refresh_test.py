@@ -66,4 +66,14 @@ class RefreshTests(unittest.TestCase):
         self.assertEqual(self.calls,[])
         self.assertEqual(json.loads((self.root/'state/status.json').read_text())['state'],'disabled')
 
+    def test_executables_follow_path_and_explicit_overrides(self):
+        import os
+        from unittest.mock import patch
+        binary=self.root/'qmd';binary.write_text('#!/bin/sh\nexit 0\n');binary.chmod(0o700)
+        with patch.dict(os.environ, {'PATH':str(self.root)}):
+            self.assertEqual(m.executable({}, 'qmdBinary', 'qmd'),str(binary))
+            self.assertEqual(m.executable({'qmdBinary':'/custom/qmd'}, 'qmdBinary', 'qmd'),'/custom/qmd')
+            with self.assertRaisesRegex(RuntimeError,'absolute'):m.executable({'qmdBinary':'relative/qmd'}, 'qmdBinary', 'qmd')
+            with self.assertRaisesRegex(RuntimeError,'PATH'):m.executable({}, 'nodeBinary', 'node')
+
 if __name__=='__main__':unittest.main()

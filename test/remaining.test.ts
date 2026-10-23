@@ -66,8 +66,8 @@ test("shared journal folders separate voice transcripts from daily and navigatio
   expect((await search("journals")).items.map(r => r.ref.id)).toEqual(["2024/01-January/2024-01-01.md"]);
   expect((await runtime.read_record({ ref: p.items[0].ref })).record.body).toBe(text);
   expect(await readFile(join(c.journals, voice), "utf8")).toBe(text);
-  await expect(runtime.read_record({ ref: { source: "voice-journals", id: "2024/01-January/2024-01-01.md" } })).rejects.toThrow("transcript note");
-  await expect(runtime.read_record({ ref: { source: "voice-journals", id: "index.md" } })).rejects.toThrow("transcript note");
+  await expect(runtime.read_record({ ref: { source: "voice-journals", id: "2024/01-January/2024-01-01.md" } })).rejects.toThrow("configured Markdown selection");
+  await expect(runtime.read_record({ ref: { source: "voice-journals", id: "index.md" } })).rejects.toThrow("configured Markdown selection");
 });
 
 async function native(lines: any[]) {

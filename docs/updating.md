@@ -50,3 +50,16 @@ If an update fails, keep maintenance stopped and return to the recorded public c
 Hybrid QMD search now uses the configured `nodeBinary` and `qmdPackage` directly. Keep QMD at 1.0.7 for this adapter. Existing CLI, MCP and refresh launch paths are unchanged; implementation modules moved into the folders described in [architecture](architecture.md).
 
 Parser upgrades also refresh WhatsApp polls/contact cards and affected export projections during the next explicit maintenance run. Existing cached mail is reformatted from saved responses. Allow the library update and embedding steps to finish before checking semantic coverage. No new source configuration is needed.
+
+## Moving to named sources
+
+Existing source IDs and flat configuration fields remain supported. For new settings, put repeatable integrations under `sources` and keep the same IDs during migration:
+
+- Move each `mailAccounts` entry to `sources.<same-id>` and add `adapter: "gmail"` or `"fastmail"`.
+- Move note paths to Markdown source definitions. Copy the filename pattern, date fields, content label and timezone you actually use. See the README's daily-journal settings. Legacy voice/call notes used `content: "transcript"`, `reviewed: true`, and date fields `["source_started_at", "date"]`.
+- Move `muesli` to `sources.calls` with `adapter: "muesli"` and `database`; move `whatsapp` to `sources.whatsapp` similarly.
+- Set `timeZone` explicitly. Older versions interpreted journal days in `America/Buenos_Aires`; new installations default to UTC. Use the old zone when preserving those dates.
+
+Keep account values, aliases, database locations and source IDs unchanged to retain existing library identities. If switching an instance to a different account or provider, use a new ID or clear its old cache. Renaming an ID creates a new reference namespace and QMD collection; it does not migrate old references.
+
+For media extraction without adjacent transcripts, choose `transcriptionBackend` and `transcriptionModel` explicitly. The previous choices were `mlx-whisper` and `large-v3`. Extraction remains disabled unless its sources and maintenance are enabled.

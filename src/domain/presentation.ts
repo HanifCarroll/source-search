@@ -1,3 +1,4 @@
+import {sourceKind,isMail} from './source-catalog';
 import { readableHtml } from "../formats/html";
 import { hash } from "./identity";
 import { type RecordData, type Page, type Query } from "./contracts";
@@ -12,13 +13,13 @@ export function excerpt(body: string, query: string) {
     return text.slice(Math.max(0, index - 100), Math.max(0, index - 100) + 500);
 }
 export function recordLink(r: RecordData) {
-    const m = r.metadata;
-    if(r.ref.source === "chrome-downloads")
+    const m = r.metadata, source=r.adapter || sourceKind(r.ref.source);
+    if(source === "chrome-downloads")
       return typeof m?.openLink === "string" ? m.openLink : undefined;
-    if(r.ref.source === "chatgpt-archive" && !m?.group && r.conversation && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(r.conversation))return `https://chatgpt.com/c/${r.conversation}`;
-    if (r.ref.source === "mail-personal" || r.ref.source === "mail-consulting")
+    if(source === "chatgpt-archive" && !m?.group && r.conversation && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(r.conversation))return `https://chatgpt.com/c/${r.conversation}`;
+    if (source === "gmail")
         return `https://mail.google.com/mail/u/?authuser=${encodeURIComponent(String(m?.account || ""))}#all/${r.conversation || r.ref.id}`;
-    if (r.ref.source === "mail-fastmail") {
+    if (source === "fastmail") {
         const names: Record<string,string> = {inbox:"Inbox",archive:"Archive",trash:"Trash",junk:"Spam",sent:"Sent",drafts:"Drafts"};
         const folder = (m?.folders as {role?:string}[] | undefined)?.find(f => f.role && names[f.role]);
         // shortcut: only native role folders have verified web paths; custom-only mail retains its record reference.
@@ -34,7 +35,7 @@ export function recordLink(r: RecordData) {
         return `https://mail.google.com/mail/u/?#all/${BigInt(thread).toString(16)}`;
     if (typeof m?.url === "string" && /^https?:\/\//.test(m.url))
         return m.url;
-    if(r.ref.source === "linkedin-archive" || r.ref.source === "twitter-archive")return undefined;
+    if(source === "linkedin-archive" || source === "twitter-archive")return undefined;
     if (!r.locator.startsWith("source-search://"))
         return r.locator.split("#")[0];
     return undefined;
@@ -49,7 +50,7 @@ export function compactRecord(r: RecordData, details = false): RecordData {
     if (link)
         m.openLink = link;
     else if(r.ref.source==="linkedin-archive" || r.ref.source==="twitter-archive")m.openAction="read_record with preview:true";
-    m.dateKind = m.dateKind || (r.type === "email" ? "message-timestamp-unknown-basis" : r.type === "written-journal" || r.ref.source === "voice-journals" ? "journal-day" : "source-occurrence");
+    m.dateKind = m.dateKind || (r.type === "email" ? "message-timestamp-unknown-basis" : r.type === "written-journal" || r.type.includes("transcript") && r.metadata?.datePrecision === "day" ? "journal-day" : "source-occurrence");
     if (!details) {
         delete m.headers;
         delete m.archiveSha256;
@@ -65,7 +66,7 @@ export function compactRecord(r: RecordData, details = false): RecordData {
     const date = r.occurredAt;
     return { ...r, ...(details && twitterOriginal!==undefined && m.bodyStatus!=="metadata-only" ? {body:r.body+"\n\nOriginal export record\n"+JSON.stringify(twitterOriginal,null,2)} : {}), ...(!details && r.ref.source === "takeout-archive" ? { body: r.body.split("\n\nOriginal export record\n")[0] } : {}), ...(date && Number.isFinite(Date.parse(date)) ? { occurredAt: new Date(date).toISOString() } : {}), metadata: m };
 }
-type Evidence=Pick<RecordData,"ref"|"title"|"author"|"occurredAt"|"type"|"metadata">;
+type Evidence=Pick<RecordData,"adapter"|"ref"|"title"|"author"|"occurredAt"|"type"|"metadata">;
 export function duplicateKey(r: Evidence, preferMessageId = true) {
     const messageId = r.metadata?.messageId || (r.metadata?.headers as any)?.["message-id"]?.[0];
     if (r.type === "email" && messageId && preferMessageId)
@@ -74,15 +75,15 @@ export function duplicateKey(r: Evidence, preferMessageId = true) {
         const address = String(r.author).match(/<([^>]+)>/)?.[1] || String(r.author);
         return hash(`possible-email:${String(r.title).trim().toLowerCase()}:${address.toLowerCase()}:${String(r.occurredAt).slice(0, 16)}`);
     }
-    const meeting = r.ref.source === "calls" ? r.ref.id : r.metadata?.muesliMeetingId || String(r.metadata?.sourceLocator || "").match(/^Muesli meetings\.id=(\d+);/)?.[1];
-    if(meeting)return hash("muesli:"+meeting);
+    const meeting = (r.adapter || sourceKind(r.ref.source)) === "muesli" ? r.ref.id : r.metadata?.muesliMeetingId || String(r.metadata?.sourceLocator || "").match(/^Muesli meetings\.id=(\d+);/)?.[1];
+    if(meeting)return hash("muesli:"+((r.adapter || sourceKind(r.ref.source)) === "muesli" ? r.ref.source : "calls")+":"+meeting);
     if(r.ref.source === "chrome-history" && typeof r.metadata?.url === "string"){
       const doc=googleDocument(r.metadata.url);if(doc)return hash("google-resource:"+doc.url);
     }
     return undefined;
 }
 function originalFileKey(r: Evidence) {
-    if(["vault","journals","voice-journals","call-notes"].includes(r.ref.source) && typeof r.metadata?.openLink === "string" && isAbsolute(r.metadata.openLink))return hash("original-file:"+r.metadata.openLink);
+    if(["vault","markdown"].includes(r.adapter || sourceKind(r.ref.source)) && typeof r.metadata?.openLink === "string" && isAbsolute(r.metadata.openLink))return hash("original-file:"+r.metadata.openLink);
     return undefined;
 }
 export function annotateDuplicates(items: Evidence[]) {
@@ -98,13 +99,13 @@ export function annotateDuplicates(items: Evidence[]) {
         const a=item.metadata?.messageId,b=other.metadata?.messageId;
         if(a && b && a!==b) continue;
         const duplicates=(item.metadata?.duplicateEvidence || []) as {ref:RecordData["ref"];reason:string}[];
-        if(!duplicates.some(d=>d.ref.source===other.ref.source && d.ref.id===other.ref.id))duplicates.push({ref:other.ref,reason:(item.ref.source === "vault" || other.ref.source === "vault") && item.metadata?.openLink===other.metadata?.openLink ? "same original Markdown file; QMD and native reader are one evidence lineage" : item.ref.source === "calls" || other.ref.source === "calls" ? "same Muesli meeting; retained note and original transcript are related representations" : item.ref.source === "chrome-history" && other.ref.source === "chrome-history" ? "same Google resource; distinct visits or heading links" : a && b ? "same original Message-ID" : "possible duplicate: same subject, sender and minute; verify originals"});
+        if(!duplicates.some(d=>d.ref.source===other.ref.source && d.ref.id===other.ref.id))duplicates.push({ref:other.ref,reason:(item.ref.source === "vault" || other.ref.source === "vault") && item.metadata?.openLink===other.metadata?.openLink ? "same original Markdown file; QMD and native reader are one evidence lineage" : (item.adapter || sourceKind(item.ref.source)) === "muesli" || (other.adapter || sourceKind(other.ref.source)) === "muesli" ? "same Muesli meeting; retained note and original transcript are related representations" : item.ref.source === "chrome-history" && other.ref.source === "chrome-history" ? "same Google resource; distinct visits or heading links" : a && b ? "same original Message-ID" : "possible duplicate: same subject, sender and minute; verify originals"});
         item.metadata={...item.metadata,duplicateEvidence:duplicates};
     }
 }
-export function progress(page: Page, q: Query) {
+export function progress(page: Page, q: Query, adapter=sourceKind(q.source)) {
     page.progress = { returned: page.items.length, hasMore: !!page.nextCursor, totalMatches: page.totalMatches ?? null, ...(page.scan ? {candidatesChecked:page.scan.checked,undecodable:page.scan.undecodable,...(page.scan.missingText ? {missingText:page.scan.missingText} : {}),exhausted:page.scan.exhausted,...(page.scan.workLimit ? {workLimit:page.scan.workLimit} : {})} : {}),continuation: page.nextCursor ? page.items.length ? "more-results-or-candidates" : "more-candidates-to-check" : page.scan?.exhausted===false ? "incomplete-source" : (q.source === "vault" || q.source === "library" || q.source === "documents" || !!page.retrieval) ? "ranked-candidates-exhausted" : "complete" };
-    page.query = { ...page.query, text: q.query, ...(q.mode || (["agent-history","vault","library","documents"].includes(q.source) || !!page.retrieval) ? {mode:q.mode || "hybrid"} : {}), match: q.match || (q.source.startsWith("mail-") || (["agent-history","vault","library","documents"].includes(q.source) || !!page.retrieval) ? "provider-native" : "word-prefix"), sort: page.query?.sort || q.sort || ((["agent-history","vault","library","documents"].includes(q.source) || !!page.retrieval) ? "relevance" : q.source === "contacts" ? "source-order" : "newest"), from: q.from, to: q.to, types: q.types, sections:q.sections, roles:q.roles,contentTypes:q.contentTypes,selectedBranch:q.selectedBranch, folders: q.folders,...(q.source.startsWith("mail-") || q.source === "takeout-archive" ? {excludeSpamTrash:q.excludeSpamTrash!==false} : {}) };
+    page.query = { ...page.query, text: q.query, ...(q.mode || (["agent-history","vault","library","documents"].includes(q.source) || !!page.retrieval) ? {mode:q.mode || "hybrid"} : {}), match: q.match || (isMail(adapter) || (["agent-history","vault","library","documents"].includes(q.source) || !!page.retrieval) ? "provider-native" : "word-prefix"), sort: page.query?.sort || q.sort || ((["agent-history","vault","library","documents"].includes(q.source) || !!page.retrieval) ? "relevance" : q.source === "contacts" ? "source-order" : "newest"), from: q.from, to: q.to, types: q.types, sections:q.sections, roles:q.roles,contentTypes:q.contentTypes,selectedBranch:q.selectedBranch, folders: q.folders,...(isMail(adapter) || q.source === "takeout-archive" ? {excludeSpamTrash:q.excludeSpamTrash!==false} : {}) };
     return page;
 }
 

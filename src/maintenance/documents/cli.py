@@ -5,7 +5,7 @@ from .formats import extract
 from .pipeline import main as run_pipeline
 
 def main():
- os.umask(0o077);os.environ['PATH']='/opt/homebrew/bin:'+str(HOME/'.local/bin')+':'+os.environ.get('PATH','')
+ os.umask(0o077)
  # Installed model only: maintenance cannot silently fetch a new model.
  os.environ['HF_HUB_OFFLINE']='1'
  parser=argparse.ArgumentParser();parser.add_argument('--config');parser.add_argument('--worker',action='store_true');args=parser.parse_args()

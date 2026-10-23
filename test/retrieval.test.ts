@@ -9,7 +9,7 @@ import { rebuildArchive } from "../src/sources/archives/index";
 import {typedMessage} from "./helpers/messages";
 import { decodeAttributedBody, messagesTimestampToIso } from "../src/sources/messages/reader";
 import { searchMail } from "./helpers/mail";
-import { sourceIds, querySchema } from "../src/domain/contracts";
+import { querySchema } from "../src/domain/contracts";
 import { queryKey, cursor } from "../src/domain/identity";
 import { assertPacket } from "../src/domain/results";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -180,7 +180,7 @@ test("real MCP transport exposes only reads and returns the same substantive sea
     const response = await client.callTool({ name: "search_sources", arguments: { queries: [{ source: "journals", query: "networking" }] } });
     const data = JSON.parse((response.content as any[])[0].text); expect(data.results[0].items[0].ref.id).toBe("2024/01-January/2024-01-01.md");
     const schema = tools.tools.find(t => t.name === "search_sources")!.inputSchema as any;
-    expect(schema.properties.queries.maxItems).toBe(sourceIds.length);
+    expect(schema.properties.queries.maxItems).toBe(100);
     const voice = await client.callTool({ name: "search_sources", arguments: { queries: [{ source: "voice-journals", query: "networking" }, { source: "chatgpt-archive", query: "x" }] } });
     const packet = JSON.parse((voice.content as any[])[0].text); expect(packet.results[0].items).toHaveLength(1); expect(packet.results[1].error.code).toBe("SOURCE_NOT_CONFIGURED");
     const opened = await client.callTool({ name: "read_record", arguments: { ref: packet.results[0].items[0].ref } }); expect(JSON.parse((opened.content as any[])[0].text).record.body).toContain("voice fixture");

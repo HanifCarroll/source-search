@@ -1,8 +1,9 @@
-import { isProjected, librarySources } from "../../domain/source-policy";
+import {sourceKind,isMail} from '../../domain/source-catalog';
+import { isProjected } from "../../domain/source-policy";
 import { Database } from "bun:sqlite";
 import { readFile, lstat, access } from "node:fs/promises";
 import { join, relative, sep, isAbsolute, extname } from "node:path";
-import {sourceEnabled, requireSource, sourceScope, type Config} from "../../platform/config";
+import {sourceEnabled, requireSource, sourceScope, configuredSourceIds, type Config} from "../../platform/config";
 import { libraryDB } from "./store";
 import { archiveSignature, type ArchiveSource } from "../../sources/archives/originals";
 import { runQmd, type QmdRun } from "../qmd/runner";
@@ -17,8 +18,9 @@ export async function libraryStatus(c:Config){
  const db=libraryDB(c);
  try{
   const states=new Map((db.query("SELECT source,data FROM states").all() as any[]).map(r=>[r.source,JSON.parse(r.data)]));
-  const sources=librarySources.filter(source=>sourceEnabled(c,source)).flatMap(source=>{
-    const stage=source.endsWith('-archive')?'archives':source.startsWith('mail-')?'mail':source==='documents'?'documents':'native';
+  const sources=configuredSourceIds(c).filter(source=>sourceEnabled(c,source) && isProjected(source,c)).flatMap(source=>{
+    const kind=sourceKind(source,c);
+    const stage=kind.endsWith('-archive')?'archives':isMail(source,c)?'mail':kind==='documents'?'documents':'native';
     const failure=states.get('maintenance-'+stage),saved=states.get(source);
     if(!saved && !failure)return [];
     return [{source,...saved,...(failure?.state==='error'?{state:'error',error:failure.error,checkedAt:failure.checkedAt}:{})}];
@@ -49,12 +51,12 @@ export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>run
  if(pendingEmbeddings)warnings.push(`${pendingEmbeddings} selected library chunks await embeddings; semantic coverage is partial while the background job continues.`);
  try{for(const r of raw.slice(0,100)){
   if(typeof r.file!=="string"||typeof r.score!=="number")fail("INVALID_PROVIDER_RESPONSE","Invalid QMD hit");
-  const m=/^qmd:\/\/ss-([a-z-]+)\/([a-f0-9]{64})\.md$/.exec(r.file);
-  if(!m || !sourceEnabled(c,m[1]!) || !isProjected(m[1]!) || q.source!=="library" && m[1]!==q.source)continue;
+  const m=/^qmd:\/\/ss-([a-z][a-z0-9-]*)\/([a-f0-9]{64})\.md$/.exec(r.file);
+  if(!m || !sourceEnabled(c,m[1]!) || !isProjected(m[1]!,c) || q.source!=="library" && m[1]!==q.source)continue;
   const row=db.query("SELECT * FROM chunks WHERE id=? AND source=?").get(m[2]!,m[1]!) as any;
   const indexed=index.query("SELECT hash FROM documents WHERE active=1 AND collection=? AND path=?").get("ss-"+m[1],m[2]+".md") as any;
   if(row && JSON.parse(row.guard).scope!==sourceScope(c,row.source))continue;
-  if(row && JSON.parse(row.guard).mail && JSON.parse(row.guard).accountSignature!==hash(JSON.stringify(c.mailAccounts[row.source as keyof typeof c.mailAccounts])))continue;
+  if(row && JSON.parse(row.guard).mail && JSON.parse(row.guard).accountSignature!==sourceScope(c,row.source))continue;
   if(!row || row.hash!==indexed?.hash){warnings.push("A changed/deleted projection is waiting for QMD refresh; its stale hit was withheld.");continue;}
   if(row.source==="documents"){
     try { for(const original of JSON.parse(row.refs) as Ref[])await readDocument(c,original); }
@@ -80,7 +82,7 @@ export async function readDocument(c:Config,ref:Ref):Promise<RecordData>{
  if(origin.mailRef)requireSource(c,origin.mailRef.source);
  if(origin.source)requireSource(c,origin.source);
  if(origin.source==="takeout-archive" && !c.takeout.includes(origin.signature[0]))fail("SOURCE_DISABLED","Archive is no longer selected");
- if(origin.mailRef && origin.accountSignature!==hash(JSON.stringify(c.mailAccounts[origin.mailRef.source as keyof typeof c.mailAccounts])))fail("SOURCE_DISABLED","Attachment belongs to a previous account configuration");
+ if(origin.mailRef && origin.accountSignature!==sourceScope(c,origin.mailRef.source))fail("SOURCE_DISABLED","Attachment belongs to a previous account configuration");
  if(!origin.mailRef && !origin.source){
    const path=origin.path as string;
    if(!path || !c.documentRoots.some(root=>{const rel=relative(root,path);return rel!=="" && rel!==".." && !rel.startsWith(".."+sep) && !isAbsolute(rel);}))fail("SOURCE_DISABLED","Document root is no longer configured");
@@ -99,7 +101,7 @@ export async function readLibrary(c:Config,ref:Ref,validate:(r:Ref)=>Promise<unk
  requireSource(c,row.source);
  if(JSON.parse(row.guard).scope!==sourceScope(c,row.source))fail("SOURCE_DISABLED","Source configuration changed; rebuild or purge its previous projection");
  const refs=JSON.parse(row.refs) as Ref[],guard=JSON.parse(row.guard);
- if(guard.mail && guard.accountSignature!==hash(JSON.stringify(c.mailAccounts[guard.mail as keyof typeof c.mailAccounts])))fail("SOURCE_DISABLED","Projection belongs to a previous account configuration");
+ if(guard.mail && guard.accountSignature!==sourceScope(c,guard.mail))fail("SOURCE_DISABLED","Projection belongs to a previous account configuration");
  if(guard.archive){if(guard.signature!==await archiveSignature(c,guard.archive as ArchiveSource))fail("STALE_RECORD","Selected original export changed; background rebuild is pending");}
  else for(const original of refs)await validate(original);
  return {ref:{...ref,version:row.hash},title:row.title,body:row.body,type:"derived-source-section",locator:"source-search://library/"+row.id,observedAt:now(),metadata:{sourceFamily:row.source,derived:true,originals:refs},warnings:["This is a labelled search projection. Original references were checked for freshness; use them to open complete source records. It is not an independent evidence source."]};

@@ -1,4 +1,5 @@
-import {defaultConfig, requireSource, type Config} from "../../platform/config";
+import {sourceKind} from '../../domain/source-catalog';
+import {mailAccount, defaultConfig, requireSource, type Config} from "../../platform/config";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readableMail } from "../../domain/presentation";
@@ -28,17 +29,18 @@ export const run: Run = async argv => {
     ]);
   } finally { if (timer) clearTimeout(timer); }
 };
-export type MailSource = "mail-personal" | "mail-consulting" | "mail-fastmail";
+export type MailSource = string;
 function accountFor(config:Config,source:MailSource){
   requireSource(config,source);
-  const account=config.mailAccounts[source];
+  const account=mailAccount(config,source);
   if(!account)fail("SOURCE_NOT_CONFIGURED","Configure an account for this mail source");
   return account;
 }
 function providerId(id: string) { if (!/^[A-Za-z0-9_-]{1,200}$/.test(id)) fail("INVALID_REFERENCE", "Invalid provider record identifier"); return id; }
 export async function searchMail(q: Query, execute: Run = run, previews:PreviewBudget = {remaining:3,records:new Map()}, config:Config = defaultConfig()): Promise<Page> {
   const source = q.source as MailSource, account = accountFor(config,source);
-  const fastmail = source === "mail-fastmail", key = queryKey(q), page = position(q.cursor, key);
+  q={...q,excludeSpamTrash:q.excludeSpamTrash!==false};
+  const fastmail = sourceKind(source,config) === "fastmail", key = queryKey(q), page = position(q.cursor, key);
   if (q.conversation) fail("UNSUPPORTED_FILTER", "Use read_record with context to open the mail thread");
   if (page !== undefined && typeof page !== "string") fail("INVALID_CURSOR", "Expected a provider page token");
   let continuation: { position: number; state: string } | undefined;
@@ -73,14 +75,14 @@ export async function searchMail(q: Query, execute: Run = run, previews:PreviewB
   const items = messages.slice(0, q.limit).map((m: any, index: number) => {
     const id = providerId(fastmail ? m.message_id : m.id);
     if(previews.records.has(source+":"+id))return hit(previews.records.get(source+":"+id)!,q,String(page || ""));
-    return hit({ ref: { source, id }, title: m.subject || "(No subject)", body: m.snippet || m.body || "", type: "email", locator: `source-search://${source}/${id}`, observedAt,
+    return hit({ adapter:sourceKind(source,config),ref: { source, id }, title: m.subject || "(No subject)", body: m.snippet || m.body || "", type: "email", locator: `source-search://${source}/${id}`, observedAt,
       author: String(m.from || "unknown").slice(0, 500), occurredAt: mailDate(m.date,fastmail),
       conversation: m.thread_id || m.threadId, metadata: { previewOnly:true,dateKind:fastmail ? "provider-received-at" : "provider-message-date", direction:mailDirection(m.labels,m.folders), account: account.email, to: m.to || [], labels: m.labels || [], folders:m.folders || [], messageId:m.message_id_header } }, q, fastmail ? JSON.stringify({ position: data.position + index + 1, state: data.queryState }) : String(page || ""));
   });
   return { source, status: "ok", totalMatches:fastmail?data.total:undefined, items, ...(next ? { nextCursor: next } : {}), warnings, observedAt };
 }
 export async function readMail(source: MailSource, id: string, execute: Run = run, config:Config = defaultConfig()): Promise<RecordData> {
-  const account=accountFor(config,source); providerId(id); const fastmail = source === "mail-fastmail";
+  const account=accountFor(config,source); providerId(id); const fastmail = sourceKind(source,config) === "fastmail";
   const data = await execute(fastmail ? [config.mailbridgeBinary, "--json", "read", "--account", account.account, "--message-id", id]
     : [config.gmailBinary, "gmail", "get", id, "--account", account.account, "--gmail-no-send", "--json", "--no-input"]) as any;
   const summary = fastmail ? data.summary : data.headers;
@@ -88,7 +90,7 @@ export async function readMail(source: MailSource, id: string, execute: Run = ru
   const body = readableMail((fastmail ? (data.body_text || data.body_html) : data.body) || "");
   const date=mailDate(summary.date,true),internal=new Date(Number(data.message?.internalDate));
   const occurredAt=date || (!fastmail && Number.isFinite(internal.getTime()) ? internal.toISOString() : undefined);
-  return versioned({ ref: { source, id }, title: summary.subject || "(No subject)", body: body || "", type: "email", observedAt: now(), locator: `source-search://${source}/${id}`,
+  return versioned({ adapter:sourceKind(source,config),ref: { source, id }, title: summary.subject || "(No subject)", body: body || "", type: "email", observedAt: now(), locator: `source-search://${source}/${id}`,
     author: summary.from || "unknown", occurredAt,
     conversation: fastmail ? summary.thread_id : data.message.threadId,
     metadata: { dateKind:fastmail ? (date ? "provider-received-at" : "unknown") : date ? "message-date-header" : occurredAt ? "provider-internal-date" : "unknown", direction:mailDirection(data.message?.labelIds,summary.folders), account: account.email, to: summary.to, cc: summary.cc, bodyFormat:"text", folders:summary.folders || [], labels:data.message?.labelIds || [], messageId:summary["message-id"] || summary.messageId, attachments: fastmail ? data.attachments?.map((a: any) => ({ name: a.filename, type: a.mime_type })) : undefined },
@@ -97,7 +99,7 @@ export async function readMail(source: MailSource, id: string, execute: Run = ru
 export async function mailContext(record: RecordData, execute: Run = run, config:Config = defaultConfig()) {
   const account=accountFor(config,record.ref.source as MailSource);
   if (!record.conversation) return { records: [], warnings: ["Provider did not return a thread identifier"] };
-  const source = record.ref.source as MailSource, fastmail = source === "mail-fastmail";
+  const source = record.ref.source as MailSource, fastmail = sourceKind(source,config) === "fastmail";
   if (fastmail) {
     const raw = await execute([config.mailbridgeBinary, "--json", "thread", "--account", account.account, "--thread-id", providerId(record.conversation), "--scan-limit", "200"]) as any;
     if (!Array.isArray(raw.messages)) fail("INVALID_PROVIDER_RESPONSE", "Missing mail thread list");

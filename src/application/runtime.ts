@@ -1,18 +1,21 @@
+import {sourceGroups} from '../platform/source-settings';
+import {sourceKind} from '../domain/source-catalog';
 import {createSourceAccess} from "./source-access";
 import type {Run} from "../sources/mail/index";
 import {writePreview} from "./preview";
-import {describeSource, groups} from "./catalogue";
-import {sourceEnabled, type Config} from "../platform/config";
-import {sourceIds, querySchema, searchSchema, readSchema, type Page} from "../domain/contracts";
+import {describeSource} from "./catalogue";
+import {sourceEnabled, configuredSourceIds, type Config} from "../platform/config";
+import {querySchema, searchSchema, readSchema, type Page} from "../domain/contracts";
 import {canTrimItems} from "../domain/source-policy";
 import {textPage, assertPacket, packetBytes} from "../domain/results";
 import {compactRecord, annotateDuplicates, progress} from "../domain/presentation";
 import {errorData, now} from "../domain/identity";
 
 export function createRuntime(config: Config, execute?: Run) {
+  const groups=sourceGroups(config);
   const access = createSourceAccess(config, execute);
   async function list_sources() {
-    const sources = await boundedMap(sourceIds, async source => {
+    const sources = await boundedMap(configuredSourceIds(config), async source => {
       const base = { source, readOnly: true, checkedAt: now() };
       if(!sourceEnabled(config,source))return {...base,available:false,state:"disabled",error:{code:"SOURCE_DISABLED",message:"Enable this source in local configuration"}};
       try { return {...base,...await access.status(source)};
@@ -29,7 +32,7 @@ export function createRuntime(config: Config, execute?: Run) {
     async function fetchPage(q:ReturnType<typeof querySchema.parse>):Promise<Page> {
       try {
         const result = await search(q);
-        progress(result,q);
+        progress(result,q,sourceKind(q.source,config));
         if(result.status!=="error" && !result.items.length){
           if(result.nextCursor)result.warnings.push("No matches in this batch; continue before concluding that nothing matches.");
           else if(result.scan?.missingText && result.scan.missingText===result.scan.checked)result.warnings.push("No checked entries have readable text. Different keywords cannot recover it; inspect the original application or obtain more complete history.");
@@ -54,7 +57,7 @@ export function createRuntime(config: Config, execute?: Run) {
         results[results.indexOf(largest)]={source:largest.source,status:"error",items:[],warnings:[],error:{code:"OUTPUT_LIMIT",message:"One result cannot fit the shared output budget; search this source separately"},observedAt:now()};output.truncated=true;continue;
       }
       result.items.pop(); result.budgetReduced = true; output.truncated = true;
-      if (!canTrimItems(queries[results.indexOf(result)]!)) {
+      if (!canTrimItems(queries[results.indexOf(result)]!,config)) {
         // shortcut: Gmail/CASS have no safe intra-page token here; retry smaller pages until their providers expose one.
         const index=results.indexOf(result), q=queries[index];
         results[index]=await fetchPage({...q,limit:Math.max(1,Math.floor(result.items.length/2))});
@@ -64,7 +67,7 @@ export function createRuntime(config: Config, execute?: Run) {
     for(let i=0;i<results.length;i++){
       const r=results[i]!,q=queries[i]!;
       if(r.budgetReduced){r.reduction={requested:q.limit,returned:r.items.length,reason:r.reduction?.reason || "Shared response byte budget"};}
-      progress(r,q);
+      progress(r,q,sourceKind(q.source,config));
     }
     const summary={searched:results.map(r=>r.source),failed:results.filter(r=>r.status === "error").map(r=>r.source),partial:results.filter(r=>r.status === "partial").map(r=>r.source),more:results.filter(r=>r.nextCursor).map(r=>r.source)};
     const result={...output,summary};assertPacket(result);return result;

@@ -1,4 +1,4 @@
-import codecs, json, os, zipfile, uuid
+import codecs, json, os, zipfile, uuid, shutil
 from pathlib import Path
 from .common import TEXT, IMAGE, MEDIA, BOOK_FORMATS, HOME, BOOK_PAGES, Skipped, command, digest, private_dir, signature
 
@@ -49,7 +49,7 @@ def extract(path,cache,options=None):
       bitmap=page.render(scale=scale);png=cache/f'ocr-{os.getpid()}.png'
       try:
        with bitmap.to_pil() as image:image.save(png)
-       text=command([options.get('tesseractBinary') or '/opt/homebrew/bin/tesseract',str(png),'stdout','-l','eng'],180).decode()
+       text=command([options.get('tesseractBinary') or shutil.which('tesseract') or 'tesseract',str(png),'stdout','-l',options.get('ocrLanguages') or 'eng'],180).decode()
       finally:bitmap.close();png.unlink(missing_ok=True)
       warnings.append('OCR used; recognition and reading order require checking against the page')
      if text.strip():parts.append(f'## Page {n+1}\n\n{text}')
@@ -76,7 +76,7 @@ def extract(path,cache,options=None):
      # Tesseract does not accept GIF directly; composite transparency onto white.
      with frame.convert('RGBA') as rgba,Image.new('RGB',frame.size,'white') as rgb:
       rgb.paste(rgba,mask=rgba.getchannel('A'));rgb.save(png)
-     text=command([options.get('tesseractBinary') or '/opt/homebrew/bin/tesseract',str(png),'stdout','-l','eng'],180).decode()
+     text=command([options.get('tesseractBinary') or shutil.which('tesseract') or 'tesseract',str(png),'stdout','-l',options.get('ocrLanguages') or 'eng'],180).decode()
      if text.strip() and text not in parts:parts.append(text)
   finally:png.unlink(missing_ok=True)
   return '\n\n'.join(parts),['OCR text; recognition errors are possible']
@@ -85,10 +85,11 @@ def extract(path,cache,options=None):
   for ext in ('.vtt','.srt','.txt'):
    sidecar=path.with_suffix(ext)
    if sidecar.is_file() and not sidecar.is_symlink():return sidecar.read_text(),['Reused adjacent transcript: '+str(sidecar)]
-  streams=json.loads(command([options.get('ffprobeBinary') or '/opt/homebrew/bin/ffprobe','-v','error','-select_streams','a','-show_entries','stream=index','-of','json',str(path)]))
+  streams=json.loads(command([options.get('ffprobeBinary') or shutil.which('ffprobe') or 'ffprobe','-v','error','-select_streams','a','-show_entries','stream=index','-of','json',str(path)]))
   if not streams.get('streams'):raise Skipped('Media has no audio stream to transcribe')
+  if not options.get('transcriptionBackend') or not options.get('transcriptionModel'):raise Skipped('Set transcriptionBackend and transcriptionModel to transcribe audio without a sidecar')
   out=cache/('audio-'+digest(json.dumps(signature(path)))) ;private_dir(out)
-  command([options.get('transcribeBinary') or str(HOME/'.local/bin/transcribe-audio'),'transcribe',str(path),'--backend','mlx-whisper','--model','large-v3','--formats','txt,json','--output-dir',str(out),'--output-name','transcript','--json'],1800)
+  command([options.get('transcribeBinary') or shutil.which('transcribe-audio') or 'transcribe-audio','transcribe',str(path),'--backend',options['transcriptionBackend'],'--model',options['transcriptionModel'],'--formats','txt,json','--output-dir',str(out),'--output-name','transcript','--json'],1800)
   matches=list(out.glob('*.json'))
   if not matches:raise ValueError('Transcription produced no timestamped JSON')
   data=json.loads(matches[0].read_text());segments=data.get('segments',[])

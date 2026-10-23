@@ -20,14 +20,17 @@ Copy `config.example.json` to a private location outside this checkout, use abso
 
 ```json
 {
-  "enabledSources": ["journals"],
-  "journals": "/absolute/path/to/daily-notes"
+  "enabledSources": ["notes"],
+  "timeZone": "Europe/London",
+  "sources": {
+    "notes": {"adapter": "markdown", "root": "/absolute/path/to/notes"}
+  }
 }
 ```
 
 ```sh
-bun run start search '{"queries":[{"source":"journals","query":"example"}]}'
-bun run start read '{"ref":{"source":"journals","id":"ID returned by search","version":"returned version"}}'
+bun run start search '{"queries":[{"source":"notes","query":"example"}]}'
+bun run start read '{"ref":{"source":"notes","id":"ID returned by search","version":"returned version"}}'
 bun run mcp
 ```
 
@@ -37,13 +40,13 @@ Search/read also accept JSON on stdin. Register MCP with the absolute Bun execut
 
 | Sources | Configuration |
 | --- | --- |
-| `journals`, `voice-journals`, `call-notes` | Note folders; journal dates currently use America/Argentina/Buenos_Aires |
+| Markdown folders (`markdown`) | Named folders, file patterns, date fields, timezone and note/journal/transcript labels |
 | `things-archive` | Selected task export in the supported JSONL/project format |
 | `chatgpt-archive`, `takeout-archive`, `linkedin-archive`, `twitter-archive` | Export files; enable maintenance and run a rebuild |
-| `messages`, `whatsapp`, `calls` | macOS application databases and existing OS permissions |
+| `messages`; named WhatsApp (`whatsapp`) and Muesli (`muesli`) sources | Local application databases and existing OS permissions |
 | `chrome-history`, `chrome-bookmarks`, `chrome-downloads` | Chrome profile directories; downloads are metadata only |
-| `mail-personal`, `mail-consulting` | A compatible `gog` executable and configured account routing |
-| `mail-fastmail` | A compatible `mailbridge` executable and configured account routing |
+| Named Gmail accounts (`gmail`) | A compatible `gog` executable and configured account routing |
+| Named Fastmail accounts (`fastmail`) | A compatible `mailbridge` executable and configured account routing |
 | `calendar`, `contacts` | Optional helper built with your own signing identity and bundle ID |
 | `agent-history` | An existing compatible CASS index and executable |
 | `vault` | QMD collections, index and installed models |
@@ -51,7 +54,35 @@ Search/read also accept JSON on stdin. Register MCP with the absolute Bun execut
 
 Adapters were developed against CASS 0.10.0 and QMD 1.0.7. The hybrid and embedding adapters require QMD 1.0.7 because they use its internal APIs. Mail tools need the commands and response formats in `src/sources/mail/index.ts`, including `gog --gmail-no-send` and mailbridge paginated search.
 
-Configure each mail source with `account`, `email`, and optional `aliases` under `mailAccounts`. Executable paths are configurable; see `src/platform/config.ts` for the full schema. Use absolute paths and the listed configuration fields.
+## Source configuration
+
+A source ID is your name for an instance; `adapter` selects its integration. Gmail, Fastmail, Markdown, Muesli and WhatsApp support multiple independently named instances. Other integrations retain the IDs in the table and use their existing path/index settings; an optional `label` changes their display name. Up to 100 source instances are supported.
+
+```json
+{
+  "enabledSources": ["work-mail", "receipts", "research", "meetings"],
+  "timeZone": "Europe/London",
+  "sources": {
+    "work-mail": {"adapter": "gmail", "account": "work", "email": "work@example.com"},
+    "receipts": {"adapter": "fastmail", "account": "receipts", "email": "receipts@example.com"},
+    "research": {
+      "adapter": "markdown",
+      "root": "/absolute/path/to/research",
+      "pattern": "**/*.md",
+      "dateFields": ["created", "date"]
+    },
+    "meetings": {"adapter": "muesli", "database": "/absolute/path/to/muesli.db"}
+  }
+}
+```
+
+Use lowercase source IDs with letters, digits and hyphens. Keep IDs stable: saved references and library collections use them. Defining a source does not enable it; add its ID to `enabledSources`. `list_sources` reports configured instances and generates `all-mail`, `all-notes`, `all-journals` and `historical-exports` groups from them.
+
+Markdown sources default to ordinary notes, `**/*.md`, the `date` frontmatter field, and exclusions for `.git` and `node_modules`. Set `exclude` to your own glob list, `dateFromFilename` to read a leading `YYYY-MM-DD`, and `content` to `journal` or `transcript` when appropriate. Transcripts can set `reviewed: true`; `journal: true` includes a transcribed journal in `all-journals`. Attribution is unspecified unless you set `author`. For daily date-named journals, use `pattern: "**/????-??-??.md"`, `dateFromFilename: true`, `dateFields: []`, and `content: "journal"`.
+
+Date-only and offset-free note dates use the source's `timeZone`, then the global `timeZone`, then UTC. Dates with an explicit offset retain their instant. Each mailbox has an `account`, `email`, and optional `aliases`; account authentication stays in its provider tool.
+
+Executables are discovered on `PATH`, with explicit paths taking precedence. Background jobs may have a shorter `PATH`; set `gmailBinary`, `mailbridgeBinary`, `cassBinary`, `qmdBinary`, or other executable overrides there. QMD's package, models and indexes still need explicit configuration. See `src/platform/source-settings.ts` and `src/platform/config.ts` for the complete schemas.
 
 ## Maintenance and retention
 

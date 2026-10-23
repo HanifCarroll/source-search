@@ -1,10 +1,11 @@
-import { librarySources } from "../domain/source-policy";
+import {sourceKind,isMail} from '../domain/source-catalog';
+import { isProjected } from "../domain/source-policy";
 import {privateDirectory,markManagedCache} from "../platform/storage";
 /** Explicit maintenance entry point. Never imported by the read-only MCP gateway. */
 import { lstat, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { loadConfig, sourceEnabled, requireMaintenance, type Config } from "../platform/config";
+import { loadConfig, sourceEnabled, requireMaintenance, configuredSourceIds, databasePath, mailAccount, sourceScope, type Config } from "../platform/config";
 import { allDatabaseRecords, databaseProjectionVersion } from "../sources/local/databases";
 import { allMessageRecords } from "../sources/messages/index";
 import { archiveSources, exportPaths, archiveSignature, exportProjectionVersion } from "../sources/archives/originals";
@@ -18,11 +19,11 @@ export async function stampPaths(paths:string[]){const values=[];for(const p of 
 async function native(c:Config){
  const db=libraryDB(c,true);
  try{
-  for(const source of ["calls","messages","whatsapp"] as const){
+  for(const source of configuredSourceIds(c).filter(id=>["muesli","messages","whatsapp"].includes(sourceKind(id,c)))){
    try{
     if(!sourceEnabled(c,source))continue;
-    const path=source==="calls"?c.muesli:source==="messages"?c.messages:c.whatsapp,paths=[path,path+"-wal"],signature=await stampPaths(paths);
-    const projectionVersion=source==="messages" ? 1 : databaseProjectionVersion(source);
+    const path=source==="messages"?c.messages:databasePath(c,source),paths=[path,path+"-wal"],signature=await stampPaths(paths);
+    const projectionVersion=source==="messages" ? 1 : databaseProjectionVersion(source,c);
     if(getState(db,source).signature===signature && (getState(db,source).projectionVersion||1)===projectionVersion && getState(db,source).state!=="error")continue;
     const records=source==="messages"?await allMessageRecords(c):await allDatabaseRecords(c,source);
     if(signature!==await stampPaths(paths))throw Error("Source changed during snapshot; retaining previous projection and retrying");
@@ -50,16 +51,15 @@ async function archives(c:Config){
   }
  }finally{index?.close();db.close();}
 }
-function command(c:Config):Run{return argv=>run([argv[0]!.endsWith("/.local/bin/gog")?c.gmailBinary:argv[0]!,...argv.slice(1)]);}
-export async function syncMail(c:Config,execute:Run=command(c),sources:readonly (MailSource)[]=["mail-personal","mail-consulting","mail-fastmail"]){
+export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSource[]=configuredSourceIds(c).filter(id=>isMail(id,c))){
  requireMaintenance(c);
  const db=libraryDB(c,true);
  try{for(const source of sources){
   if(!sourceEnabled(c,source))continue;
   let state=getState(db,source),changed=false;
-  const accountSignature=hash(JSON.stringify(c.mailAccounts[source]));
-  if(state.accountSignature && state.accountSignature!==accountSignature)throw Error("Mail account changed; purge caches before using a different account in this slot");
+  const accountSignature=sourceScope(c,source);
   try{
+   if(state.accountSignature && state.accountSignature!==accountSignature)throw Error("Mail account or provider changed; use a new source ID or purge this source cache");
    if(state.projectionVersion!==2){
     // Re-project existing provider responses locally; unchanged summaries must
     // not leave HTML bodies in an older format or trigger a full account fetch.
@@ -127,7 +127,7 @@ export async function syncMail(c:Config,execute:Run=command(c),sources:readonly 
 async function documents(c:Config){
  if(!sourceEnabled(c,"documents"))return;
  const temporaryConfig=join(c.libraryRoot,"extraction-config.json");
- await privateJSON(temporaryConfig,c);
+ await privateJSON(temporaryConfig,{...c,mailAccounts:Object.fromEntries(configuredSourceIds(c).filter(id=>isMail(id,c)).map(id=>[id,mailAccount(c,id)]))});
  try{
   const child=Bun.spawn([c.extractorPython,join(import.meta.dir,"../../scripts/extract-documents.py"),"--config",temporaryConfig],{stdin:"ignore",stdout:"inherit",stderr:"inherit"});
   if(await child.exited)throw Error("Document extraction failed; see private maintenance log");
@@ -139,7 +139,7 @@ export async function syncLibrary(c:Config){
  requireMaintenance(c);
  if(!c.libraryEnabled || !sourceEnabled(c,"library"))return;
  await markManagedCache(c.libraryRoot);await privateDirectory(c.libraryRoot);await privateDirectory(join(c.libraryRoot,"mail-raw"));
- const db=libraryDB(c,true);for(const source of librarySources.filter(s=>sourceEnabled(c,s)))if(!getState(db,source).state)setState(db,source,{state:"queued",records:0,chunks:0});db.close();
+ const db=libraryDB(c,true);for(const source of configuredSourceIds(c).filter(s=>sourceEnabled(c,s) && isProjected(s,c)))if(!getState(db,source).state)setState(db,source,{state:"queued",records:0,chunks:0});db.close();
  // Independent source failures are recorded without starving healthy sources.
  for(const [name,work] of [["native",native],["archives",archives],["mail",syncMail],["documents",documents]] as const){
   try{await work(c);const d=libraryDB(c,true);d.query("DELETE FROM states WHERE source=?").run("maintenance-"+name);d.close();}catch(e){const d=libraryDB(c,true);setState(d,"maintenance-"+name,{state:"error",error:errorData(e),checkedAt:now()});d.close();}

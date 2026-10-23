@@ -1,5 +1,17 @@
 {
   "enabledSources": [],
   "maintenanceEnabled": false,
-  "libraryEnabled": false
+  "libraryEnabled": false,
+  "timeZone": "UTC",
+  "sources": {
+    "notes": {
+      "adapter": "markdown",
+      "root": "/absolute/path/to/notes"
+    },
+    "work-mail": {
+      "adapter": "gmail",
+      "account": "work",
+      "email": "work@example.com"
+    }
+  }
 }

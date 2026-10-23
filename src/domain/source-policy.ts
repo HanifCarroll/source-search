@@ -1,25 +1,21 @@
+import {sourceKind,type SourceCatalog} from './source-catalog';
 import type { Query } from './contracts';
 
-// Sources whose records can be projected into the cross-source library.
-export const librarySources = [
-  'things-archive', 'chatgpt-archive', 'takeout-archive', 'linkedin-archive',
-  'twitter-archive', 'messages', 'whatsapp', 'calls', 'mail-personal',
-  'mail-consulting', 'mail-fastmail', 'documents',
-] as const;
-export function isProjected(source: string) {
-  return (librarySources as readonly string[]).includes(source);
+export function isProjected(source: string, catalog:SourceCatalog={}) {
+  return ["gmail","fastmail","muesli","whatsapp","messages","things-archive","chatgpt-archive","takeout-archive","linkedin-archive","twitter-archive","documents"].includes(sourceKind(source,catalog));
 }
-export function usesLibrary(q: Pick<Query, 'source' | 'mode'>) {
+export function usesLibrary(q: Pick<Query, 'source' | 'mode'>, catalog:SourceCatalog={}) {
   return q.source === 'library' || q.source === 'documents' ||
-    isProjected(q.source) && !!q.mode && q.mode !== 'lexical';
+    isProjected(q.source,catalog) && !!q.mode && q.mode !== 'lexical';
 }
-export function contextMode(source: Query['source']): 'none' | 'neighbors' | 'inline' {
+export function contextMode(source: Query['source'],catalog:SourceCatalog={}): 'none' | 'neighbors' | 'inline' {
+  source=sourceKind(source,catalog);
   if (source === 'agent-history') return 'inline';
-  return ['mail-personal', 'mail-consulting', 'mail-fastmail', 'messages',
+  return ['gmail', 'fastmail', 'messages',
     'whatsapp', 'chatgpt-archive', 'linkedin-archive', 'twitter-archive'].includes(source)
     ? 'neighbors' : 'none';
 }
-export function canTrimItems(q: Query) {
+export function canTrimItems(q: Query,catalog:SourceCatalog={}) {
   // Library cursors belong to derived hits even when the requested source is mail.
-  return usesLibrary(q) || !['mail-personal', 'mail-consulting', 'agent-history'].includes(q.source);
+  return usesLibrary(q,catalog) || !['gmail', 'agent-history'].includes(sourceKind(q.source,catalog));
 }

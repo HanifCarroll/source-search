@@ -1,6 +1,5 @@
 import { z } from "zod";
-export const sourceIds = ["mail-personal", "mail-consulting", "mail-fastmail", "messages", "journals", "things-archive", "whatsapp", "voice-journals", "calls", "call-notes", "calendar", "contacts", "chrome-history", "chrome-bookmarks", "chrome-downloads", "chatgpt-archive", "takeout-archive", "linkedin-archive", "twitter-archive", "agent-history", "vault", "library", "documents"] as const;
-export const sourceId = z.enum(sourceIds);
+export const sourceId = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/).refine(id=>id!=="constructor","Reserved source ID");
 export const sectionKind = z.enum(["primary", "quoted", "generated", "manual", "review", "metadata"]);
 export type SectionKind = z.infer<typeof sectionKind>;
 export type TextSection = { kind: SectionKind; start: number; end: number };
@@ -21,15 +20,15 @@ export const querySchema = z.object({
   excludeSpamTrash: z.boolean().optional(),
   limit: z.number().int().min(1).max(25).default(10)
 }).strict().refine(q => !q.from || !q.to || Date.parse(q.from) < Date.parse(q.to), "from must precede to");
-export const selectionSchema = z.object({...querySchema.shape,source:z.enum([...sourceIds,"all-journals","all-mail","historical-exports"])}).strict().refine(q=>!q.from || !q.to || Date.parse(q.from)<Date.parse(q.to),"from must precede to");
-export const searchSchema = z.object({ queries: z.array(selectionSchema).min(1).max(sourceIds.length) }).strict()
+export const selectionSchema = z.object({...querySchema.shape,source:sourceId}).strict().refine(q=>!q.from || !q.to || Date.parse(q.from)<Date.parse(q.to),"from must precede to");
+export const searchSchema = z.object({ queries: z.array(selectionSchema).min(1).max(100) }).strict()
   .refine(r => new Set(r.queries.map(q => q.source)).size === r.queries.length, "Search each source at most once per request");
 export const refSchema = z.object({ source: sourceId, id: z.string().min(1).max(16000), version: z.string().max(100).optional() }).strict();
 export const readSchema = z.object({ ref: refSchema, cursor: z.string().max(4000).optional(), focus:z.string().max(1000).optional(), preview:z.boolean().default(false), context: z.boolean().default(false), details: z.boolean().default(false) }).strict();
 export type Query = z.infer<typeof querySchema>;
 export type Ref = z.infer<typeof refSchema>;
 export type RecordData = {
-  ref: Ref; title: string; body: string; type: string; locator: string;
+  adapter?: string; ref: Ref; title: string; body: string; type: string; locator: string;
   occurredAt?: string; observedAt: string; author?: string; conversation?: string;
   metadata?: Record<string, unknown>; warnings?: string[]; sections?: TextSection[];
 };

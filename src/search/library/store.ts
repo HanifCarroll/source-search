@@ -24,7 +24,7 @@ export function makeChunks(source:string,records:RecordData[],guard:unknown):Chu
  const groups=new Map<string,RecordData[]>();
  for(const r of records){
   if(!r.body.trim())continue;
-  const grouped=!!r.conversation && ["messages","whatsapp","chatgpt-archive","linkedin-archive"].includes(source);
+  const grouped=!!r.conversation && ["messages","whatsapp","chatgpt-archive","linkedin-archive"].includes(r.adapter || source);
   const key=grouped?r.conversation+":"+(r.occurredAt||"undated").slice(0,10):source==="linkedin-archive" && !/post|article/.test(r.type)?r.type+":"+(r.occurredAt||"undated").slice(0,10):r.ref.id;
   const g=groups.get(key)||[];g.push(r);groups.set(key,g);
  }

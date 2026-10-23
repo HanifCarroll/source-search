@@ -8,10 +8,18 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import stat
 import subprocess
 import threading
 import time
+
+
+def executable(config, key, name):
+    path = config.get(key) or shutil.which(name)
+    if not path or not Path(path).is_absolute():
+        raise RuntimeError('Configure an absolute ' + key + ' path or put ' + name + ' on PATH')
+    return path
 
 
 def stamp():
@@ -59,7 +67,7 @@ SF_DATALESS = 0x40000000  # iCloud placeholder whose contents are not on this Ma
 def materialize(config, timeout=60, download=None, is_dataless=None, sleep=time.sleep):
     """Download iCloud placeholders first; QMD's read fails with error -11 on them."""
     download = download or (lambda path: subprocess.run(['/usr/bin/brctl', 'download', str(path)], stdin=subprocess.DEVNULL, capture_output=True, timeout=30))
-    is_dataless = is_dataless or (lambda path: bool(path.lstat().st_flags & SF_DATALESS))
+    is_dataless = is_dataless or (lambda path: bool(getattr(path.lstat(), 'st_flags', 0) & SF_DATALESS))
     waiting = []
     for root in config.get('qmdRoots', {}).values():
         for base, directories, files in os.walk(root, followlinks=False):
@@ -143,7 +151,7 @@ def run(config_path, state_dir):
 
     def refresh(config):
         nonlocal child
-        binary = config.get('qmdBinary', str(Path.home() / '.bun/bin/qmd'))
+        binary = executable(config, 'qmdBinary', 'qmd')
         index = config.get('qmdIndex', 'source-search')
         if not Path(binary).is_absolute():
             raise RuntimeError('QMD binary must be an absolute path')
@@ -179,9 +187,9 @@ def run(config_path, state_dir):
         log = state_dir / 'library-refresh.log'
         if log.exists() and log.stat().st_size > 2 * 1024 * 1024:
             os.replace(log, state_dir / 'library-refresh.previous.log')
-        commands = [([config['bunBinary'], str(Path(__file__).resolve().parents[2] / 'src/maintenance/library-sync.ts')], 3600),
-                    ([config.get('qmdBinary', str(Path.home() / '.bun/bin/qmd')), '--index', config.get('libraryIndex', 'source-search-library'), 'update'], 600),
-                    ([config['nodeBinary'], str(Path(__file__).resolve().parent / 'embeddings/run.mjs')], 900)]
+        commands = [([executable(config, 'bunBinary', 'bun'), str(Path(__file__).resolve().parents[2] / 'src/maintenance/library-sync.ts')], 3600),
+                    ([executable(config, 'qmdBinary', 'qmd'), '--index', config.get('libraryIndex', 'source-search-library'), 'update'], 600),
+                    ([executable(config, 'nodeBinary', 'node'), str(Path(__file__).resolve().parent / 'embeddings/run.mjs')], 900)]
         with log.open('a') as output:
             for args, timeout in commands:
                 if stopping.is_set(): return

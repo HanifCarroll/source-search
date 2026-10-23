@@ -103,4 +103,26 @@ class ExtractionTests(unittest.TestCase):
  def test_huge_pdf_page_fails_before_render(self):
   p=self.source/'huge.pdf';fixture_pdf(p,[''],100000,100000)
   with self.assertRaisesRegex(ValueError,'pixel budget'):formats.extract(p,self.cache)
+ def test_media_uses_selected_backend_model_and_requires_a_selection(self):
+  from unittest.mock import patch
+  p=self.source/'invented.wav';p.write_bytes(b'invented audio');calls=[]
+  def command(args,*a,**k):
+   calls.append(args)
+   if '-show_entries' in args:return b'{"streams":[{"index":0}]}'
+   out=Path(args[args.index('--output-dir')+1]);(out/'transcript.json').write_text(json.dumps({'segments':[{'start':0,'end':1,'text':'Invented transcript'}]}));return b'{}'
+  with patch.object(formats,'command',command):
+   with self.assertRaisesRegex(formats.Skipped,'transcriptionBackend'):formats.extract(p,self.cache,{})
+   text,_=formats.extract(p,self.cache,{'transcriptionBackend':'fixture-backend','transcriptionModel':'fixture-small','transcribeBinary':'/fixture/transcribe','ffprobeBinary':'/fixture/probe'})
+  self.assertIn('Invented transcript',text);args=calls[-1];self.assertEqual(args[0],'/fixture/transcribe');self.assertEqual(args[args.index('--backend')+1],'fixture-backend');self.assertEqual(args[args.index('--model')+1],'fixture-small')
+ def test_named_fastmail_attachment_uses_its_own_account(self):
+  from unittest.mock import patch
+  from maintenance.documents import inventory as inputs
+  rawdir=self.cache/'mail-raw';rawdir.mkdir();attachment=self.source/'note.txt';attachment.write_text('Invented attachment')
+  m.save(rawdir/'billing-one.json',{'source':'billing','id':'one','raw':{'attachments':[{'filename':'note.txt','size_bytes':19}]}})
+  calls=[]
+  def download(args,*a,**k):
+   calls.append(args);return json.dumps({'attachments':[{'output_path':str(attachment),'filename':'note.txt'}]}).encode()
+  config={'enabledSources':['billing'],'sources':{'billing':{'adapter':'fastmail','account':'receipts','email':'receipts@example.test'}},'mailbridgeBinary':'/fixture/mailbridge'}
+  with patch.object(inputs,'command',download):items,failures=m.mail_attachments(config,self.cache)
+  self.assertEqual(failures,[]);self.assertEqual(len(items),1);self.assertEqual(calls[0][calls[0].index('--account')+1],'receipts');self.assertIn('source-search://billing/',items[0]['locator'])
 if __name__=='__main__':unittest.main()

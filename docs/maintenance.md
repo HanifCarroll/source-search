@@ -6,7 +6,7 @@ Maintenance runs separately from the MCP server. Run it on demand or set up a re
 2. Enable each source. For library work also enable `libraryEnabled`, `maintenanceEnabled`, and the `library` source.
 3. Build the native export index with `bun run start rebuild` if selected exports are enabled.
 4. Run `bun src/library-sync.ts` to create search projections. Mail backfills continue across runs. Cached records are pruned after a successful scan.
-5. Configure QMD collections to point to the generated `library/collections/ss-<source>` directories, using an index/database that matches `libraryIndex` and `libraryDatabase`. Install the exact QMD 1.0.7 adapter version and its models separately; configure `qmdPackage` and `qmdModels`.
+5. Configure QMD collections to point to the generated `library/collections/ss-<source>` directories, where `<source>` is the configured source ID, using an index/database that matches `libraryIndex` and `libraryDatabase`. Install the exact QMD 1.0.7 adapter version and its models separately; configure `qmdPackage` and `qmdModels`.
 6. Run QMD update and `node scripts/embed-library.mjs` using the installed models.
 
 The optional `scripts/qmd-auto-refresh.py --config /absolute/config.json --state-dir /absolute/private/state` process waits for vault edits to settle, then refreshes enabled indexes. Configure `bunBinary`, `nodeBinary`, `qmdBinary`, `qmdPackage`, indexes and databases. Stop the process before purging caches or moving roots. Schedule it with your preferred service manager.
@@ -21,7 +21,7 @@ Create a separate Python environment and install `scripts/extraction-requirement
 
 PDF text extraction and rendering use pypdfium2/PDFium; Pillow handles rendered OCR images.
 
-Other formats use python-docx, Beautiful Soup, macOS textutil, configured Tesseract, or a separately installed local transcription command. Transcription uses `mlx-whisper` with an already installed `large-v3` model and offline model loading. Media probing uses `ffprobeBinary` to skip videos without audio before transcription. Install these tools and models separately.
+Other formats use python-docx, Beautiful Soup, macOS textutil, configured Tesseract, or a separately installed local transcription command. Set `transcriptionBackend` and `transcriptionModel` to values supported by your installed `transcribeBinary`; models must already be installed. Model loading stays offline. Without these settings, media without an adjacent transcript is skipped. Set `ocrLanguages` to installed Tesseract language codes, such as `eng+spa` (default `eng`). Media probing uses `ffprobeBinary` to skip videos without audio before transcription. Install these tools and models separately.
 
 Each file runs in a separate worker with a wall-clock timeout, bounded output and CPU/file-size limits. Linux also applies an address-space limit. macOS does not have an equivalent enforced memory cap here. Source files are capped at 250 MB; extracted text is capped at 4 MB; PDFs over 100 pages are skipped; archive and document expansion have separate bounds. OCR and transcription can be inaccurate; verify important wording against originals.
 

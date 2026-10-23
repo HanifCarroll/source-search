@@ -26,7 +26,7 @@ def mail_attachments(config,root):
   try:
    item=json.loads(rawfile.read_text());source=item['source'];mid=item['id'];raw=item['raw']
    if source not in config.get('enabledSources',[]):continue
-   account=config.get('mailAccounts',{}).get(source)
+   account=config.get('sources',{}).get(source) or config.get('mailAccounts',{}).get(source)
    if not account:raise ValueError('Mail account is not configured')
    folder=downloads/(source+'-'+mid);private_dir(folder)
    manifest=folder/'manifest.json'
@@ -34,7 +34,7 @@ def mail_attachments(config,root):
    parent_signature=signature(rawfile)
    if not isinstance(cached,dict) or cached.get('parent')!=parent_signature:
     entries=[]
-    if source=='mail-fastmail':
+    if config.get('sources',{}).get(source,{}).get('adapter', 'fastmail' if source=='mail-fastmail' else 'gmail')=='fastmail':
      supported=[a for a in raw.get('attachments',[]) if Path(a.get('filename','')).suffix.lower() in SUPPORTED]
      if supported:
       if sum(a.get('size_bytes') or 0 for a in raw.get('attachments',[]))>250*1024*1024:raise ValueError('Message attachments exceed download byte budget')

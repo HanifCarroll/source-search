@@ -1,13 +1,14 @@
+import {sourceKind} from '../domain/source-catalog';
 import { searchMessages, readMessage, messagesStatus } from "../sources/messages/index";
 import type { Query, Ref, RecordData, Page } from '../domain/contracts';
-import { assertVersion, errorData } from '../domain/identity';
+import { assertVersion, errorData, fail } from '../domain/identity';
 import { contextMode, usesLibrary } from '../domain/source-policy';
 import { validateOptions } from '../domain/query';
-import { requireSource, type Config } from '../platform/config';
+import { requireSource, configuredSourceIds, mailAccount, markdownSettings, type Config } from '../platform/config';
 import { libraryStatus, searchLibrary, readLibrary, readDocument } from '../search/library/index';
 import { qmdStatus, searchQmd, readQmd } from '../search/qmd/vault';
 import { cassStatus, searchCass, readCass } from '../sources/agent-history/index';
-import { journalPaths, searchJournals, journalRecord, thingsRecords } from '../sources/local/journals-and-tasks';
+import { isDailyJournal, journalPaths, searchJournals, journalRecord, thingsRecords } from '../sources/local/journals-and-tasks';
 import { databaseStatus, searchDatabase, readDatabase } from '../sources/local/databases';
 import { notesStatus, searchNotes, readNote } from '../sources/local/notes';
 import { pimStatus, searchPim, readPim } from '../sources/local/pim';
@@ -32,9 +33,9 @@ export function createSourceAccess(config: Config, execute: Run = run) {
   function mail(source: MailSource): Adapter {
     return {
       async status() {
-        const result = await searchMail({source, query:source === 'mail-fastmail' ? '' : 'newer_than:1d', limit:1}, execute, {remaining:0,records:new Map()}, config);
-        const account = config.mailAccounts[source]!;
-        return {available:true, account:account.email, aliases:account.aliases, querySyntax:source === 'mail-fastmail' ? 'provider text' : 'Gmail query syntax', filters:['from','to','folders','excludeSpamTrash'], pagination:true, coverage:'Provider mailbox; full historical coverage has not been established', warnings:result.warnings};
+        const result = await searchMail({source, query:sourceKind(source,config) === 'fastmail' ? '' : 'newer_than:1d', limit:1}, execute, {remaining:0,records:new Map()}, config);
+        const account = mailAccount(config,source)!;
+        return {available:true, account:account.email, aliases:account.aliases, querySyntax:sourceKind(source,config) === 'fastmail' ? 'provider text' : 'Gmail query syntax', filters:['from','to','folders','excludeSpamTrash'], pagination:true, coverage:'Provider mailbox; full historical coverage has not been established', warnings:result.warnings};
       },
       search: (q, previews) => searchMail(q, execute, previews, config),
       async read(ref, context) {
@@ -67,10 +68,10 @@ export function createSourceAccess(config: Config, execute: Run = run) {
       },
     };
   }
-  function database(source: 'whatsapp' | 'calls'): Adapter {
-    return {status:async()=>({available:true,...await databaseStatus(config,source),filters:['from','to',...(source==='whatsapp'?['conversation']:[])],querySyntax:'literal words, all must match',pagination:true}), search:q=>searchDatabase(config,q), read:(ref,context)=>readDatabase(config,ref,context)};
+  function database(source: string): Adapter {
+    return {status:async()=>({available:true,...await databaseStatus(config,source),filters:['from','to',...(sourceKind(source,config)==='whatsapp'?['conversation']:[])],querySyntax:'literal words, all must match',pagination:true}), search:q=>searchDatabase(config,q), read:(ref,context)=>readDatabase(config,ref,context)};
   }
-  function notes(source: 'voice-journals' | 'call-notes'): Adapter {
+  function notes(source: string): Adapter {
     return {status:async()=>({available:true,...await notesStatus(config,source),filters:['from','to'],querySyntax:'literal words, all must match',pagination:true}),search:q=>searchNotes(config,q),read:recordOnly(ref=>readNote(config,ref))};
   }
   function pim(source: 'calendar' | 'contacts'): Adapter {
@@ -80,9 +81,6 @@ export function createSourceAccess(config: Config, execute: Run = run) {
     return {status:async()=>({available:true,...await chromeStatus(config,source),filters:['from','to'],querySyntax:'literal words, all must match',pagination:true}),search:q=>searchChrome(config,q),read:recordOnly(ref=>readChrome(config,ref))};
   }
   const adapters: Record<Source, Adapter> = {
-    'mail-personal':mail('mail-personal'), 'mail-consulting':mail('mail-consulting'), 'mail-fastmail':mail('mail-fastmail'),
-    'whatsapp':database('whatsapp'), 'calls':database('calls'),
-    'voice-journals':notes('voice-journals'), 'call-notes':notes('call-notes'),
     'calendar':pim('calendar'), 'contacts':pim('contacts'),
     'chrome-history':chrome('chrome-history'), 'chrome-bookmarks':chrome('chrome-bookmarks'), 'chrome-downloads':chrome('chrome-downloads'),
     'chatgpt-archive':archive('chatgpt-archive'), 'takeout-archive':archive('takeout-archive'),
@@ -94,10 +92,6 @@ export function createSourceAccess(config: Config, execute: Run = run) {
         const result=await readMessage(config,ref,context);
         return {...result,contextWarnings:context && !result.record.conversation ? ['No unambiguous conversation was found; neighboring messages are unavailable.'] : []};
       },
-    },
-    journals: {
-      async status() { const paths=await journalPaths(config.journals); return {available:true,dailyNotes:paths.paths.length,filters:['from','to'],querySyntax:'literal words, all must match',coverage:'Daily written journals; voice and call transcripts have separate source IDs',warnings:paths.warnings}; },
-      search:q=>searchJournals(config,q), read:recordOnly(ref=>journalRecord(config,ref)),
     },
     'things-archive': {
       async status() {
@@ -118,9 +112,16 @@ export function createSourceAccess(config: Config, execute: Run = run) {
       read:recordOnly(async ref=>{const record=await readDocument(config,ref);if(record.metadata?.mailRef)await read(record.metadata.mailRef as Ref);return record;}),
     },
   };
+  for(const id of configuredSourceIds(config)){
+    const kind=sourceKind(id,config);
+    if(kind==='gmail' || kind==='fastmail')adapters[id]=mail(id);
+    else if(kind==='markdown')adapters[id]=isDailyJournal(config,id)?{status:async()=>({available:true,dailyNotes:(await journalPaths(markdownSettings(config,id).root,markdownSettings(config,id).exclude)).paths.length,filters:['from','to'],coverage:'Daily Markdown journals'}),search:q=>searchJournals(config,q),read:recordOnly(ref=>journalRecord(config,ref))}:notes(id);
+    else if(kind==='muesli' || kind==='whatsapp')adapters[id]=database(id);
+  }
   async function read(ref: Ref, options: {context?:boolean; continuation?:boolean} = {}): Promise<ReadResult> {
     requireSource(config,ref.source);
-    const mode=contextMode(ref.source);
+    if(!adapters[ref.source])fail('SOURCE_NOT_CONFIGURED','No adapter is configured for this source');
+    const mode=contextMode(ref.source,config);
     // CASS neighbors form part of the record body, so continuation must retain
     // that same window. Separate neighboring records need fetching only once.
     const context=!!options.context && (mode==='inline' || !options.continuation);
@@ -129,12 +130,12 @@ export function createSourceAccess(config: Config, execute: Run = run) {
     return result;
   }
   return {
-    status: (source: Source) => {requireSource(config,source);return adapters[source].status();},
+    status: (source: Source) => {requireSource(config,source);if(!adapters[source])fail("SOURCE_NOT_CONFIGURED","No adapter is configured for this source");return adapters[source].status();},
     searchSession() {
       const previews:PreviewBudget={remaining:3,records:new Map()};
       return (q:Query) => {
-        requireSource(config,q.source);validateOptions(q);
-        return usesLibrary(q) ? searchLibrary(config,q) : adapters[q.source].search(q,previews);
+        requireSource(config,q.source);if(!adapters[q.source])fail("SOURCE_NOT_CONFIGURED","No adapter is configured for this source");validateOptions(q,config);
+        return usesLibrary(q,config) ? searchLibrary(config,q) : adapters[q.source].search(q,previews);
       };
     },
     read,

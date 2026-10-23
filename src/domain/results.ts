@@ -1,3 +1,4 @@
+import {isMail} from './source-catalog';
 import type { Query, RecordData, Hit } from "./contracts";
 import { fail, hash, queryKey, cursor, numberPosition } from "./identity";
 import { matchesQuery } from "./query";
@@ -11,7 +12,7 @@ export function within(date: string | undefined, q: Query) {
 }
 export function hit(record: RecordData, q: Query, after: string | number): Hit {
   const compact = compactRecord(record);
-  const providerSyntax=(q.source.startsWith("mail-") || q.source === "agent-history") && !q.match && /[:(){}]/.test(q.query);
+  const providerSyntax=(isMail(record.adapter || record.ref.source) || q.source === "agent-history") && !q.match && /[:(){}]/.test(q.query);
   const match = (!providerSyntax && (findRecordMatch(compact,q) || (record.type === "email" ? findRecordMatch(compact,{...q,sections:["metadata"]}) : undefined))) || {field:"provider" as const,explanation:providerSyntax ? "Provider query matched this record; native operators may match headers or labels rather than a body passage." : "Provider matched this record; read its original to locate the passage."};
   if(q.sections?.includes("metadata") && compact.body!==record.body && findRecordMatch(record,q)?.section === "metadata")Object.assign(match,{field:"body",section:"metadata",explanation:"Matched export metadata; use details:true to inspect the original fields"});
   if(compact.metadata?.previewOnly){delete match.start;delete match.end;delete match.section;match.explanation="Matched a provider preview; the original passage and section need a record read";}

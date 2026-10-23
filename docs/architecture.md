@@ -32,15 +32,17 @@ The four files directly in `src/` are compatibility entry points. `cli.ts`, `mcp
 
 `domain` and `platform` do not import source adapters, search, application, interfaces, or maintenance. They share the contracts and identity primitives that let every adapter return the same record and page shapes. The low-level vendor parsers are independent of the application.
 
-`application/source-access.ts` binds each source's status, native search, and original read in one exhaustive registration. It owns source checks, routing, the per-request mail preview allowance, and context retrieval. A new source cannot silently fall through to another source's implementation.
+`application/source-access.ts` binds each source's status, native search, and original read in one registration per configured instance. It owns source checks, routing, the per-request mail preview allowance, and context retrieval. A new source cannot silently fall through to another source's implementation.
 
 `application/runtime.ts` orchestrates requests: it expands groups, contains individual source failures, budgets combined results, paginates text, and writes requested previews. It calls source access through three operations: status, a search session, and an original read. CLI and MCP share this runtime; CLI additionally imports explicit maintenance commands.
+
+`platform/source-settings.ts` validates source definitions and derives groups. `domain/source-catalog.ts` resolves instance IDs to adapter kinds and retains compatibility aliases for old references. Mail, Markdown and supported local database adapters receive the instance ID throughout search, pagination, indexing and reads. Capability checks depend on the adapter kind; references and QMD collections use the instance ID. Other integrations keep their standard IDs and existing storage configuration.
 
 `domain/source-policy.ts` defines which sources can use library projections, how context participates in continuation, and which search routes have item-level cursors. Validation, routing, the catalogue, and maintenance use these same decisions. CASS context is part of the record body and must remain identical across continuation pages; other sources return neighboring records separately, on the first page.
 
 Library provenance validation uses original reads directly. It never recursively calls the public, formatted `read_record` response. A valid short library section can therefore be read even when an original has metadata too large for the response budget. Original version and enabled-source checks still apply.
 
-Presentation is a pure record-to-response transformation. Source adapters gather current availability information, such as whether a Chrome download still exists. That availability does not become part of the original record's version. Shared SQLite snapshots and column checks live in `platform/sqlite.ts`; Chrome and WhatsApp do not depend on Messages internals.
+Presentation is a pure record-to-response transformation. Source adapters gather current availability information, such as whether a Chrome download still exists. That availability does not become part of the original record's version. Adapter identity is separate from a record version, so moving settings into an explicit source definition does not change unchanged originals. Cache guards bind mail to its provider/account and databases to their selected locations. Shared SQLite snapshots and column checks live in `platform/sqlite.ts`; Chrome and WhatsApp do not depend on Messages internals.
 
 Maintenance may use source readers and projection storage. The read interface cannot import maintenance. `test/architecture.test.ts` checks these import directions, runtime cycles, the retrieval graph, and the absence of direct file, network, or process access in domain modules. Put new behavior in its owning module rather than adding a generic shared helper file.
 
