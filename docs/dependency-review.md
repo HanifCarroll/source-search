@@ -2,6 +2,8 @@
 
 Reviewed 2026-10-23 against the current source tree. This is a review and migration proposal; the candidate packages have not been added to production dependencies.
 
+The subsequent [comparison with alternatives](dependency-comparison.md) changes the ZIP recommendation to `@zip.js/zip.js`, makes calendar adoption conditional on explicit timezone data, and adds HTML table-formatting requirements. The table below reflects those conclusions; the detailed ZIP section preserves the original `yauzl` evaluation.
+
 The strongest opportunities are standards parsers: HTML, MIME email, iCalendar, and YAML frontmatter. Several small handwritten parsers already produce incorrect results on valid invented inputs. Source-specific record interpretation, original-reference validation, and search orchestration should remain application code.
 
 ## Recommended changes
@@ -11,8 +13,8 @@ The strongest opportunities are standards parsers: HTML, MIME email, iCalendar, 
 | First | `stripHtml` in `src/vendor/takeout/parsers.ts`, also used outside Takeout | Adopt `html-to-text` | Named entities remain encoded, a `>` inside an attribute leaks markup into text, and an out-of-range numeric entity throws. A candidate probe handled all three. |
 | First | MIME headers, transfer decoding and address splitting in the same file | Adopt streaming `MailParser` from `mailparser` | An ISO-8859-1 email loses its accented character; a quoted sender name containing a comma becomes two participants. The candidate decoded both correctly. |
 | Small independent fix | Frontmatter splitting in `src/sources/local/notes.ts` | Use the existing `Bun.YAML.parse` API | A quoted value containing `---` is truncated by the delimiter split. Bun's installed parser preserved it. No additional package is needed. |
-| Next | iCalendar parsing in `src/vendor/takeout/parsers.ts` | Adopt `ical.js` | An event using a valid embedded `VTIMEZONE` has no parsed timestamp today. The candidate resolved the supplied offset. |
-| Qualified migration | `src/vendor/takeout/zip.ts` | Use `yauzl` for ZIP structure and entry streams, retain application checks | It can replace central-directory/ZIP64 machinery and avoid holding the whole archive in memory. It does not check CRC32, so it is not a complete replacement for the existing wrapper. |
+| Next | iCalendar parsing in `src/vendor/takeout/parsers.ts` | Prefer `ical.js` with explicit timezone data | Handles embedded zones; bare IANA IDs require registered definitions. Preserve floating/all-day values. |
+| Qualified migration | `src/vendor/takeout/zip.ts` | Prefer `@zip.js/zip.js`, retain the application archive contract | File-backed Bun streaming, CRC checking and strict archive options passed the comparison fixtures. |
 | Conditional | `parseCsv` in `src/vendor/takeout/parsers.ts` | Consider `csv-parse` for standard CSV; retain explicit export-dialect handling | Our LinkedIn path accepts mixed backslash and doubled-quote escaping. Neither tested candidate configuration accepted that fixture. A direct replacement would regress support. |
 
 ### HTML: make one shared conversion boundary
