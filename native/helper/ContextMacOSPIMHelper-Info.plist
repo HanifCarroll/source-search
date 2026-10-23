@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>Context macOS PIM Helper</string>
+  <key>CFBundleExecutable</key>
+  <string>context-macos-pim-helper</string>
+  <key>CFBundleIdentifier</key>
+  <string>org.example.source-search.macos-pim-helper</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>Context macOS PIM Helper</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>Source Search reads local Calendars to index event metadata.</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>Source Search reads local Calendars to index event metadata.</string>
+  <key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+  <string>Source Search does not write to Calendars.</string>
+  <key>NSContactsUsageDescription</key>
+  <string>Source Search reads local Contacts to index contact metadata.</string>
+</dict>
+</plist>
