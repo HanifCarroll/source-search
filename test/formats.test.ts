@@ -68,7 +68,10 @@ test('ZIP limits, file streaming and source changes are enforced',async()=>{
   const bytes=await createZip([{path:'a',text:'abc'},{path:'b',text:'def'}]);
   for(const options of [{maxEntries:1},{maxTotalUncompressedBytes:5},{maxArchiveBytes:10}])await expect(parseSafeZipArchive(bytes,options)).rejects.toThrow('safety limit');
   await expect(parseSafeZipArchive(await createZip([{path:'bomb',text:'a'.repeat(10000),method:8}]),{maxCompressionRatio:2})).rejects.toThrow('ratio');
-  const path=join(root,'archive.zip');await writeFile(path,bytes);const zip=await loadSafeZipArchive(path);expect(new TextDecoder().decode(await zip.readEntry(zip.entries[0]!))).toBe('abc');
+  const path=join(root,'archive.zip');await writeFile(path,bytes);const zip=await loadSafeZipArchive(path);
+  const memory=await parseSafeZipArchive(bytes);
+  for(const archive of [zip,memory])expect(archive.entries[0]!.compressedSha256).toBe(createHash('sha256').update('abc').digest('hex'));
+  expect(new TextDecoder().decode(await zip.readEntry(zip.entries[0]!))).toBe('abc');
   await writeFile(path,await createZip([{path:'changed',text:'other'}]));await expect(zip.readEntry(zip.entries[0]!)).rejects.toThrow('changed');
   await symlink(path,join(root,'link.zip'));await expect(loadSafeZipArchive(join(root,'link.zip'))).rejects.toThrow('symbolic link');
  }finally{await rm(root,{recursive:true,force:true});}
@@ -79,3 +82,13 @@ test('WhatsApp concatenated vCards and legacy malformed photo fields retain cont
  const result=whatsappStructuredText({messageType:4,contactCard:card+'\n'+next});
  expect(result.text).toContain('Fixture Person\nInvented second line');expect(result.text).toContain('+15550102030');expect(result.text).toContain('Second Person');expect(result.text).not.toContain('UnfoldedPhotoBytes');expect(result.warning).toBeUndefined();
 });
+
+test('large file-backed ZIP slice hashing completes without a Bun stream stall',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'ss-zip-stream-'));
+ try{
+  const path=join(root,'archive.zip'),script=join(root,'check.ts');
+  const bytes=await createZip([{path:'large.txt',text:'x'.repeat(32*1024*1024)},{path:'second.txt',text:'y'.repeat(32*1024*1024)}]);await writeFile(path,bytes);
+  await writeFile(script,`import {loadSafeZipArchive} from ${JSON.stringify(join(import.meta.dir,'../src/vendor/takeout/zip.ts'))};const zip=await loadSafeZipArchive(${JSON.stringify(path)});if((await zip.readEntry(zip.entries[0])).length!==32*1024*1024)throw Error('size mismatch');`);
+  const child=Bun.spawn([process.execPath,script],{stdout:'pipe',stderr:'pipe',timeout:5000});expect(await child.exited).toBe(0);
+ }finally{await rm(root,{recursive:true,force:true});}
+},10000);

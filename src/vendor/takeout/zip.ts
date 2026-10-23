@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {lstat} from 'node:fs/promises';
+import {createReadStream} from 'node:fs';
 import {BlobReader,ZipReader,type FileEntry} from '@zip.js/zip.js';
 
 export const DEFAULT_MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024;
@@ -52,6 +53,20 @@ export async function loadSafeZipArchive(input:string|Uint8Array,options:ZipSafe
     const after=await lstat(input);
     if(after.isSymbolicLink() || after.ino!==stat.ino || after.size!==stat.size || after.mtimeMs!==stat.mtimeMs || after.ctimeMs!==stat.ctimeMs)throw Error('ZIP archive changed while it was being read.');
   };
+  const digestRange=async(start=0,end=blob.size)=>{
+    const hash=createHash('sha256');let length=0;
+    // Bun 1.3 file-backed Blob.slice().stream() can stall before a non-EOF
+    // slice boundary. Node's bounded file stream avoids that runtime bug.
+    if(end>start){
+      if(typeof input==='string'){
+        for await(const chunk of createReadStream(input,{start,end:end-1})){length+=chunk.length;if(length>end-start)throw Error('ZIP hash range exceeded');hash.update(chunk);}
+      }else{
+        const bytes=new Uint8Array(await blob.slice(start,end).arrayBuffer());length=bytes.length;hash.update(bytes);
+      }
+    }
+    if(length!==end-start)throw Error('ZIP archive changed while hashing.');
+    return hash.digest('hex');
+  };
   const reader=new ZipReader(new BlobReader(blob),{checkCrc32:true,checkAmbiguity:true,filenameValidation:'balanced',useWebWorkers:false});
   const entries:SafeZipEntry[]=[],native=new Map<string,FileEntry>();
   let totalDeclaredUncompressedBytes=0;
@@ -78,13 +93,13 @@ export async function loadSafeZipArchive(input:string|Uint8Array,options:ZipSafe
       // Validate local headers and overlap using zip.js without inflating media.
       await entry.getData(new WritableStream(),{checkOverlappingEntryOnly:true});
       const dataOffset=entry.localDirectory!.dataOffset;
-      const compressedSha256=await digest(blob.slice(dataOffset,dataOffset+entry.compressedSize));
+      const compressedSha256=await digestRange(dataOffset,dataOffset+entry.compressedSize);
       const safe:SafeZipEntry={path,entryId:`google-takeout/entry/${encodeURIComponent(path)}`,isDirectory,compressedSize:entry.compressedSize,uncompressedSize:entry.uncompressedSize,compressionMethod:entry.compressionMethod,crc32:entry.signature!,flags,externalAttributes:entry.externalFileAttributes,localHeaderOffset:entry.offset,compressedSha256};
       entries.push(safe);native.set(safe.entryId,entry);
       // Empty compressed directories still need deflate and CRC validation.
       if(isDirectory)await extract(entry,1);
     }
-    const archiveSha256=await digest(blob);
+    const archiveSha256=await digestRange();
     await unchanged();
     return {archiveBytes:blob.size,archiveSha256,entries,totalDeclaredUncompressedBytes,limits,async readEntry(request){
       const known=entries.find(e=>e.entryId===request.entryId),entry=native.get(request.entryId);
@@ -102,9 +117,6 @@ export async function loadSafeZipArchive(input:string|Uint8Array,options:ZipSafe
   }
 }
 export const parseSafeZipArchive=loadSafeZipArchive;
-async function digest(blob:Blob){
-  const hash=createHash('sha256');for await(const chunk of blob.stream())hash.update(chunk);return hash.digest('hex');
-}
 async function extract(entry:FileEntry,limit:number){
   const chunks:Uint8Array[]=[];let length=0;
   await entry.getData(new WritableStream<Uint8Array>({write(chunk){
