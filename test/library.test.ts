@@ -1,3 +1,4 @@
+import type { QmdRequest } from "../src/search/qmd/runner";
 import {test,expect} from "bun:test";
 import {mkdtemp,mkdir,rm,writeFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
@@ -37,9 +38,9 @@ test("ranked projection search uses collection scope, withholds stale index text
   for(const path of c.qmdModels)await writeFile(path,"synthetic marker");
   await publish(c,"whatsapp",[rec("1","Synthetic idea")],{}, {state:"ready"});let d=libraryDB(c);const row=d.query("SELECT * FROM chunks").get() as any;d.close();
   const db=new Database(c.libraryDatabase);db.exec("CREATE TABLE documents(collection,path,hash,active);CREATE TABLE content_vectors(hash)");db.query("INSERT INTO documents VALUES(?,?,?,1)").run("ss-whatsapp",row.id+".md",row.hash);db.query("INSERT INTO content_vectors VALUES(?)").run(row.hash);db.close();
-  let args:string[]=[];const execute=async(a:string[])=>{args=a;return [{file:"qmd://ss-whatsapp/"+row.id+".md",score:1,snippet:"Synthetic idea"}];};
+  let args:QmdRequest|undefined;const execute=async(a:QmdRequest)=>{args=a;return [{file:"qmd://ss-whatsapp/"+row.id+".md",score:1,snippet:"Synthetic idea"}];};
   const q=querySchema.parse({source:"whatsapp",query:"thought",mode:"hybrid"});const page=await searchLibrary(c,q,execute);
-  expect(args).toContain("ss-whatsapp");expect(page.items[0]!.ref.source).toBe("library");expect(page.retrieval!.effectiveMode).toBe("hybrid");
+  expect(args).toEqual({index:"library",mode:"hybrid",query:"thought",collection:"ss-whatsapp"});expect(page.items[0]!.ref.source).toBe("library");expect(page.retrieval!.effectiveMode).toBe("hybrid");
   await publish(c,"whatsapp",[rec("1","Changed idea")],{}, {state:"ready"});expect((await searchLibrary(c,q,execute)).items.length).toBe(0);
  }finally{await rm(root,{recursive:true,force:true});}
 });

@@ -1,14 +1,12 @@
 import { scanRecords } from "../../domain/scan";
-import { matchesQuery } from "../../domain/query";
-import { basename } from "node:path";
+import { lstatSync } from "node:fs";
+import { basename, isAbsolute } from "node:path";
 import type { Config } from "../../platform/config";
-import { createSnapshot } from "../messages/reader";
-import { requireColumns } from "./databases";
+import { createSnapshot, requireColumns } from "../../platform/sqlite";
 import { recordPage } from "../../domain/pages";
 import { googleDocument } from "../../domain/presentation";
 import { fail, now, versioned, assertVersion, queryKey, position, cursor } from "../../domain/identity";
 import { contained, textFile } from "../../platform/source-files";
-import { hit, matches, within } from "../../domain/results";
 import { type RecordData, type Query, type Ref, type Page } from "../../domain/contracts";
 
 const stamp = (v: number | bigint) => { const n = Number(v) / 1000 - 11644473600000; return Number.isFinite(n) && n > -8640000000000000 && n < 8640000000000000 ? new Date(n).toISOString() : undefined; };
@@ -16,7 +14,12 @@ function record(source: Query["source"], profile: string, index: number, row: an
   const identity = [index, String(row.id)],download=source === "chrome-downloads";
   let title=row.title || (row.target_path ? basename(row.target_path) : row.url) || "Chrome record",url=row.url || "";
   if(download)try{const u=new URL(url);if(u.hostname === "chatgpt.com" && u.pathname === "/backend-api/estuary/content" && /\.zip$/i.test(title))title="ChatGPT data export (ZIP)";url=u.origin+u.pathname;}catch{url="";}
-  return versioned({ ref: { source, id: Buffer.from(JSON.stringify(identity)).toString("base64url") }, title, body: [title,url,download && row.target_path ? `Local file: ${row.target_path}` : ""].filter(Boolean).join("\n"), type: source.replace("chrome-", "browser-"), locator: `source-search://${source}/${index}/${row.id}`, occurredAt: stamp(row.time), observedAt: now(), metadata: { profile, profileName: basename(profile), url: row.url, downloadPath: row.target_path, downloadsAreMetadataOnly: download } });
+  const result = versioned({ ref: { source, id: Buffer.from(JSON.stringify(identity)).toString("base64url") }, title, body: [title,url,download && row.target_path ? `Local file: ${row.target_path}` : ""].filter(Boolean).join("\n"), type: source.replace("chrome-", "browser-"), locator: `source-search://${source}/${index}/${row.id}`, occurredAt: stamp(row.time), observedAt: now(), metadata: { profile, profileName: basename(profile), url: row.url, downloadPath: row.target_path, downloadsAreMetadataOnly: download } });
+  // Availability is checked at source access, and does not change record identity.
+  if (download && typeof row.target_path === "string" && isAbsolute(row.target_path)) {
+    try { if (lstatSync(row.target_path).isFile()) result.metadata!.openLink = row.target_path; } catch {}
+  }
+  return result;
 }
 async function bookmarks(config: Config) {
   const records: RecordData[] = [], warnings: string[] = [];

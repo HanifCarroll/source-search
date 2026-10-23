@@ -2,14 +2,13 @@ import {privateDirectory} from "../../platform/storage";
 import {randomUUID} from "node:crypto";
 import { lstatSync,chmodSync } from "node:fs";
 import { Database } from "bun:sqlite";
-import { mkdir, writeFile, rename, rm, chmod, readFile, readdir } from "node:fs/promises";
+import { writeFile, rename, rm, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {sourceScope, type Config} from "../../platform/config";
-import { hash, now, stableJson } from "../../domain/identity";
+import { hash, now } from "../../domain/identity";
 import { type RecordData, type Ref } from "../../domain/contracts";
 import { contentSections } from "../../domain/content";
 
-export const librarySources = ["things-archive","chatgpt-archive","takeout-archive","linkedin-archive","twitter-archive","messages","whatsapp","calls","mail-personal","mail-consulting","mail-fastmail","documents"];
 export function libraryDB(c:Config, write=false) {
  const path=join(c.libraryRoot,"library.sqlite");if(!write){const st=lstatSync(path);if(!st.isFile() || st.isSymbolicLink())throw Error("Library cache must be an existing regular file");}
  if(write){const st=lstatSync(c.libraryRoot);if(!st.isDirectory() || st.isSymbolicLink() || st.mode & 0o077)throw Error("Library root must be private (0700)");try{const f=lstatSync(path);if(!f.isFile() || f.isSymbolicLink())throw Error("Unsafe library file");}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}}

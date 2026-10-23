@@ -2,12 +2,25 @@ import type { Config } from "../../platform/config";
 import { fail } from "../../domain/identity";
 import worker from "./hybrid.mjs" with { type: "text" };
 
-export type QmdRun = (argv: string[]) => Promise<unknown>;
-export const runQmd = async (argv: string[], config: Config): Promise<unknown> => {
-  const hybrid = argv[3] === "query";
-  const collectionIndex = argv.indexOf("-c");
-  const input = hybrid ? JSON.stringify({packagePath:config.qmdPackage, models:config.qmdModels, database:argv[2] === config.libraryIndex ? config.libraryDatabase : config.qmdDatabase, query:argv.at(-1), collection:collectionIndex < 0 ? undefined : argv[collectionIndex+1]}) : undefined;
-  const command = hybrid ? [config.nodeBinary, "--input-type=module", "--eval", worker + "\nawait main();"] : argv;
+export type QmdRequest = {
+  index: "vault" | "library";
+  mode: "lexical" | "semantic" | "hybrid";
+  query: string;
+  collection?: string;
+};
+export type QmdRun = (request: QmdRequest) => Promise<unknown>;
+export const runQmd = async (request: QmdRequest, config: Config): Promise<unknown> => {
+  const library = request.index === "library";
+  const input = request.mode === "hybrid" ? JSON.stringify({
+    packagePath:config.qmdPackage, models:config.qmdModels,
+    database:library ? config.libraryDatabase : config.qmdDatabase,
+    query:request.query, collection:request.collection,
+  }) : undefined;
+  const command = input
+    ? [config.nodeBinary, "--input-type=module", "--eval", worker + "\nawait main();"]
+    : [config.qmdBinary, "--index", library ? config.libraryIndex : config.qmdIndex,
+       request.mode === "lexical" ? "search" : "vsearch", "--json", "-n", "100",
+       ...(request.collection ? ["-c",request.collection] : []), "--",request.query];
   const child = Bun.spawn(command, { stdout: "pipe", stderr: "pipe", stdin: input ? new Blob([input]) : "ignore", env:{...process.env, HF_HUB_OFFLINE:"1"} });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const bounded = async (stream: ReadableStream<Uint8Array>) => {

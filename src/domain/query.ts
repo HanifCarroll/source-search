@@ -1,3 +1,4 @@
+import { isProjected, usesLibrary } from "./source-policy";
 import { fail } from "./identity";
 import { type Query, type RecordData } from "./contracts";
 export const groups = {
@@ -29,13 +30,12 @@ export function sortRecords(records: RecordData[], q: Query) {
 }
 export function validateOptions(q: Query) {
     const source = q.source;
-    const projected=["library","documents","things-archive","chatgpt-archive","takeout-archive","linkedin-archive","twitter-archive","messages","whatsapp","calls","mail-personal","mail-consulting","mail-fastmail"];
-    if(source==="library" || source==="documents" || q.mode && q.mode!=="lexical" && projected.includes(source)){
+    if(usesLibrary(q)){
         if(q.from || q.to || q.conversation || q.match || q.sections || q.types || q.roles || q.contentTypes || q.selectedBranch!==undefined || q.folders || q.excludeSpamTrash!==undefined || q.sort && q.sort!=="relevance")fail("UNSUPPORTED_FILTER","Hybrid library discovery supports mode and relevance only; use the native source without mode for exact filters");
         if(source.startsWith("mail-") && /(?:^|\s)(?:from|to|in|label|has|after|before|newer_than):/.test(q.query))fail("UNSUPPORTED_FILTER","Use native mail search without mode for Gmail query operators");
         return;
     }
-    if(q.mode && !["agent-history","vault",...projected].includes(source))fail("UNSUPPORTED_FILTER","Search mode is unavailable for this source");
+    if(q.mode && !["agent-history","vault"].includes(source) && !isProjected(source))fail("UNSUPPORTED_FILTER","Search mode is unavailable for this source");
     if(source === "vault" && (q.from || q.to || q.conversation || q.match || q.sections || q.types || (q.sort && q.sort!=="relevance")))fail("UNSUPPORTED_FILTER","QMD supports relevance ordering and mode only; use the original source readers for date/section filters");
     if(q.sections && (source.startsWith("mail-") || source === "agent-history"))fail("UNSUPPORTED_FILTER","Provider-native searches cannot filter text sections; read the record and inspect its match/section instead");
     if(source !== "chatgpt-archive" && (q.roles !== undefined || q.contentTypes !== undefined || q.selectedBranch !== undefined))fail("UNSUPPORTED_FILTER","Role, contentTypes and selectedBranch filters are available only for the ChatGPT export");

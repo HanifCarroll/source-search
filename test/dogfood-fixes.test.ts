@@ -76,7 +76,8 @@ test("download titles and local opening avoid hashed paths and signed links in t
  const db=new Database(join(root,"History"));db.exec("CREATE TABLE downloads(id INTEGER,start_time INTEGER,target_path TEXT);CREATE TABLE downloads_url_chains(id INTEGER,chain_index INTEGER,url TEXT)");db.query("INSERT INTO downloads VALUES(1,13348540800000000,?)").run(local);db.query("INSERT INTO downloads_url_chains VALUES(1,0,?)").run("https://chatgpt.com/backend-api/estuary/content?sig=PRIVATE_TOKEN");db.close();
  const p=await searchChrome(c,querySchema.parse({source:"chrome-downloads",query:""})),r=await readChrome(c,p.items[0].ref);
  expect(p.items[0].title).toBe("ChatGPT data export (ZIP)");expect(p.items[0].metadata?.openLink).toBe(local);expect(JSON.stringify(p)).not.toContain("PRIVATE_TOKEN");expect(p.items[0].excerpt.split(local)).toHaveLength(2);expect(compactRecord(r,true).metadata?.url).toContain("PRIVATE_TOKEN");
- await rm(local);expect(compactRecord(r).metadata?.openLink).toBeUndefined();
+ await rm(local);const missing=await readChrome(c,r.ref);
+ expect(compactRecord(missing).metadata?.openLink).toBeUndefined();expect(missing.ref).toEqual(r.ref);
 });
 
 test("calendar HTML and LinkedIn month dates use the shared projections with exact original fields retained",async()=>{

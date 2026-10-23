@@ -12,6 +12,11 @@ test('module dependencies keep transport and maintenance out of retrieval and do
  for(const path of await modules()){
   const name=relative(root,path);
   const code=ts.transpileModule(await readFile(path,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ESNext,module:ts.ModuleKind.ESNext}}).outputText;
+  if(name.startsWith('domain/')) {
+   const external=[...code.matchAll(/(?:from\s*|import\s*\(\s*|import\s+)["']([^.'"][^"']*)["']/g)].map(m=>m[1]!);
+   for(const dep of external)expect(dep,`${name} must remain free of source I/O`).not.toMatch(/^(?:node:)?(?:fs|child_process|net|http|https)(?:\/|$)|^bun:sqlite$/);
+   expect(code,`${name} must remain free of source I/O`).not.toMatch(/\b(?:Bun\.(?:spawn|file|write)|fetch)\s*\(/);
+  }
   const dependencies=[...code.matchAll(/(?:from\s*|import\s*\(\s*|import\s+)["'](\.[^"']+)["']/g)].map(m=>relative(root,resolve(dirname(path),m[1]!.replace(/\.ts$/,'')))+'.ts');
   graph.set(name,dependencies);
   const forbidden=name.startsWith('domain/') || name.startsWith('platform/') ? /^(application|interfaces|maintenance|search|sources)\// : name.startsWith('sources/') ? /^(application|interfaces|maintenance|search)\// : name.startsWith('search/') ? /^(application|interfaces|maintenance)\// : null;

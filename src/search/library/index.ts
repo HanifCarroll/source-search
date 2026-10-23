@@ -1,8 +1,9 @@
+import { isProjected } from "../../domain/source-policy";
 import { Database } from "bun:sqlite";
 import { readFile, lstat, access } from "node:fs/promises";
 import { join, relative, sep, isAbsolute, extname } from "node:path";
 import {sourceEnabled, requireSource, sourceScope, type Config} from "../../platform/config";
-import { libraryDB, getState, librarySources } from "./store";
+import { libraryDB } from "./store";
 import { archiveSignature, type ArchiveSource } from "../../sources/archives/originals";
 import { runQmd, type QmdRun } from "../qmd/runner";
 import { fail, hash, now, cursor, numberPosition, queryKey, assertVersion } from "../../domain/identity";
@@ -24,14 +25,14 @@ export async function libraryStatus(c:Config){
   return {available:(embeddings?.indexedDocuments||0)>0,modelsPresent,sources:sources.map(s=>({...s,embeddings:bySource[s.source]||{indexedDocuments:0,ready:0,pending:null}})),embeddings,coverage:"Derived text with original references. Ranked discovery; inspect per-source backfill/freshness. Mail excludes spam/trash. Exports reflect selected snapshots."};
  }finally{db.close();}
 }
-export async function searchLibrary(c:Config,q:Query,execute:QmdRun=argv=>runQmd(argv,c)):Promise<Page>{
+export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>runQmd(request,c)):Promise<Page>{
  requireSource(c,"library");requireSource(c,q.source);
  if(!c.libraryEnabled)fail("SOURCE_NOT_CONFIGURED","Library maintenance is not configured");
  if(!q.query.trim())fail("INVALID_QUERY","Library discovery requires a nonempty query");
  const mode=q.mode||"hybrid",status=await libraryStatus(c);
  if(!status.available)fail("SOURCE_NOT_READY","Initial library backfill has not produced searchable text yet");
  if(mode!=="lexical" && (!status.modelsPresent || !(q.source==="library"?status.embeddings?.ready:status.sources?.find(s=>s.source===q.source)?.embeddings?.ready)))fail("SOURCE_NOT_READY","Initial library embeddings are still building; lexical discovery is available after indexing");
- const raw=await execute([c.qmdBinary,"--index",c.libraryIndex,mode==="lexical"?"search":mode==="semantic"?"vsearch":"query","--json","-n","100",...(q.source!=="library"?["-c","ss-"+q.source]:[]),"--",q.query]);
+ const raw=await execute({index:"library",mode,query:q.query,...(q.source!=="library"?{collection:"ss-"+q.source}:{})});
  if(!Array.isArray(raw))fail("INVALID_PROVIDER_RESPONSE","QMD returned invalid library results");
  await regular(c.libraryDatabase);const db=libraryDB(c),index=new Database(c.libraryDatabase,{create:false,strict:true});index.exec("PRAGMA query_only=ON");
  const records:RecordData[]=[],warnings=["Derived search text; read returned references for provenance and verify originals before citing. Ranked candidates are not exhaustive."];
@@ -41,7 +42,7 @@ export async function searchLibrary(c:Config,q:Query,execute:QmdRun=argv=>runQmd
  try{for(const r of raw.slice(0,100)){
   if(typeof r.file!=="string"||typeof r.score!=="number")fail("INVALID_PROVIDER_RESPONSE","Invalid QMD hit");
   const m=/^qmd:\/\/ss-([a-z-]+)\/([a-f0-9]{64})\.md$/.exec(r.file);
-  if(!m || !sourceEnabled(c,m[1]!) || !librarySources.includes(m[1]!) || q.source!=="library" && m[1]!==q.source)continue;
+  if(!m || !sourceEnabled(c,m[1]!) || !isProjected(m[1]!) || q.source!=="library" && m[1]!==q.source)continue;
   const row=db.query("SELECT * FROM chunks WHERE id=? AND source=?").get(m[2]!,m[1]!) as any;
   const indexed=index.query("SELECT hash FROM documents WHERE active=1 AND collection=? AND path=?").get("ss-"+m[1],m[2]+".md") as any;
   if(row && JSON.parse(row.guard).scope!==sourceScope(c,row.source))continue;

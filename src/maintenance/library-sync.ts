@@ -1,17 +1,18 @@
+import { librarySources } from "../domain/source-policy";
 import {privateDirectory,markManagedCache} from "../platform/storage";
 /** Explicit maintenance entry point. Never imported by the read-only MCP gateway. */
-import { mkdir, lstat, readFile, rm } from "node:fs/promises";
+import { lstat, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { loadConfig, configPath, sourceEnabled, requireMaintenance, type Config } from "../platform/config";
+import { loadConfig, sourceEnabled, requireMaintenance, type Config } from "../platform/config";
 import { allDatabaseRecords } from "../sources/local/databases";
 import { allMessageRecords } from "../sources/messages/index";
 import { archiveSources, exportPaths, archiveSignature, exportProjectionVersion } from "../sources/archives/originals";
 import { rebuildArchive } from "../sources/archives/index";
 import { readMail, searchMail, run, type Run, type MailSource } from "../sources/mail/index";
 import { hash, now, errorData } from "../domain/identity";
-import { type RecordData, type Query } from "../domain/contracts";
-import { libraryDB, getState, setState, publish, privateJSON, librarySources } from "../search/library/store";
+import { type Query } from "../domain/contracts";
+import { libraryDB, getState, setState, publish, privateJSON } from "../search/library/store";
 
 export async function stampPaths(paths:string[]){const values=[];for(const p of paths){try{const s=await lstat(p);values.push([p,s.size,s.mtimeMs,s.ctimeMs,s.ino]);}catch(e){if((e as any).code!=="ENOENT")throw e;values.push([p,null]);}}return hash(JSON.stringify(values));}
 async function native(c:Config){

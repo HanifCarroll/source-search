@@ -1,9 +1,8 @@
 import { scanRecords } from "../../domain/scan";
-import { matchesQuery } from "../../domain/query";
-import { createSnapshot, decodeAttributedBody, messagesTimestampToIso } from "./reader";
+import { createSnapshot } from "../../platform/sqlite";
+import { decodeAttributedBody, messagesTimestampToIso } from "./reader";
 import type { Config } from "../../platform/config";
-import { fail, hash, now, queryKey, numberPosition, cursor, assertVersion } from "../../domain/identity";
-import { hit, matches, within } from "../../domain/results";
+import { fail, hash, now, assertVersion } from "../../domain/identity";
 import { type Query, type Page, type RecordData, type Ref } from "../../domain/contracts";
 import type { Database } from "bun:sqlite";
 

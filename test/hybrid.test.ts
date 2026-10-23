@@ -1,3 +1,4 @@
+import type { QmdRequest } from "../src/search/qmd/runner";
 import { test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
@@ -28,12 +29,12 @@ async function fixture() {
   return {c,dir,root,result};
 }
 test("QMD hybrid discovery preserves original paths, paginates, and refuses stale originals",async()=>{
- const {c,dir,root,result}=await fixture();const calls:string[][]=[];
+ const {c,dir,root,result}=await fixture();const calls:QmdRequest[]=[];
  try{
-  const execute=async(argv:string[])=>{calls.push(argv);return result;};
+  const execute=async(request:QmdRequest)=>{calls.push(request);return result;};
   const q=querySchema.parse({source:"vault",query:"learning from doing",limit:1});
   const first=await searchQmd(c,q,execute);expect(first.retrieval?.effectiveMode).toBe("hybrid");
-  expect(calls[0]).toContain("query");expect(calls[0]!.slice(-2)).toEqual(["--","learning from doing"]);
+  expect(calls[0]).toEqual({index:"vault",mode:"hybrid",query:"learning from doing"});
   expect((await readQmd(c,first.items[0]!.ref)).locator).toBe(join(root,"A Thought.md"));
   const second=await searchQmd(c,{...q,cursor:first.nextCursor},execute);expect(second.items[0]!.ref.id).toBe("qmd://notes/b-thought.md");expect(second.nextCursor).toBeUndefined();
   const doc=await readQmd(c,first.items[0]!.ref);expect(doc.body).toContain("Practice");

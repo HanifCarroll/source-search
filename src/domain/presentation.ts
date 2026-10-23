@@ -3,7 +3,6 @@ import { hash } from "./identity";
 import { type RecordData, type Page, type Query } from "./contracts";
 import { searchableText, words } from "./query";
 import { isAbsolute } from "node:path";
-import { lstatSync } from "node:fs";
 export function readableMail(text: string) {
     return /^\s*(?:<!doctype\s+html|<(?:html|body|div|table|p|span|head|b|a|ul|li|br|h[1-6])\b)/i.test(text) ? readableHtml(text) : text;
 }
@@ -14,10 +13,8 @@ export function excerpt(body: string, query: string) {
 }
 export function recordLink(r: RecordData) {
     const m = r.metadata;
-    if(r.ref.source === "chrome-downloads") {
-      if(typeof m?.downloadPath === "string" && isAbsolute(m.downloadPath))try{if(lstatSync(m.downloadPath).isFile())return m.downloadPath;}catch{}
-      return undefined;
-    }
+    if(r.ref.source === "chrome-downloads")
+      return typeof m?.openLink === "string" ? m.openLink : undefined;
     if(r.ref.source === "chatgpt-archive" && !m?.group && r.conversation && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(r.conversation))return `https://chatgpt.com/c/${r.conversation}`;
     if (r.ref.source === "mail-personal" || r.ref.source === "mail-consulting")
         return `https://mail.google.com/mail/u/?authuser=${encodeURIComponent(String(m?.account || ""))}#all/${r.conversation || r.ref.id}`;

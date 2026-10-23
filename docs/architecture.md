@@ -4,13 +4,13 @@ Source Search has one read interface: `createRuntime(config)` supplies source st
 
 ```
 src/
-  application/       Request routing, source catalogue, previews
+  application/       Source registration, request orchestration, catalogue, previews
   interfaces/        CLI, MCP transport, runtime reload
   domain/            Record/query contracts, matching, identity, pagination, presentation
-  platform/          Configuration, private cache storage, original-file access
+  platform/          Configuration, private storage, files, SQLite snapshots
   sources/
     mail/            Provider commands and mail records
-    messages/        Messages queries and attributed-body decoding
+    messages/        Messages queries, attributed-body decoding and timestamps
     local/           Journals, tasks, local databases, PIM, browser metadata
     archives/        Export indexing, original reads, per-export interpretation
     agent-history/   CASS search and original conversation reads
@@ -31,13 +31,21 @@ The four files directly in `src/` are compatibility entry points. `cli.ts`, `mcp
 
 `domain` and `platform` do not import source adapters, search, application, interfaces, or maintenance. They share the contracts and identity primitives that let every adapter return the same record and page shapes. The low-level vendor parsers are independent of the application.
 
-Source adapters implement native status, search, and record reads. Ranked search uses those original references to validate provenance. Application routing selects an adapter and applies shared presentation and response budgets. MCP exposes only the read interface; CLI additionally imports explicit maintenance commands.
+`application/source-access.ts` binds each source's status, native search, and original read in one exhaustive registration. It owns source checks, routing, the per-request mail preview allowance, and context retrieval. A new source cannot silently fall through to another source's implementation.
 
-Maintenance may use source readers and projection storage. The read interface cannot import maintenance. `test/architecture.test.ts` checks these import directions, runtime cycles, and the retrieval graph. Put new behavior in its owning module rather than adding a generic shared helper file.
+`application/runtime.ts` orchestrates requests: it expands groups, contains individual source failures, budgets combined results, paginates text, and writes requested previews. It calls source access through three operations: status, a search session, and an original read. CLI and MCP share this runtime; CLI additionally imports explicit maintenance commands.
+
+`domain/source-policy.ts` defines which sources can use library projections, how context participates in continuation, and which search routes have item-level cursors. Validation, routing, the catalogue, and maintenance use these same decisions. CASS context is part of the record body and must remain identical across continuation pages; other sources return neighboring records separately, on the first page.
+
+Library provenance validation uses original reads directly. It never recursively calls the public, formatted `read_record` response. A valid short library section can therefore be read even when an original has metadata too large for the response budget. Original version and enabled-source checks still apply.
+
+Presentation is a pure record-to-response transformation. Source adapters gather current availability information, such as whether a Chrome download still exists. That availability does not become part of the original record's version. Shared SQLite snapshots and column checks live in `platform/sqlite.ts`; Chrome and WhatsApp do not depend on Messages internals.
+
+Maintenance may use source readers and projection storage. The read interface cannot import maintenance. `test/architecture.test.ts` checks these import directions, runtime cycles, the retrieval graph, and the absence of direct file, network, or process access in domain modules. Put new behavior in its owning module rather than adding a generic shared helper file.
 
 ## Search engines
 
-CASS owns agent-history retrieval. QMD owns vault and library ranking. The QMD subprocess runner is shared by both adapters, keeping time and output budgets in one place. Lexical and semantic requests use the installed CLI. Hybrid requests use the version-pinned Node worker embedded in the Bun runtime, so reloads do not depend on temporary bundle-relative script paths.
+CASS owns agent-history retrieval. QMD owns vault and library ranking. The QMD subprocess runner accepts a typed request containing the target (`vault` or `library`), mode, query, and optional collection. It selects the database and constructs fixed command arguments itself, keeping process details, time limits, and output budgets out of both adapters. It does not infer the target from an index name or parse a caller-built command line. Lexical and semantic requests use the installed CLI. Hybrid requests use the version-pinned Node worker embedded in the Bun runtime, so reloads do not depend on temporary bundle-relative script paths.
 
 QMD's embedding tokenizer can underestimate the ranking model's input length. The hybrid worker measures complete ranking inputs, including query and template. Oversized passages are divided into windows; each candidate keeps its highest window score and original identity. One ranking context bounds GPU memory and prevents teardown while another ranking operation is still running. Errors remain errors; no lexical fallback substitutes for hybrid search.
 
@@ -52,3 +60,9 @@ Original files, account configuration, source samples, model files, and generate
 ## Verification
 
 Run `bun run check`, `bun test`, `bun run demo`, and `bun run test:python` in an environment with the locked extraction dependencies. Tests use invented records. Live source checks are a separate installation audit and their receipts stay private. The GitHub workflow runs tests on Linux and macOS.
+
+## Scope of the refactor
+
+The initial folder reorganization made the code easier to navigate but left source dispatch, context rules, provider commands, and formatting coupled. The current separation changes those interfaces and removes duplicate routing decisions. Regression tests cover provenance validation independent of formatting, projected-mail continuation policy, typed QMD execution, and download availability without record-version changes.
+
+The source adapters still own their different schemas and query semantics. We keep those differences explicit instead of imposing a generic provider framework. The catalogue remains a source-specific description of behavior, and archive formats keep their specialized parsers. Document extraction is optional and disabled unless explicitly enabled; disabling it does not remove original documents or emails.

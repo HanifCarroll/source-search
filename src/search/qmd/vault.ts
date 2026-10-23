@@ -55,13 +55,12 @@ function indexed(c: Config, db: Database, id: string): Indexed {
   if (!row) fail("STALE_RECORD", "QMD record no longer exists in the active index");
   return row;
 }
-export async function searchQmd(c: Config, input: Query, execute: QmdRun = argv => runQmd(argv, c)): Promise<Page> {
+export async function searchQmd(c: Config, input: Query, execute: QmdRun = request => runQmd(request, c)): Promise<Page> {
   const q = { ...input, mode: input.mode ?? "hybrid" };
   if (!q.query.trim()) fail("INVALID_QUERY", "QMD requires a nonempty discovery query");
   const state = await qmdStatus(c);
   if (!state.available || q.mode !== "lexical" && !state.semanticReady) fail("SOURCE_NOT_READY", "QMD embeddings/models are not ready; complete the explicit setup or request lexical mode");
-  const command = q.mode === "hybrid" ? "query" : q.mode === "semantic" ? "vsearch" : "search";
-  const raw = await execute([c.qmdBinary, "--index", c.qmdIndex, command, "--json", "-n", String(candidateLimit), "--", q.query]);
+  const raw = await execute({index:"vault",mode:q.mode,query:q.query});
   if (!Array.isArray(raw) || raw.some(r => typeof r.file !== "string" || typeof r.score !== "number")) fail("INVALID_PROVIDER_RESPONSE", "Invalid QMD search results");
   const paths = await originalPaths(c), db = open(c), records: RecordData[] = [], seen = new Set<string>();
   const warnings = ["Bounded ranked discovery: at most 100 candidates (QMD hybrid reranks up to 40). End of these pages does not mean the collection was exhaustively searched."];

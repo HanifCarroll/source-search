@@ -1,17 +1,10 @@
 import { scanRecords } from "../../domain/scan";
-import { matchesQuery } from "../../domain/query";
 import type { Database } from "bun:sqlite";
 import type { Config } from "../../platform/config";
-import { createSnapshot } from "../messages/reader";
-import { fail, now, versioned, assertVersion, queryKey, numberPosition, cursor } from "../../domain/identity";
-import { hit, matches, within } from "../../domain/results";
+import { createSnapshot, requireColumns } from "../../platform/sqlite";
+import { fail, now, versioned, assertVersion } from "../../domain/identity";
 import { type Query, type Ref, type RecordData, type Page } from "../../domain/contracts";
 
-export function requireColumns(db: Database, table: string, names: string[]) {
-  const columns = new Set((db.query(`PRAGMA table_info("${table}")`).all() as { name: string }[]).map(r => r.name));
-  if (names.some(n => !columns.has(n))) fail("UNSUPPORTED_SCHEMA", `Source table ${table} lacks required content columns`);
-  return columns;
-}
 function schema(db: Database, source: "whatsapp" | "calls") {
   if (source === "calls") { requireColumns(db, "meetings", ["id", "title", "start_time", "end_time", "raw_transcript", "formatted_notes", "manual_notes", "deleted_at"]); }
   else { requireColumns(db, "ZWAMESSAGE", ["Z_PK", "ZCHATSESSION", "ZSTANZAID", "ZMESSAGEDATE", "ZISFROMME", "ZTEXT", "ZFROMJID", "ZMEDIAITEM"]); requireColumns(db, "ZWACHATSESSION", ["Z_PK", "ZCONTACTJID", "ZPARTNERNAME"]); }
