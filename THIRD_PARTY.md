@@ -5,6 +5,13 @@ Source Search code is distributed under MIT. Dependencies keep their own license
 | Component | License / source |
 | --- | --- |
 | MCP TypeScript SDK | MIT; https://github.com/modelcontextprotocol/typescript-sdk |
+| html-to-text | MIT; https://github.com/html-to-text/node-html-to-text |
+| MailParser | MIT; https://github.com/nodemailer/mailparser |
+| ICAL.js | MPL-2.0; https://github.com/kewisch/ical.js (unmodified dependency; package includes its source and license) |
+| Temporal polyfill | ISC; https://github.com/js-temporal/temporal-polyfill |
+| zip.js | BSD-3-Clause; https://github.com/gildas-lormeau/zip.js |
+| protobuf.js | BSD-3-Clause; https://github.com/protobufjs/protobuf.js |
+| Parser types (development) | MIT; https://github.com/DefinitelyTyped/DefinitelyTyped |
 | Zod | MIT; https://github.com/colinhacks/zod |
 | TypeScript (development) | Apache-2.0; https://github.com/microsoft/TypeScript |
 | Bun types (development) | MIT; https://github.com/oven-sh/bun |

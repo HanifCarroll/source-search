@@ -43,9 +43,9 @@ async function archives(c:Config){
    if(!exportPaths(c,source).length){setState(db,source,{state:"waiting-for-export",records:0,chunks:0});continue;}
    try{
     const row=index.query("SELECT value FROM meta WHERE key=?").get(source) as any;const state=JSON.parse(row.value);
-    if(getState(db,source).signature===state.signature && getState(db,source).projectionFormat===2 && getState(db,source).state!=="error")continue;
+    if(getState(db,source).signature===state.signature && getState(db,source).projectionFormat===2 && getState(db,source).projectionVersion===exportProjectionVersion(source) && getState(db,source).state!=="error")continue;
     const records=(index.query("SELECT data,body FROM records WHERE source=? ORDER BY id").all(source) as any[]).map(r=>({...JSON.parse(r.data),body:r.body}));
-    await publish(c,source,records,{archive:source,signature:state.signature},{projectionFormat:2,signature:state.signature,state:"ready",error:null,checkedAt:now(),coverage:"Selected export snapshot only; no automatic account export"});
+    await publish(c,source,records,{archive:source,signature:state.signature},{projectionFormat:2,projectionVersion:exportProjectionVersion(source),signature:state.signature,state:"ready",error:null,checkedAt:now(),coverage:"Selected export snapshot only; no automatic account export"});
    }catch(e){setState(db,source,{...getState(db,source),state:"error",error:errorData(e),checkedAt:now()});}
   }
  }finally{index?.close();db.close();}
@@ -60,6 +60,20 @@ export async function syncMail(c:Config,execute:Run=command(c),sources:readonly 
   const accountSignature=hash(JSON.stringify(c.mailAccounts[source]));
   if(state.accountSignature && state.accountSignature!==accountSignature)throw Error("Mail account changed; purge caches before using a different account in this slot");
   try{
+   if(state.projectionVersion!==2){
+    // Re-project existing provider responses locally; unchanged summaries must
+    // not leave HTML bodies in an older format or trigger a full account fetch.
+    const cached=db.query("SELECT id FROM mail WHERE source=? ORDER BY id").all(source) as {id:string}[];
+    for(const {id} of cached){
+     const saved=JSON.parse(await readFile(join(c.libraryRoot,"mail-raw",source+"-"+id+".json"),"utf8"));
+     if(saved.source!==source || saved.id!==id || saved.accountSignature!==accountSignature)throw Error("Cached mail identity does not match the configured account");
+     const record=await readMail(source,id,async()=>saved.raw,c);
+     db.query("UPDATE mail SET data=? WHERE source=? AND id=?").run(JSON.stringify(record),source,id);
+    }
+    const records=(db.query("SELECT data FROM mail WHERE source=? ORDER BY id").all(source) as {data:string}[]).map(row=>JSON.parse(row.data));
+    await publish(c,source,records,{mail:source,accountSignature},{...state,projectionVersion:2});
+    state=getState(db,source);
+   }
    if(state.nextScanAt && Date.now()<state.nextScanAt)continue;
    state={...state,accountSignature,cycle:state.cycle||now(),state:"backfilling",error:null};
    const cacheItems=async(items:any[])=>{

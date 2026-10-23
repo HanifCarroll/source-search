@@ -148,6 +148,6 @@ test('LinkedIn archive shares search, pagination, original reads and MCP, and re
     await expect(rebuildArchive(c)).rejects.toThrow();expect(await readFile(c.index)).toEqual(previous);
     expect((await runtime.search_sources({queries:[{source:'linkedin-archive',query:'fixture'}]})).results[0].error?.code).toBe('INDEX_STALE');
     await writeFile(zip,await createZip([{path:'../Messages.csv',text:messages}]));
-    await expect(exportRecords(c,'linkedin-archive')).rejects.toThrow('unsafe');
+    await expect(exportRecords(c,'linkedin-archive')).rejects.toThrow(/unsafe/i);
   } finally {await client?.close();await rm(root,{recursive:true,force:true});}
 });

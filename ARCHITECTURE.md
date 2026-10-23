@@ -6,7 +6,7 @@ Readers preserve original references, versions, source-specific errors, bounded 
 
 Export rebuilds run on demand and include enabled sources. Successful rebuilds replace disposable indexes atomically. Library maintenance has a separate entry point and configuration setting. Derived reads and discovery enforce the originating source's enablement; disabling `library` blocks derived discovery even if native readers remain enabled.
 
-The native ZIP reader validates names, links, sizes and CRC. Document extraction is separate from retrieval and processes selected local files and eligible attachments. These parsers run with the user’s filesystem permissions.
+The zip.js adapter validates names, links, sizes and CRC. Document extraction is separate from retrieval and processes selected local files and eligible attachments. These parsers run with the user’s filesystem permissions.
 
 Cache files are plaintext and require private storage. Previews have size limits and are cleaned on subsequent preview access. Cache purging removes the default owned cache directory only after path checks. Custom paths require manual cleanup.
 

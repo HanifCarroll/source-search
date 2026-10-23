@@ -133,5 +133,5 @@ test("actual Takeout field aliases and nested MIME text remain searchable withou
   const r=await exportRecords(c,"takeout-archive"), values=[...r.records.values()];
   expect(values.find(r=>r.type==="maps-review")!.title).toBe("Fixture place"); expect(values.find(r=>r.title==="Fixture undated")!.occurredAt).toBeUndefined();
   const contribution=values.find(r=>r.type==="search-contribution")!; expect(contribution.title).toContain("Fixture question"); expect(contribution.occurredAt).toBe("2024-01-02T00:00:00.000Z");
-  const mail=values.find(r=>r.type==="email")!; expect(mail.body).toContain("Fixture nested original body"); expect(mail.body).not.toContain("U0VDUkVUX0FUVEFDSE1FTlQ="); expect(mail.metadata?.headers).toBeDefined(); expect(mail.warnings?.length).toBeGreaterThan(0); expect(r.warnings.some(w=>w.includes("Incomplete MIME"))).toBe(true);
+  const mail=values.find(r=>r.type==="email")!; expect(mail.body).toContain("Fixture nested original body"); expect(mail.body).not.toContain("U0VDUkVUX0FUVEFDSE1FTlQ="); expect(mail.metadata?.headers).toBeDefined(); expect(mail.body).toContain("malformed fixture MIME section"); expect(mail.body).not.toContain("SECRET_ATTACHMENT");
 });

@@ -1,6 +1,6 @@
 # Comparing parser libraries for Source Search
 
-2026-10-23. This follow-up tests alternatives to the initial [dependency review](dependency-review.md). All candidate installations and experiments were isolated from the application. No production dependency or source projection changed during this comparison.
+2026-10-23. This follow-up tests alternatives to the initial [dependency review](dependency-review.md). All candidate installations and experiments were isolated from the application. The comparison itself did not change production dependencies. The implementation described below followed it.
 
 ## Decisions
 
@@ -80,3 +80,13 @@ csv-parse and Papa Parse both handled standard quoted, multiline CSV. Neither cl
 5. Leave CSV unchanged unless a concrete streaming or correctness requirement outweighs the dialect migration cost.
 
 The installed candidate dependency set reported no known vulnerabilities in `bun audit` at review time. Licenses checked in the installed metadata: MIT (HTML/MIME/CSV candidates), MIT-0 (PostalMime), MPL-2.0 (ICAL.js), Apache-2.0 (node-ical), BSD-3-Clause (zip.js), ISC (yaml), and an MIT-or-GPL choice for JSZip. Retain dependency notices when distributing them. No claim here replaces an integration test or ongoing dependency updates.
+
+## Implemented integration
+
+The application now uses html-to-text, streaming MailParser, ICAL.js, zip.js and Bun YAML. The export-aware CSV parser remains. Temporal's polyfill supplies IANA-zone conversion from the runtime's timezone data; ICAL resolves embedded VTIMEZONE within each calendar. Floating and all-day values keep their original meaning. Recurrences are retained without expansion.
+
+WhatsApp poll receipt envelopes use a small protobuf.js schema for the question and options. ICAL.js also parses shared vCards. The adapter selects contact text fields, separates concatenated cards, and normalizes WhatsApp's unindented text continuations before parsing; binary photos and overloaded media fields are excluded.
+
+ZIP archives use file-backed BlobReader access, streamed archive/compressed hashes, strict local-header and overlap checks, CRC verification, and bounded output. Original entry identities remain path-based. MBOX entry bytes are still bounded and buffered; MailParser drains decoded attachments without retaining them. These changes do not implement a streaming MBOX archive iterator.
+
+Parser versions invalidate archive and WhatsApp projections. Saved mail responses are reformatted locally without fetching every message again. Regression tests cover checksums, ZIP64, unsafe paths, size limits, source changes, MIME charsets and attachments, calendar DST/custom zones, contact variants, poll decoding, and cache upgrades. All test records are invented.

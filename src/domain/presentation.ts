@@ -1,4 +1,4 @@
-import { readableHtml } from "../vendor/takeout/parsers";
+import { readableHtml } from "../formats/html";
 import { hash } from "./identity";
 import { type RecordData, type Page, type Query } from "./contracts";
 import { searchableText, words } from "./query";

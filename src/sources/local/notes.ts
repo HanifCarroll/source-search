@@ -1,3 +1,4 @@
+import {frontmatterFields} from "../../formats/frontmatter";
 import { readdir, lstat } from "node:fs/promises";
 import { join, relative, basename } from "node:path";
 import type { Config } from "../../platform/config";
@@ -28,7 +29,7 @@ export async function notesStatus(config: Config, source: Ref["source"]) { const
 export async function readNote(config: Config, ref: Ref): Promise<RecordData> {
   if (!note(basename(ref.id), ref.source)) fail("INVALID_REFERENCE", "Expected a retained transcript note");
   const path = await contained(root(config, ref.source), ref.id), body = await textFile(path);
-  const field = (name: string) => new RegExp(`^${name}:\\s*["']?([^"'\\n]+)`, "m").exec(body.startsWith("---") ? body.split("---")[1] : "")?.[1]?.trim();
+  const fields=frontmatterFields(body),field=(name:string)=>fields[name];
   const date = field("source_started_at") || field("date"), occurredAt = date && Number.isFinite(Date.parse(date)) ? /^\d{4}-\d{2}-\d{2}$/.test(date) ? date + "T00:00:00-03:00" : new Date(date).toISOString() : undefined;
   const r = versioned({ ref: { source: ref.source, id: ref.id }, body, title: basename(ref.id, ".md"), type: "reviewed-transcript-note", locator: path, occurredAt, observedAt: now(),
     metadata: { transcription: true, muesliMeetingId: field("source") === "muesli" && /^\d+$/.test(field("muesli_meeting_id") || "") ? field("muesli_meeting_id") : undefined, sourceLocator: field("source_audio") || field("source_locator"), backend: field("backend"), model: field("model"), datePrecision: date?.length === 10 ? "day" : "timestamp" }, warnings: ["This is the retained source note, not newly transcribed audio; its original quality warnings remain in the text."] });

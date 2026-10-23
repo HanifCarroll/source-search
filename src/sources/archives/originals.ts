@@ -18,7 +18,7 @@ import { type Ref, type RecordData } from "../../domain/contracts";
 
 export const archiveSources = ["things-archive", "chatgpt-archive", "takeout-archive", "linkedin-archive", "twitter-archive"] as const;
 export type ArchiveSource = typeof archiveSources[number];
-export const exportProjectionVersion=(source:ArchiveSource)=>source === "linkedin-archive" ? 5 : source === "twitter-archive" ? 3 : source === "takeout-archive" ? 2 : 1;
+export const exportProjectionVersion=(source:ArchiveSource)=>source === "linkedin-archive" ? 6 : source === "twitter-archive" ? 3 : source === "takeout-archive" ? 3 : 1;
 export function exportPaths(config:Config,source:ArchiveSource) {
   return source === "things-archive" ? [config.things] : source === "chatgpt-archive" ? config.chatgpt : source === "linkedin-archive" ? config.linkedin : source === "twitter-archive" ? config.twitter : config.takeout;
 }
@@ -124,7 +124,7 @@ export async function exportRecords(config: Config, source: ArchiveSource, only?
       for (const entry of zip.entries.filter(e => !e.isDirectory && (!only || e.path === only.entry))) {
         const classified = classifyTakeoutEntry(entry);
         if (classified.kind.startsWith("ignored")) { warnings.push(`Unsupported entry: ${basename(entry.path)}`); continue; }
-        const bytes = await zip.readEntry(entry), parsed = parseTakeoutEntry(classified, bytes, { archiveSha256: zip.archiveSha256, archiveBytes: zip.archiveBytes, importedAt: new Date(0), sourceAccountId: "selected-export", entry, entrySha256: entry.sha256! },only?.messageIndex);
+        const bytes = await zip.readEntry(entry), parsed = await parseTakeoutEntry(classified, bytes, { archiveSha256: zip.archiveSha256, archiveBytes: zip.archiveBytes, importedAt: new Date(0), sourceAccountId: "selected-export", entry, entrySha256: entry.sha256! },only?.messageIndex);
         if (parsed.incomplete) fail("INVALID_ARCHIVE", `Malformed export entry: ${entry.path}; old index retained`);
         if (parsed.warning) warnings.push(parsed.warning);
         for (const item of parsed.items) {

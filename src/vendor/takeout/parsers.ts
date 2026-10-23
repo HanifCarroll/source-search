@@ -1,3 +1,6 @@
+import {parseCalendarComponent,calendarDate} from "../../formats/calendar";
+import {parseMimeMessage} from "../../formats/mime";
+import {stripHtml,readableHtml} from "../../formats/html";
 import { createHash } from "node:crypto";
 import type { Participant, SourceItemDraft } from "../source-types";
 import type {
@@ -10,7 +13,6 @@ import type {
 import type { SafeZipEntry } from "./zip";
 
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
-const tolerantUtf8Decoder = new TextDecoder("utf-8");
 
 export function classifyTakeoutEntry(entry: SafeZipEntry): ClassifiedTakeoutEntry {
   const path = entry.path.replace(/^Takeout\//i, "");
@@ -32,15 +34,15 @@ export function classifyTakeoutEntry(entry: SafeZipEntry): ClassifiedTakeoutEntr
   return { entry, kind: "ignored-unsupported" };
 }
 
-export function parseTakeoutEntry(
+export async function parseTakeoutEntry(
   classified: ClassifiedTakeoutEntry,
   bytes: Uint8Array,
   context: TakeoutEntryContext,
   mailboxMessageIndex?: number,
-): ParsedTakeoutEntry {
+): Promise<ParsedTakeoutEntry> {
   switch (classified.kind) {
     case "mailbox":
-      return { items: parseMailbox(bytes, context, mailboxMessageIndex) };
+      return { items: await parseMailbox(bytes, context, mailboxMessageIndex) };
     case "settings":
       return { items: [], archiveOnly: parseAdministrativeSettings(bytes, context) };
     case "youtube-html":
@@ -167,9 +169,10 @@ function parseAdministrativeSettings(bytes: Uint8Array, context: TakeoutEntryCon
   };
 }
 
-function parseMailbox(bytes: Uint8Array, context: TakeoutEntryContext, only?:number): SourceItemDraft[] {
+async function parseMailbox(bytes: Uint8Array, context: TakeoutEntryContext, only?:number): Promise<SourceItemDraft[]> {
   if(only!==undefined && (!Number.isSafeInteger(only) || only<1 || only>200_000))throw Error("Invalid original mailbox message index");
-  const text = tolerantUtf8Decoder.decode(bytes);
+  // Latin-1 gives a one-to-one byte mapping for MBOX boundaries; MIME decodes each part's declared charset.
+  const text = Buffer.from(bytes).toString("latin1");
   const starts = [...text.matchAll(/^From [^\r\n]*(?:\r\n|\n|\r|$)/gm)].map((match) => match.index ?? 0);
   if (starts.length === 0) throw new Error(`Malformed MBOX ${context.entry.path}: no message separators found.`);
   const items: SourceItemDraft[] = [];
@@ -177,11 +180,13 @@ function parseMailbox(bytes: Uint8Array, context: TakeoutEntryContext, only?:num
   for (let index = 0; index < starts.length; index += 1) {
     const start = starts[index]!;
     const end = starts[index + 1] ?? text.length;
-    const rawMessage = text.slice(start, end);
-    const separatorEnd = rawMessage.search(/\r?\n|\r/);
+    const rawBytes = Buffer.from(text.slice(start,end),"latin1");
+    const rawMessage = rawBytes.toString("utf8");
+    const byteMessage = rawBytes.toString("latin1");
+    const separatorEnd = byteMessage.search(/\r?\n|\r/);
     if (separatorEnd < 0) throw new Error(`Malformed MBOX message ${index + 1} in ${context.entry.path}.`);
-    const separator = rawMessage.slice(0, separatorEnd);
-    const message = rawMessage.slice(separatorEnd + (rawMessage[separatorEnd] === "\r" && rawMessage[separatorEnd + 1] === "\n" ? 2 : 1));
+    const separator = Buffer.from(byteMessage.slice(0, separatorEnd),"latin1").toString("utf8");
+    const message = byteMessage.slice(separatorEnd + (byteMessage[separatorEnd] === "\r" && byteMessage[separatorEnd + 1] === "\n" ? 2 : 1));
     // Earlier headers determine duplicate Message-ID occurrences; MIME bodies need parsing only for the selected original.
     if(only!==undefined && index+1!==only){
       if(index+1>only)break;
@@ -189,7 +194,8 @@ function parseMailbox(bytes: Uint8Array, context: TakeoutEntryContext, only?:num
       const id=firstHeader(parseHeaders(message.slice(0,boundary),context.entry.path),"message-id")?.trim() || `sha256:${sha256(rawMessage)}`;
       identities.set(id,(identities.get(id) || 0)+1);continue;
     }
-    const parsed = parseMailMessage(message, context.entry.path, index + 1);
+    if(message.search(/\r?\n\r?\n|\r\n?\r/)<0)throw Error(`Malformed MBOX message ${index+1}: missing header/body boundary`);
+    const parsed = await parseMimeMessage(Buffer.from(message,"latin1"));
     const identityBase = parsed.messageId ?? `sha256:${sha256(rawMessage)}`;
     const occurrence = (identities.get(identityBase) ?? 0) + 1;
     identities.set(identityBase, occurrence);
@@ -242,58 +248,6 @@ function parseMailbox(bytes: Uint8Array, context: TakeoutEntryContext, only?:num
   return items;
 }
 
-type ParsedMailMessage = {
-  headers: Record<string, string[]>;
-  subject: string;
-  from: string;
-  to: string[];
-  labels: string[];
-  messageId?: string;
-  occurredAt?: Date;
-  dateValue?: string;
-  bodyText: string;
-  warnings: string[];
-  bodyHtml?: string;
-  participants: Participant[];
-};
-
-function parseMailMessage(message: string, path: string, index: number): ParsedMailMessage {
-  const separator = message.search(/\r?\n\r?\n|\r\n?\r/);
-  if (separator < 0) throw new Error(`Malformed MBOX message ${index} in ${path}: missing header/body boundary.`);
-  const boundaryLength = message[separator] === "\r" && message[separator + 1] === "\n" ? 4 : 2;
-  const headerText = message.slice(0, separator);
-  const body = message.slice(separator + boundaryLength);
-  const headers = parseHeaders(headerText, path);
-  const subject = decodeMimeHeader(firstHeader(headers, "subject") ?? "");
-  const from = formatAddresses(parseAddressList(firstHeader(headers, "from") ?? ""));
-  const toAddresses = [...parseAddressList(firstHeader(headers, "to") ?? ""), ...parseAddressList(firstHeader(headers, "cc") ?? "")];
-  const to = toAddresses.map((address) => address.displayName ? `${address.displayName} <${address.id}>` : address.id);
-  const labels = (firstHeader(headers, "x-gmail-labels") ?? "").split(",").map((label) => label.trim()).filter(Boolean);
-  const dateValue = firstHeader(headers, "date");
-  const timestamp = dateValue ? Date.parse(dateValue) : Number.NaN;
-  const warnings: string[] = [];
-  const mime = parseMimeContent(headers, body, warnings);
-  const participants = [
-    ...parseAddressList(firstHeader(headers, "from") ?? "", "author"),
-    ...toAddresses.map((address) => ({ ...address, role: "recipient" as const })),
-  ];
-  const messageIdHeader = firstHeader(headers, "message-id")?.trim();
-  return {
-    headers,
-    subject,
-    from,
-    to,
-    labels,
-    ...(messageIdHeader ? { messageId: messageIdHeader } : {}),
-    ...(Number.isFinite(timestamp) ? { occurredAt: new Date(timestamp) } : {}),
-    ...(dateValue ? { dateValue } : {}),
-    warnings,
-    bodyText: mime.text,
-    ...(mime.html ? { bodyHtml: mime.html } : {}),
-    participants,
-  };
-}
-
 function parseHeaders(text: string, path: string): Record<string, string[]> {
   const lines = text.split(/\r\n|\n|\r/);
   const headers: Record<string, string[]> = {};
@@ -312,107 +266,6 @@ function parseHeaders(text: string, path: string): Record<string, string[]> {
   }
   if (Object.keys(headers).length === 0) throw new Error(`Malformed MBOX message in ${path}: no headers.`);
   return headers;
-}
-
-function parseMimeContent(headers: Record<string, string[]>, body: string, warnings: string[] = []): { text: string; html?: string } {
-  const contentType = firstHeader(headers, "content-type") ?? "text/plain";
-  const mediaType = contentType.split(";", 1)[0]!.trim().toLowerCase();
-  if (mediaType !== "text/plain" && mediaType !== "text/html" && !mediaType.startsWith("multipart/")) {
-    return { text: "" };
-  }
-  const boundary = contentType.match(/boundary\s*=\s*(?:"([^"]+)"|([^;\s]+))/i)?.[1] ?? contentType.match(/boundary\s*=\s*(?:"([^"]+)"|([^;\s]+))/i)?.[2];
-  if (!boundary) {
-    const decoded = decodeTransferEncoding(body, firstHeader(headers, "content-transfer-encoding"));
-    return mediaType === "text/html" ? { text: stripHtml(decoded), html: decoded } : { text: decoded };
-  }
-  const parts = body.split(`--${boundary}`);
-  const candidates: Array<{ text: string; html?: string; kind: "plain" | "html" }> = [];
-  for (const part of parts.slice(1)) {
-    if (part.startsWith("--")) continue;
-    const boundaryIndex = part.search(/\r?\n\r?\n|\r\n?\r/);
-    if (boundaryIndex < 0) { if (part.trim()) warnings.push("Incomplete MIME part: missing header/body boundary; original retained in archive"); continue; }
-    const length = part[boundaryIndex] === "\r" && part[boundaryIndex + 1] === "\n" ? 4 : 2;
-    let childHeaders: Record<string, string[]>;
-    try { childHeaders = parseHeaders(part.slice(0, boundaryIndex), "MIME part"); }
-    catch { warnings.push("Incomplete MIME part: malformed headers; original retained in archive"); continue; }
-    const childBody = part.slice(boundaryIndex + length).replace(/\r?\n$/, "");
-    if (/\battachment\b/i.test(firstHeader(childHeaders, "content-disposition") ?? "")) continue;
-    const child = parseMimeContent(childHeaders, childBody, warnings);
-    const childType = firstHeader(childHeaders, "content-type") ?? "text/plain";
-    if (child.text.trim() && /^(?:text\/plain|text\/html|multipart\/[^;]+)(?:;|$)/i.test(childType.trim())) {
-      candidates.push({ ...child, kind: /^text\/html(?:;|$)/i.test(childType.trim()) || child.html ? "html" : "plain" });
-    }
-  }
-  const plain = candidates.find((candidate) => candidate.kind === "plain");
-  const html = candidates.find((candidate) => candidate.kind === "html");
-  return plain ?? html ?? { text: "" };
-}
-
-function decodeTransferEncoding(value: string, encoding: string | undefined): string {
-  if (encoding?.toLowerCase() === "base64") {
-    try {
-      return tolerantUtf8Decoder.decode(Buffer.from(value.replace(/\s/g, ""), "base64"));
-    } catch {
-      throw new Error("Malformed base64 MIME body.");
-    }
-  }
-  if (encoding?.toLowerCase() === "quoted-printable") return decodeQuotedPrintable(value);
-  return value;
-}
-
-function decodeQuotedPrintable(value: string): string {
-  const bytes: number[] = [];
-  for (let index = 0; index < value.length; index += 1) {
-    if (value[index] !== "=") {
-      bytes.push(value.charCodeAt(index) & 0xff);
-      continue;
-    }
-    if (value[index + 1] === "\r" && value[index + 2] === "\n") {
-      index += 2;
-      continue;
-    }
-    if (value[index + 1] === "\n") {
-      index += 1;
-      continue;
-    }
-    const hex = value.slice(index + 1, index + 3);
-    // Real Gmail exports can contain a literal equals sign in a body that is
-    // labelled quoted-printable. Preserve it and continue; the immutable raw
-    // message remains authoritative, and one malformed body must not abort the
-    // rest of an account export.
-    if (!/^[0-9a-f]{2}$/i.test(hex)) {
-      bytes.push("=".charCodeAt(0));
-      continue;
-    }
-    bytes.push(Number.parseInt(hex, 16));
-    index += 2;
-  }
-  return tolerantUtf8Decoder.decode(new Uint8Array(bytes));
-}
-
-function parseAddressList(value: string, role: Participant["role"] = "unknown"): Participant[] {
-  return value.split(",").map((part) => decodeMimeHeader(part.trim())).filter(Boolean).map((part) => {
-    const angle = part.match(/^(.*?)\s*<([^>]+)>$/);
-    const id = (angle?.[2] ?? part).trim();
-    const displayName = angle?.[1]?.replace(/^"|"$/g, "").trim() || undefined;
-    return { id, ...(displayName ? { displayName } : {}), role };
-  });
-}
-
-function formatAddresses(addresses: Participant[]): string {
-  return addresses.map((address) => address.displayName ? `${address.displayName} <${address.id}>` : address.id).join(", ");
-}
-
-function decodeMimeHeader(value: string): string {
-  return value.replace(/=\?([^?]+)\?([bq])\?([^?]+)\?=/gi, (_match, charset: string, encoding: string, payload: string) => {
-    try {
-      if (encoding.toLowerCase() === "b") return tolerantUtf8Decoder.decode(Buffer.from(payload, "base64"));
-      const bytes = payload.replace(/_/g, " ").replace(/=([0-9a-f]{2})/gi, (_hex, value: string) => String.fromCharCode(Number.parseInt(value, 16)));
-      return tolerantUtf8Decoder.decode(Buffer.from(bytes, "latin1"));
-    } catch {
-      return payload;
-    }
-  });
 }
 
 function parseYouTubeHistoryHtml(bytes: Uint8Array, context: TakeoutEntryContext): SourceItemDraft[] {
@@ -502,38 +355,26 @@ function parseYouTubeCsv(bytes: Uint8Array, context: TakeoutEntryContext): Sourc
 
 function parseCalendar(bytes: Uint8Array, context: TakeoutEntryContext): SourceItemDraft[] {
   const text = decodeUtf8(bytes, context.entry.path);
-  const lines = unfoldIcs(text);
-  if (lines[0]?.toUpperCase() !== "BEGIN:VCALENDAR" || !lines.some((line) => line.toUpperCase() === "END:VCALENDAR")) {
-    throw new Error(`Malformed iCalendar file ${context.entry.path}: missing VCALENDAR boundaries.`);
-  }
-  const events: string[][] = [];
-  let current: string[] | undefined;
-  for (const line of lines) {
-    if (line.toUpperCase() === "BEGIN:VEVENT") {
-      if (current) throw new Error(`Malformed iCalendar file ${context.entry.path}: nested VEVENT.`);
-      current = [line];
-    } else if (line.toUpperCase() === "END:VEVENT") {
-      if (!current) throw new Error(`Malformed iCalendar file ${context.entry.path}: stray END:VEVENT.`);
-      current.push(line);
-      events.push(current);
-      current = undefined;
-    } else if (current) current.push(line);
-  }
-  if (current) throw new Error(`Malformed iCalendar file ${context.entry.path}: unterminated VEVENT.`);
+  const calendar=parseCalendarComponent(text),events=calendar.getAllSubcomponents("vevent");
   const seen = new Map<string, number>();
   return events.map((event, index) => {
-    const properties = parseIcsProperties(event, context.entry.path);
+    const properties=new Map<string,IcsProperty[]>();
+    for(const property of event.getAllProperties()){
+      const values=properties.get(property.name)||[];
+      const params=Object.fromEntries(Object.entries(property.toJSON()[1]).map(([key,value])=>[key.toUpperCase(),String(value)]));
+      values.push({value:String(property.getFirstValue()??""),params});properties.set(property.name,values);
+    }
     const uid = firstProperty(properties, "uid") ?? `event-${index + 1}`;
     const occurrence = (seen.get(uid) ?? 0) + 1;
     seen.set(uid, occurrence);
-    const start = parseIcsDate(properties.get("dtstart")?.[0]);
-    const end = parseIcsDate(properties.get("dtend")?.[0]);
+    const start = calendarDate(event.getFirstProperty("dtstart"));
+    const end = calendarDate(event.getFirstProperty("dtend"));
     const summary = firstProperty(properties, "summary") ?? "Calendar event";
     const description = firstProperty(properties, "description");
     const location = firstProperty(properties, "location");
     const url = firstProperty(properties, "url");
     const participants = parseIcsParticipants(properties);
-    const sourceRecord = { eventIndex: index + 1, component: event.join("\r\n"), properties: Object.fromEntries([...properties.entries()].map(([key, values]) => [key, values.map((value) => value.value)])) };
+    const sourceRecord = { eventIndex: index + 1, component: event.toString(), properties: Object.fromEntries([...properties.entries()].map(([key, values]) => [key, values.map((value) => value.value)])) };
     return makeItem(context, {
       sourceItemId: itemId(context, "calendar-event", `${uid}#${occurrence}`),
       logicalId: `${context.entry.entryId}/calendar-event/${uid}#${occurrence}`,
@@ -560,130 +401,6 @@ function parseCalendar(bytes: Uint8Array, context: TakeoutEntryContext): SourceI
 }
 
 type IcsProperty = { value: string; params: Record<string, string> };
-
-function unfoldIcs(text: string): string[] {
-  const physical = text.replace(/^\uFEFF/, "").split(/\r\n|\n|\r/);
-  const logical: string[] = [];
-  for (const line of physical) {
-    if (line.startsWith(" ") || line.startsWith("\t")) {
-      if (!logical.length) throw new Error("Malformed iCalendar continuation line.");
-      logical[logical.length - 1] += line.slice(1);
-    } else if (line && logical.length && !isIcsPropertyStart(line)) {
-      // Some Google Takeout calendars omit the required leading space on a
-      // folded description line. Keep it attached to the prior property.
-      logical[logical.length - 1] += line;
-    } else if (line) logical.push(line);
-  }
-  return logical;
-}
-
-function isIcsPropertyStart(line: string): boolean {
-  const boundary = line.search(/[;:]/);
-  return boundary > 0 && /^[A-Z0-9-]+$/i.test(line.slice(0, boundary));
-}
-
-function parseIcsProperties(event: string[], path: string): Map<string, IcsProperty[]> {
-  const properties = new Map<string, IcsProperty[]>();
-  for (const line of event.slice(1, -1)) {
-    const colon = findIcsDelimiter(line, ":");
-    if (colon <= 0) throw new Error(`Malformed iCalendar property in ${path}: ${line.slice(0, 60)}.`);
-    const [name, ...paramParts] = splitIcsParameters(line.slice(0, colon));
-    const params: Record<string, string> = {};
-    for (const part of paramParts) {
-      const equal = part.indexOf("=");
-      if (equal <= 0) throw new Error(`Malformed iCalendar parameter in ${path}: ${part}.`);
-      params[part.slice(0, equal).toUpperCase()] = part.slice(equal + 1).replace(/^"|"$/g, "");
-    }
-    const key = name!.toLowerCase();
-    const values = properties.get(key) ?? [];
-    values.push({ value: unescapeIcs(line.slice(colon + 1)), params });
-    properties.set(key, values);
-  }
-  return properties;
-}
-
-function findIcsDelimiter(value: string, delimiter: ":" | ";"): number {
-  let quoted = false;
-  let escaped = false;
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index]!;
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (character === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (character === '"') {
-      quoted = !quoted;
-      continue;
-    }
-    if (!quoted && character === delimiter) return index;
-  }
-  return -1;
-}
-
-function splitIcsParameters(value: string): string[] {
-  const parts: string[] = [];
-  let remainder = value;
-  while (remainder.length > 0) {
-    const delimiter = findIcsDelimiter(remainder, ";");
-    if (delimiter < 0) {
-      parts.push(remainder);
-      break;
-    }
-    parts.push(remainder.slice(0, delimiter));
-    remainder = remainder.slice(delimiter + 1);
-  }
-  return parts;
-}
-
-function parseIcsDate(property: IcsProperty | undefined): { date?: Date; raw: string; allDay: boolean; metadata: Record<string, unknown> } | undefined {
-  if (!property) return undefined;
-  const raw = property.value;
-  const allDay = property.params.VALUE?.toUpperCase() === "DATE" || /^\d{8}$/.test(raw);
-  const dateMatch = raw.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z|[+-]\d{4})?)?$/);
-  if (!dateMatch) return { raw, allDay, metadata: { raw, ...(property.params.TZID ? { timezone: property.params.TZID } : {}) } };
-  const [, year, month, day, hour = "00", minute = "00", second = "00", zone] = dateMatch;
-  const timezone = property.params.TZID;
-  const metadata = { raw, allDay, ...(zone ? { zone } : {}), ...(timezone ? { timezone } : {}) };
-  // Floating times and dates have no instant without an external timezone.
-  if (allDay || (!zone && !timezone)) return { raw, allDay, metadata };
-  let milliseconds = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second));
-  if (zone && zone !== "Z") {
-    const sign = zone.startsWith("-") ? -1 : 1;
-    const offset = (Number(zone.slice(1, 3)) * 60 + Number(zone.slice(3, 5))) * 60_000;
-    milliseconds -= sign * offset;
-  } else if (!zone && timezone) {
-    try {
-      milliseconds = zonedIcsMilliseconds(milliseconds, timezone);
-    } catch (error) {
-      if (!(error instanceof RangeError)) throw error;
-      // Unknown/custom VTIMEZONE identifiers retain their source wall time.
-      return { raw, allDay, metadata: { ...metadata, unresolvedTimezone: true } };
-    }
-  }
-  const date = new Date(milliseconds);
-  return { date, raw, allDay, metadata: { ...metadata, iso: date.toISOString() } };
-}
-
-function zonedIcsMilliseconds(wallTime: number, timeZone: string): number {
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
-  });
-  const offsetAt = (instant: number): number => {
-    const parts = Object.fromEntries(formatter.formatToParts(instant).map(({ type, value }) => [type, Number(value)]));
-    return Date.UTC(parts.year!, parts.month! - 1, parts.day!, parts.hour!, parts.minute!, parts.second!) - instant;
-  };
-  const before = offsetAt(wallTime - 86_400_000);
-  const after = offsetAt(wallTime + 86_400_000);
-  const candidates = [...new Set([before, after])].map((offset) => wallTime - offset)
-    .filter((instant) => instant + offsetAt(instant) === wallTime).sort((a, b) => a - b);
-  // RFC 5545: first occurrence in a fold; pre-transition offset in a gap.
-  return candidates[0] ?? wallTime - before;
-}
 
 function parseIcsParticipants(properties: Map<string, IcsProperty[]>): Participant[] {
   const participants: Participant[] = [];
@@ -1044,20 +761,8 @@ function youtubeSearchQuery(url: string): string | undefined {
   }
 }
 
-export function stripHtml(value: string): string {
-  return decodeHtmlEntities(value.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h[1-6])\b[^>]*>/gi, "\n").replace(/<script\b[\s\S]*?<\/script>/gi, "").replace(/<style\b[\s\S]*?<\/style>/gi, "").replace(/<[^>]+>/g, " "));
-}
-export function readableHtml(value:string) {
-  return /<(?:html|body|div|table|p|span|a|br|b|strong|ul|li|h[1-6])\b[^>]*>/i.test(value) ? stripHtml(value).replace(/[ \t]+/g," ").replace(/\n\s*\n\s*\n/g,"\n\n").trim() : value;
-}
-
 function decodeHtmlEntities(value: string): string {
-  const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
-  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (_match, entity: string) => {
-    if (entity.toLowerCase().startsWith("#x")) return String.fromCodePoint(Number.parseInt(entity.slice(2), 16));
-    if (entity.startsWith("#")) return String.fromCodePoint(Number.parseInt(entity.slice(1), 10));
-    return named[entity.toLowerCase()] ?? _match;
-  });
+  return stripHtml(value.replaceAll("<","&lt;").replaceAll(">","&gt;"));
 }
 
 function decodeUtf8(bytes: Uint8Array, path: string): string {
@@ -1090,10 +795,6 @@ function firstHeader(headers: Record<string, string[]>, key: string): string | u
 
 function firstProperty(properties: Map<string, IcsProperty[]>, key: string): string | undefined {
   return properties.get(key)?.[0]?.value;
-}
-
-function unescapeIcs(value: string): string {
-  return value.replace(/\\n/gi, "\n").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\\\/g, "\\");
 }
 
 function toBase64(bytes: Uint8Array): string {

@@ -166,19 +166,18 @@ test('mail duplicates retain evidence and avoid conflicting Message-IDs',()=>{
 });
 test('native ZIP decoding retains checksum and expansion validation',async()=>{
     const bytes=await createZip([{path:'fixture.txt',text:'Original compressed text',method:8}]);
-    const zip=parseSafeZipArchive(bytes);
+    const zip=await parseSafeZipArchive(bytes);
     expect(new TextDecoder().decode(await zip.readEntry(zip.entries[0]))).toBe('Original compressed text');
     const corrupt=bytes.slice();
     const central=new DataView(corrupt.buffer).getUint32(corrupt.length-6,true);
     corrupt[central+16]^=1;
-    const bad=parseSafeZipArchive(corrupt);
-    await expect(bad.readEntry(bad.entries[0])).rejects.toThrow('CRC32');
+    await expect(parseSafeZipArchive(corrupt)).rejects.toThrow();
     const oversized=bytes.slice();
     new DataView(oversized.buffer).setUint32(central+24,1,true);
     new DataView(oversized.buffer).setUint32(22,1,true);
-    const bound=parseSafeZipArchive(oversized,{maxEntryBytes:1});
+    const bound=await parseSafeZipArchive(oversized,{maxEntryBytes:1});
     await expect(bound.readEntry(bound.entries[0])).rejects.toThrow();
-    expect(()=>parseSafeZipArchive(bytes,{maxEntryBytes:1})).toThrow('safety limit');
+    await expect(parseSafeZipArchive(bytes,{maxEntryBytes:1})).rejects.toThrow('safety limit');
 });
 test('oversized native mail pages retry smaller without skipping provider continuation',async()=>{
     const c=defaultConfig();

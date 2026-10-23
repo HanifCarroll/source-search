@@ -48,3 +48,5 @@ Before adopting this release from an older private installation, configure the s
 If an update fails, keep maintenance stopped and return to the recorded public commit or a preserved installation. Restore matching dependencies and configuration. Restore cache snapshots only if the update changed their format. Original source files stay in place.
 
 Hybrid QMD search now uses the configured `nodeBinary` and `qmdPackage` directly. Keep QMD at 1.0.7 for this adapter. Existing CLI, MCP and refresh launch paths are unchanged; implementation modules moved into the folders described in [architecture](docs/architecture.md).
+
+Parser upgrades also refresh WhatsApp polls/contact cards and affected export projections during the next explicit maintenance run. Existing cached mail is reformatted from saved responses. Allow the library update and embedding steps to finish before checking semantic coverage. No new source configuration is needed.

@@ -72,11 +72,11 @@ test("X archive runtime searches, paginates, opens originals/context and refuses
 
 
 test("native X ZIP directory variants accept empty deflate but retain path, data and CRC checks",async()=>{
- const archive=parseSafeZipArchive(await createZip([{path:"data/",text:"",method:8},{path:"assets//",text:"",method:8}]));
+ const archive=await parseSafeZipArchive(await createZip([{path:"data/",text:"",method:8},{path:"assets//",text:"",method:8}]));
  expect(archive.entries.every(e=>e.isDirectory)).toBe(true);expect(await archive.readEntry(archive.entries[0]!)).toHaveLength(0);
- const bad=await createZip([{path:"data/",text:"not empty",method:8}]);expect(()=>parseSafeZipArchive(bad)).toThrow("file data");
- const bytes=await createZip([{path:"data/",text:"",method:8}]);const corrupted=new Uint8Array(bytes);corrupted[35]=255;expect(()=>parseSafeZipArchive(corrupted)).toThrow();
- for(const path of ["../data/","assets/../","assets//images/","/data/"]){const bytes=await createZip([{path,text:"",method:8}]);expect(()=>parseSafeZipArchive(bytes)).toThrow("unsafe");}
+ const bad=await createZip([{path:"data/",text:"not empty",method:8}]);await expect(parseSafeZipArchive(bad)).rejects.toThrow("file data");
+ const bytes=await createZip([{path:"data/",text:"",method:8}]);const corrupted=new Uint8Array(bytes);corrupted[35]=255;await expect(parseSafeZipArchive(corrupted)).rejects.toThrow();
+ for(const path of ["../data/","assets/../","assets//images/","/data/"]){const bytes=await createZip([{path,text:"",method:8}]);await expect(parseSafeZipArchive(bytes)).rejects.toThrow(/unsafe/i);}
 });
 
 

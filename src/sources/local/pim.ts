@@ -3,7 +3,7 @@ import { runLocalCass } from "../../vendor/cass/runner";
 import { fail, now, queryKey, position, cursor, stableJson, versioned, assertVersion } from "../../domain/identity";
 import { querySchema, type Query, type Ref, type RecordData } from "../../domain/contracts";
 import { recordPage } from "../../domain/pages";
-import { readableHtml } from "../../vendor/takeout/parsers";
+import { readableHtml } from "../../formats/html";
 
 export async function helper(config: Config, args: string[]) {
   if (!["status", "calendar", "contacts"].includes(args[0])) fail("INVALID_REQUEST", "Only native read commands are available");

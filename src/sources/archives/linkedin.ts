@@ -1,5 +1,6 @@
 import { basename } from "node:path";
-import { parseCsv, readableHtml, stripHtml } from "../../vendor/takeout/parsers";
+import { parseCsv } from "../../vendor/takeout/parsers";
+import {readableHtml,stripHtml} from "../../formats/html";
 import { fail, hash, now, versioned } from "../../domain/identity";
 import { type RecordData, type TextSection } from "../../domain/contracts";
 

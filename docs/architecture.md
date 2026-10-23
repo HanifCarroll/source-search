@@ -70,3 +70,9 @@ The source adapters still own their different schemas and query semantics. We ke
 The [dependency review](dependency-review.md) identifies standards parsers that should replace handwritten parsing, with tested examples and migration boundaries.
 
 Native database projections carry a version as well as a source fingerprint. Changing how stored text is interpreted therefore refreshes unchanged databases too. WhatsApp reads include stored photo, video and GIF captions; filenames and link-preview titles are not treated as authored captions. Coverage counts distinguish entries with searchable text from entries without supported text in the local store. Library embedding warnings apply only to the selected sources.
+
+## Format parsing
+
+`formats/` contains pure text-format adapters: HTML conversion, MIME parsing, calendar dates and YAML frontmatter. Source adapters choose records and attach provenance; format adapters handle the shared syntax. Calendar dates use ICAL.js for calendar-local VTIMEZONE definitions and Temporal for IANA identifiers. No process-global timezone registry is changed.
+
+The Takeout ZIP wrapper retains application limits and stable entry hashes around zip.js. WhatsApp's source module owns its optional native-table joins and structured-message projection. Polls use a restricted protobuf schema; contact text uses ICAL's vCard parser. Changes to these projections invalidate the corresponding maintenance caches.
