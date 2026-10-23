@@ -67,7 +67,7 @@ export async function loadSafeZipArchive(input:string|Uint8Array,options:ZipSafe
     if(length!==end-start)throw Error('ZIP archive changed while hashing.');
     return hash.digest('hex');
   };
-  const reader=new ZipReader(new BlobReader(blob),{checkCrc32:true,checkAmbiguity:true,filenameValidation:'balanced',useWebWorkers:false});
+  const reader=new ZipReader(await archiveReader(blob),{checkCrc32:true,checkAmbiguity:true,filenameValidation:'balanced',useWebWorkers:false});
   const entries:SafeZipEntry[]=[],native=new Map<string,FileEntry>();
   let totalDeclaredUncompressedBytes=0;
   try{
@@ -117,6 +117,41 @@ export async function loadSafeZipArchive(input:string|Uint8Array,options:ZipSafe
   }
 }
 export const parseSafeZipArchive=loadSafeZipArchive;
+
+// Some exporters include a ZIP64 footer even when every value fits in the
+// legacy footer. zip.js 2.24 only consumes it when a legacy sentinel requests
+// ZIP64. Validate the redundant values, then supply that sentinel in the read
+// view. Payloads and hashes still use the original bytes; strict checks stay on.
+async function archiveReader(blob:Blob):Promise<BlobReader>{
+  const reader=new BlobReader(blob),start=Math.max(0,blob.size-65633);
+  const tail=new Uint8Array(await blob.slice(start,blob.size).arrayBuffer());
+  const v=new DataView(tail.buffer,tail.byteOffset,tail.byteLength);
+  for(let end=tail.length-22;end>=76;end--){
+    if(v.getUint32(end,true)!==0x06054b50 || end+22+v.getUint16(end+20,true)!==tail.length)continue;
+    const footer=end-76;
+    if(v.getUint32(footer,true)!==0x06064b50 || v.getUint32(end-20,true)!==0x07064b50)return reader;
+    if([4,6,8,10].some(o=>v.getUint16(end+o,true)===0xffff) || [12,16].some(o=>v.getUint32(end+o,true)===0xffffffff))return reader;
+    const valid=v.getBigUint64(footer+4,true)===44n &&
+      v.getUint16(end+4,true)===0 && v.getUint16(end+6,true)===0 &&
+      v.getUint32(footer+16,true)===0 && v.getUint32(footer+20,true)===0 &&
+      v.getBigUint64(footer+24,true)===BigInt(v.getUint16(end+8,true)) &&
+      v.getBigUint64(footer+32,true)===BigInt(v.getUint16(end+10,true)) &&
+      v.getBigUint64(footer+40,true)===BigInt(v.getUint32(end+12,true)) &&
+      v.getBigUint64(footer+48,true)===BigInt(v.getUint32(end+16,true)) &&
+      v.getUint32(end-16,true)===0 && v.getBigUint64(end-12,true)===BigInt(start+footer) && v.getUint32(end-4,true)===1;
+    if(!valid)throw Error('Inconsistent optional ZIP64 footer.');
+    const patch=start+end+6,read=reader.readUint8Array.bind(reader);
+    reader.readUint8Array=async(index,length)=>{
+      const bytes=await read(index,length);
+      if(index<patch+2 && index+bytes.length>patch){
+        const view=bytes.slice();for(let p=patch;p<patch+2;p++)if(p>=index && p<index+view.length)view[p-index]=0xff;return view;
+      }
+      return bytes;
+    };
+    return reader;
+  }
+  return reader;
+}
 async function extract(entry:FileEntry,limit:number){
   const chunks:Uint8Array[]=[];let length=0;
   await entry.getData(new WritableStream<Uint8Array>({write(chunk){

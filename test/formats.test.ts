@@ -92,3 +92,11 @@ test('large file-backed ZIP slice hashing completes without a Bun stream stall',
   const child=Bun.spawn([process.execPath,script],{stdout:'pipe',stderr:'pipe',timeout:5000});expect(await child.exited).toBe(0);
  }finally{await rm(root,{recursive:true,force:true});}
 },10000);
+
+test('optional ZIP64 footers without legacy sentinel fields remain strict and preserve original hashes',async()=>{
+ const writer=new ZipWriter(new Uint8ArrayWriter(),{zip64:true,useWebWorkers:false});await writer.add('fixture.txt',new TextReader('Optional ZIP64 footer'));
+ const bytes=await writer.close(),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),end=bytes.length-22,footer=end-76;
+ view.setUint16(end+4,0,true);view.setUint16(end+6,0,true);view.setUint16(end+8,Number(view.getBigUint64(footer+24,true)),true);view.setUint16(end+10,Number(view.getBigUint64(footer+32,true)),true);view.setUint32(end+12,Number(view.getBigUint64(footer+40,true)),true);view.setUint32(end+16,Number(view.getBigUint64(footer+48,true)),true);
+ const zip=await parseSafeZipArchive(bytes);expect(new TextDecoder().decode(await zip.readEntry(zip.entries[0]!))).toBe('Optional ZIP64 footer');expect(zip.archiveSha256).toBe(createHash('sha256').update(bytes).digest('hex'));
+ for(const offset of [end+10,end+12,end+16,footer+16,footer+64]){const bad=bytes.slice();bad[offset]^=1;await expect(parseSafeZipArchive(bad)).rejects.toThrow();}
+});

@@ -8,6 +8,7 @@ src/
   interfaces/        CLI, MCP transport, runtime reload
   domain/            Record/query contracts, matching, identity, pagination, presentation
   platform/          Configuration, private storage, files, SQLite snapshots
+  formats/           HTML, MIME, calendar and YAML format adapters
   sources/
     mail/            Provider commands and mail records
     messages/        Messages queries, attributed-body decoding and timestamps
@@ -61,14 +62,6 @@ Original files, account configuration, source samples, model files, and generate
 
 Run `bun run check`, `bun test`, `bun run demo`, and `bun run test:python` in an environment with the locked extraction dependencies. Tests use invented records. Live source checks are a separate installation audit and their receipts stay private. The GitHub workflow runs tests on Linux and macOS.
 
-## Scope of the refactor
-
-The initial folder reorganization made the code easier to navigate but left source dispatch, context rules, provider commands, and formatting coupled. The current separation changes those interfaces and removes duplicate routing decisions. Regression tests cover provenance validation independent of formatting, projected-mail continuation policy, typed QMD execution, and download availability without record-version changes.
-
-The source adapters still own their different schemas and query semantics. We keep those differences explicit instead of imposing a generic provider framework. The catalogue remains a source-specific description of behavior, and archive formats keep their specialized parsers. Document extraction is optional and disabled unless explicitly enabled; disabling it does not remove original documents or emails.
-
-The [dependency review](dependency-review.md) identifies standards parsers that should replace handwritten parsing, with tested examples and migration boundaries.
-
 Native database projections carry a version as well as a source fingerprint. Changing how stored text is interpreted therefore refreshes unchanged databases too. WhatsApp reads include stored photo, video and GIF captions; filenames and link-preview titles are not treated as authored captions. Coverage counts distinguish entries with searchable text from entries without supported text in the local store. Library embedding warnings apply only to the selected sources.
 
 ## Format parsing
@@ -76,3 +69,5 @@ Native database projections carry a version as well as a source fingerprint. Cha
 `formats/` contains pure text-format adapters: HTML conversion, MIME parsing, calendar dates and YAML frontmatter. Source adapters choose records and attach provenance; format adapters handle the shared syntax. Calendar dates use ICAL.js for calendar-local VTIMEZONE definitions and Temporal for IANA identifiers. No process-global timezone registry is changed.
 
 The Takeout ZIP wrapper retains application limits and stable entry hashes around zip.js. WhatsApp's source module owns its optional native-table joins and structured-message projection. Polls use a restricted protobuf schema; contact text uses ICAL's vCard parser. Changes to these projections invalidate the corresponding maintenance caches. The MCP runtime fingerprint includes package.json and bun.lock so dependency-only updates also rebuild the retrieval bundle. Transport dependencies load when the client reconnects.
+
+The ZIP adapter keeps strict archive checks enabled. It validates redundant optional ZIP64 footer values before requesting ZIP64 interpretation from zip.js; original bytes and hashes are preserved. Library status includes failed maintenance stages even when an older searchable projection remains available.

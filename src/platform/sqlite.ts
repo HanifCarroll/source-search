@@ -1,4 +1,4 @@
-// Snapshot logic adapted from LifeOS; provenance is recorded in REUSE.md.
+// Snapshot logic adapted from LifeOS; provenance is recorded in THIRD_PARTY.md.
 import { Database } from "bun:sqlite";
 import { copyFile, lstat, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

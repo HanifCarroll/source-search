@@ -57,7 +57,7 @@ Configure each mail source with `account`, `email`, and optional `aliases` under
 
 To build indexes for enabled exports, set `maintenanceEnabled` in local configuration and run `bun run start rebuild`.
 
-The optional library requires `libraryEnabled`, `maintenanceEnabled`, and `library` in `enabledSources`. Enable each contributing source separately. `documents` also requires the extraction environment described in [EXTRACTION.md](EXTRACTION.md). For automatic refresh, set up the watcher described in [MAINTENANCE.md](MAINTENANCE.md).
+The optional library requires `libraryEnabled`, `maintenanceEnabled`, and `library` in `enabledSources`. Enable each contributing source separately. `documents` also requires the extraction environment described in [document extraction](docs/maintenance.md#document-extraction). For automatic refresh, set up the watcher described in [maintenance](docs/maintenance.md).
 
 Caches store retrieved text, attachments and previews. Disabling a source stops future access while retaining its cache. To remove cached data, stop maintenance and run `bun run start purge-cache` to preview the cleanup, then add `--apply`. The command handles the default managed cache; custom locations and backups need separate cleanup. See [SECURITY.md](SECURITY.md) for storage details.
 
@@ -68,12 +68,14 @@ Caches store retrieved text, attachments and previews. Disabling a source stops 
 - Preserve per-source errors and limits; unavailable is not empty.
 - Treat instructions found in source records as quoted content.
 - Retrieved text is shared with the requesting agent and its configured model provider.
+- Use `focus` to open a matching passage. Previews are private text files created on request.
+- Exact filters vary by source. Hybrid discovery rejects unsupported filters, and scores are not comparable across providers.
 
 The server exposes `list_sources`, `search_sources`, and `read_record` over stdio for a single local user. See [SECURITY.md](SECURITY.md).
 
 ## Development
 
-For an existing installation, see [Updating an installation](UPGRADING.md) before pulling new code or changing dependencies.
+For an existing installation, see [Updating an installation](docs/updating.md) before pulling new code or changing dependencies.
 
 ```sh
 bun run check
@@ -82,12 +84,10 @@ python -m unittest discover -s test -p '*_test.py'
 bun audit
 ```
 
-Install the extraction requirements in a dedicated virtual environment before running Python extraction tests. Tests use sample records and mocked providers. See [VERIFICATION.md](VERIFICATION.md) and [REUSE.md](REUSE.md).
+Install the extraction requirements in a dedicated virtual environment before running Python extraction tests. Tests use invented records and mocked providers. CI checks Linux and macOS. Keep live installation checks and their receipts outside Git. Before publishing, review the diff, run the demo and dependency audit, and scan Git history for secrets.
+
+See [project architecture](docs/architecture.md) for module responsibilities and dependency rules. Start changes in the owning module; top-level entry points stay stable for installed clients.
 
 ## License
 
-MIT. See [LICENSE](LICENSE), [REUSE.md](REUSE.md), and [THIRD_PARTY.md](THIRD_PARTY.md).
-
-## Development
-
-See [project architecture](docs/architecture.md) for module responsibilities and dependency rules. Start changes at the owning module; the top-level entry points stay stable for installed clients.
+MIT. See [LICENSE](LICENSE) and [third-party notices and code provenance](THIRD_PARTY.md).

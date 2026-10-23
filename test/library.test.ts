@@ -115,3 +115,20 @@ test('parser upgrades reformat cached mail locally even while provider scan is d
   try{expect(getState(updated,source)).toMatchObject({state:'ready',projectionVersion:2});expect(JSON.stringify(updated.query('SELECT body FROM chunks').all())).toContain('café — test');}finally{updated.close();}
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+
+test('maintenance failures override old ready coverage only for affected enabled sources',async()=>{
+ const {setState}=await import('../src/search/library/store');const {describeSource}=await import('../src/application/catalogue');
+ const root=await mkdtemp(join(tmpdir(),'ss-maintenance-status-')),c={...defaultConfig(),libraryRoot:root,libraryEnabled:true,libraryDatabase:join(root,'qmd.sqlite')};
+ try{
+  await publish(c,'whatsapp',[rec('1','Fixture')],{},{state:'ready'});
+  await publish(c,'twitter-archive',[{...rec('2','Archive fixture'),ref:{source:'twitter-archive',id:'2',version:'2'}}],{},{state:'ready'});
+  const manifest=libraryDB(c,true);setState(manifest,'maintenance-archives',{state:'error',error:{code:'ERROR',message:'Fixture archive failure'},checkedAt:'fixture'});const rows=manifest.query('SELECT * FROM chunks').all() as any[];manifest.close();
+  const db=new Database(c.libraryDatabase);db.exec('CREATE TABLE documents(collection,path,hash,active);CREATE TABLE content_vectors(hash)');
+  for(const row of rows){db.query('INSERT INTO documents VALUES(?,?,?,1)').run('ss-'+row.source,row.id+'.md',row.hash);db.query('INSERT INTO content_vectors VALUES(?)').run(row.hash);}db.close();
+  const status=await libraryStatus(c);expect(status.sources?.find(s=>s.source==='twitter-archive')).toMatchObject({state:'error',error:{message:'Fixture archive failure'}});
+  expect(describeSource(c,{source:'library',...status}).state).toBe('partial');
+  for(const source of ['library','twitter-archive','whatsapp']){const page=await searchLibrary(c,querySchema.parse({source,query:'fixture',mode:'lexical'}),async()=>[]);expect(page.status).toBe(source==='whatsapp'?'ok':'partial');}
+  const restricted={...c,enabledSources:['library','whatsapp'] as typeof c.enabledSources};const selected=await libraryStatus(restricted);expect(selected.state).toBe('ready');expect(JSON.stringify(selected)).not.toContain('Fixture archive failure');
+ }finally{await rm(root,{recursive:true,force:true});}
+});

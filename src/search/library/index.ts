@@ -1,4 +1,4 @@
-import { isProjected } from "../../domain/source-policy";
+import { isProjected, librarySources } from "../../domain/source-policy";
 import { Database } from "bun:sqlite";
 import { readFile, lstat, access } from "node:fs/promises";
 import { join, relative, sep, isAbsolute, extname } from "node:path";
@@ -16,13 +16,20 @@ export async function libraryStatus(c:Config){
  const modelsPresent=c.qmdModels.length===3 && (await Promise.all(c.qmdModels.map(p=>access(p).then(()=>true,()=>false)))).every(Boolean);
  const db=libraryDB(c);
  try{
-  const sources=(db.query("SELECT source,data FROM states").all() as any[]).filter(r=>sourceEnabled(c,r.source)).map(r=>({source:r.source,...JSON.parse(r.data)})).map(({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,coverage,error,failures,skipped,pending,discovered})=>({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,coverage,error,failedFiles:failures?.length||0,skippedFiles:skipped?.length||0,pending:Array.isArray(pending)?pending.length:pending,discovered}));
+  const states=new Map((db.query("SELECT source,data FROM states").all() as any[]).map(r=>[r.source,JSON.parse(r.data)]));
+  const sources=librarySources.filter(source=>sourceEnabled(c,source)).flatMap(source=>{
+    const stage=source.endsWith('-archive')?'archives':source.startsWith('mail-')?'mail':source==='documents'?'documents':'native';
+    const failure=states.get('maintenance-'+stage),saved=states.get(source);
+    if(!saved && !failure)return [];
+    return [{source,...saved,...(failure?.state==='error'?{state:'error',error:failure.error,checkedAt:failure.checkedAt}:{})}];
+  }).map(({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,coverage,error,failures,skipped,pending,discovered})=>({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,coverage,error,failedFiles:failures?.length||0,skippedFiles:skipped?.length||0,pending:Array.isArray(pending)?pending.length:pending,discovered}));
   let embeddings:any={ready:0,pending:0};const bySource:Record<string,any>={};
   try{await regular(c.libraryDatabase);const q=new Database(c.libraryDatabase,{create:false,strict:true});q.exec("PRAGMA query_only=ON");try{embeddings=q.query("SELECT count(*) indexedDocuments,sum(EXISTS(SELECT 1 FROM content_vectors v WHERE v.hash=d.hash)) ready,sum(NOT EXISTS(SELECT 1 FROM content_vectors v WHERE v.hash=d.hash)) pending FROM documents d WHERE active=1").get();
     for(const row of q.query("SELECT collection,count(*) indexedDocuments,sum(EXISTS(SELECT 1 FROM content_vectors v WHERE v.hash=d.hash)) ready,sum(NOT EXISTS(SELECT 1 FROM content_vectors v WHERE v.hash=d.hash)) pending FROM documents d WHERE active=1 GROUP BY collection").all() as any[])bySource[row.collection.replace(/^ss-/,"")]=row;
    }finally{q.close();}}catch(e){embeddings={ready:0,pending:null,error:(e as Error).message};}
   if(!embeddings.error)embeddings=sources.reduce((a,s)=>{const e=bySource[s.source]||{};return {indexedDocuments:a.indexedDocuments+(e.indexedDocuments||0),ready:a.ready+(e.ready||0),pending:a.pending+(e.pending||0)};},{indexedDocuments:0,ready:0,pending:0});
-  return {available:(embeddings?.indexedDocuments||0)>0,modelsPresent,sources:sources.map(s=>({...s,embeddings:bySource[s.source]||{indexedDocuments:0,ready:0,pending:null}})),embeddings,coverage:"Derived text with original references. Ranked discovery; inspect per-source backfill/freshness. Mail excludes spam/trash. Exports reflect selected snapshots."};
+  const available=(embeddings?.indexedDocuments||0)>0;
+  return {available,state:!available?"building":sources.some(s=>s.state!=="ready") || embeddings.error || embeddings.pending?"partial":"ready",modelsPresent,sources:sources.map(s=>({...s,embeddings:bySource[s.source]||{indexedDocuments:0,ready:0,pending:null}})),embeddings,coverage:"Derived text with original references. Ranked discovery; inspect per-source backfill/freshness. Mail excludes spam/trash. Exports reflect selected snapshots."};
  }finally{db.close();}
 }
 export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>runQmd(request,c)):Promise<Page>{
