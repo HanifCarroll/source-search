@@ -73,6 +73,8 @@ The server exposes only `list_sources`, `search_sources`, and `read_record` over
 
 ## Development
 
+For an existing installation, see [Updating an installation](UPGRADING.md) before pulling new code or changing dependencies.
+
 ```sh
 bun run check
 bun test
