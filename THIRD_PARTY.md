@@ -1,6 +1,6 @@
 # Third-party components
 
-Source Search code is distributed under MIT. Dependencies keep their own licenses. The lockfiles identify exact versions; installing dependencies does not relicense them under the project's MIT license.
+Source Search code is distributed under MIT. Dependencies keep their own licenses. The lockfiles identify exact versions.
 
 | Component | License / source |
 | --- | --- |
@@ -17,6 +17,4 @@ Source Search code is distributed under MIT. Dependencies keep their own license
 | Soup Sieve | MIT; https://github.com/facelessuser/soupsieve |
 | typing-extensions | PSF-2.0; https://github.com/python/typing_extensions |
 
-This source repository does not redistribute dependency wheels, provider binaries or models. If you distribute a standalone binary or image containing these dependencies, retain their license files and notices, including PDFium's bundled component licenses. Review licenses for separately installed QMD, CASS, mail tools, Tesseract, transcription tools and models for the specific versions/builds you distribute.
-
-PyMuPDF is not a dependency of this release. Existing personal installations are not modified by this repository.
+If you distribute a standalone binary or image containing these dependencies, retain their license files and notices, including PDFium's bundled component licenses. Review licenses for separately installed QMD, CASS, mail tools, Tesseract, transcription tools and models for the specific versions/builds you distribute.

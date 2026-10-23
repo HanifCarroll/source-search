@@ -1,11 +1,11 @@
 # Retrieval behavior
 
-Source groups expand to individual queries. Disabled sources return `SOURCE_DISABLED`; they are never silently re-enabled by group expansion, a direct record reference, or a library hit.
+Source groups expand to individual queries. Disabled sources return `SOURCE_DISABLED` for group queries, direct references and library hits.
 
-Search results distinguish content matches, title/name matches, provider previews and metadata. A filename is not evidence about a file's contents. Open the original before synthesizing an answer.
+Search results distinguish content matches, title/name matches, provider previews and metadata. Open the original to answer questions about its contents.
 
-`focus` opens the matching passage. `nextCursor` continues bounded text or search pages. Changed source versions fail explicitly. A failed or partial source is not a successful empty result.
+`focus` opens the matching passage. `nextCursor` continues bounded text or search pages. Changed source versions return an error. Results report failures and partial coverage separately from empty matches.
 
-Native filters vary by adapter. Provider-native search does not silently substitute a semantic query. Hybrid/library discovery rejects unsupported exact filters. Scores are not globally comparable across providers.
+Native filters vary by adapter. Select semantic search with the `mode` option. Hybrid/library discovery rejects unsupported exact filters. Scores are not globally comparable across providers.
 
-Previews are explicit private text files, not source edits. Browser history and download records are metadata; resource links require their own authorized reader.
+Previews are private text files created on request. Browser history and download records contain metadata; open linked resources with the appropriate reader.
