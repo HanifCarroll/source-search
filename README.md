@@ -49,9 +49,9 @@ Search/read also accept JSON on stdin. Register MCP with the absolute Bun execut
 | `vault` | QMD collections, index and installed models |
 | `library`, `documents` | Enable these and their contributing sources; configure maintenance |
 
-Adapters were developed against CASS 0.10.0 and QMD 1.0.7. The embedding adapter requires QMD 1.0.7 because it uses internal APIs. Mail tools need the commands and response formats in `src/mail.ts`, including `gog --gmail-no-send` and mailbridge paginated search.
+Adapters were developed against CASS 0.10.0 and QMD 1.0.7. The hybrid and embedding adapters require QMD 1.0.7 because they use its internal APIs. Mail tools need the commands and response formats in `src/sources/mail/index.ts`, including `gog --gmail-no-send` and mailbridge paginated search.
 
-Configure each mail source with `account`, `email`, and optional `aliases` under `mailAccounts`. Executable paths are configurable; see `src/config.ts` for the full schema. Use absolute paths and the listed configuration fields.
+Configure each mail source with `account`, `email`, and optional `aliases` under `mailAccounts`. Executable paths are configurable; see `src/platform/config.ts` for the full schema. Use absolute paths and the listed configuration fields.
 
 ## Maintenance and retention
 
@@ -87,3 +87,7 @@ Install the extraction requirements in a dedicated virtual environment before ru
 ## License
 
 MIT. See [LICENSE](LICENSE), [REUSE.md](REUSE.md), and [THIRD_PARTY.md](THIRD_PARTY.md).
+
+## Development
+
+See [project architecture](docs/architecture.md) for module responsibilities and dependency rules. Start changes at the owning module; the top-level entry points stay stable for installed clients.

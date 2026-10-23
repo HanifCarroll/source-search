@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {embedDocuments} from '../scripts/embed-library-batches.mjs';
+import {embedDocuments} from '../src/maintenance/embeddings/batches.mjs';
 
 const items = [{hash:'one', texts:['a','b']}, {hash:'two', texts:['c']}, {hash:'one', texts:['duplicate']}, {hash:'three', texts:['d','e','f']}];
 const prepare = async item => item;

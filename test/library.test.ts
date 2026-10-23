@@ -4,10 +4,10 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {Database} from "bun:sqlite";
 import {defaultConfig} from "./helpers/config";
-import {makeChunks,publish,libraryDB} from "../src/library-store";
-import {readLibrary,searchLibrary,libraryStatus} from "../src/library";
-import {querySchema,type RecordData} from "../src/shared";
-import {validateOptions} from "../src/query";
+import {makeChunks,publish,libraryDB} from "../src/search/library/store";
+import {readLibrary,searchLibrary,libraryStatus} from "../src/search/library/index";
+import { querySchema, type RecordData } from "../src/domain/contracts";
+import {validateOptions} from "../src/domain/query";
 const rec=(id:string,body:string):RecordData=>({ref:{source:"whatsapp",id,version:id},title:"Synthetic chat",body,type:"message",locator:"synthetic",author:"Fixture speaker",conversation:"fixture",occurredAt:"2026-01-01T00:00:00Z",observedAt:"synthetic"});
 test("projections preserve every passage, source reference and section, and bound conversation groups",()=>{
  const records=Array.from({length:45},(_,i)=>rec(String(i),"Invented message "+i));records.push({...rec("long","z".repeat(31000)),sections:[{kind:"generated",start:0,end:31000}]});
@@ -49,7 +49,7 @@ test("hybrid never silently ignores exact filters or switches provider syntax",(
 });
 
 test("mail maintenance resumes failures and prunes only after a complete provider inventory",async()=>{
- const {syncMail}=await import("../src/library-sync");const {getState,setState}=await import("../src/library-store");
+ const {syncMail}=await import("../src/maintenance/library-sync");const {getState,setState}=await import("../src/search/library/store");
  const root=await mkdtemp(join(tmpdir(),"ss-mail-sync-")),c={...defaultConfig(),libraryRoot:root,libraryEnabled:true};await mkdir(join(root,"mail-raw"));
  let pass=0,failSecond=false;const calls:string[][]=[];
  const execute=async(argv:string[])=>{
@@ -66,5 +66,22 @@ test("mail maintenance resumes failures and prunes only after a complete provide
   pass=1;failSecond=true;await syncMail(c,execute,["mail-personal"]);db=libraryDB(c);expect((db.query("SELECT count(*) n FROM mail").get() as any).n).toBe(2);expect(getState(db,"mail-personal").state).toBe("error");db.close();
   failSecond=false;await syncMail(c,execute,["mail-personal"]);db=libraryDB(c);expect((db.query("SELECT count(*) n FROM mail").get() as any).n).toBe(1);expect(getState(db,"mail-personal").state).toBe("ready");db.close();
   expect(calls.every(c=>!c.some(v=>["send","delete","archive","modify","trash"].includes(v)))).toBe(true);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('book exclusion also covers old extracted records and their library projections',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'ss-book-policy-'));
+ try{
+  const c={...defaultConfig(),libraryEnabled:true,libraryRoot:root,libraryDatabase:join(root,'qmd.sqlite')};
+  const original:RecordData={ref:{source:'documents',id:'synthetic-book',version:'v1'},title:'Invented book.epub',body:'Synthetic book text',type:'extracted-document',locator:'fixture',observedAt:'fixture',metadata:{origin:{name:'Invented book.epub',path:join(root,'book.epub')}}};
+  await writeFile(join(root,'documents.json'),JSON.stringify({records:[original]}));
+  const {readDocument}=await import('../src/search/library/index');
+  await expect(readDocument(c,original.ref)).rejects.toThrow('Book format excluded');
+  await publish(c,'documents',[original],{});
+  const db=libraryDB(c),rows=db.query('SELECT * FROM chunks').all() as any[];db.close();
+  const qmd=new Database(c.libraryDatabase);qmd.exec('CREATE TABLE documents(collection,path,hash,active);CREATE TABLE content_vectors(hash)');
+  for(const row of rows)qmd.query('INSERT INTO documents VALUES(?,?,?,1)').run('ss-documents',row.id+'.md',row.hash);qmd.close();
+  const page=await searchLibrary(c,querySchema.parse({source:'library',query:'synthetic',mode:'lexical'}),async()=>rows.map(row=>({file:`qmd://ss-documents/${row.id}.md`,score:1,snippet:'Synthetic book text'})));
+  expect(page.items).toHaveLength(0);
  }finally{await rm(root,{recursive:true,force:true});}
 });

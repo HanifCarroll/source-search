@@ -1,8 +1,8 @@
 import {mkdtemp,writeFile,rm} from "node:fs/promises";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
-import {defaultConfig} from "../src/config";
-import {createRuntime} from "../src/runtime";
+import {defaultConfig} from "../src/platform/config";
+import {createRuntime} from "../src/application/runtime";
 const directory=await mkdtemp(join(tmpdir(),"source-search-demo-"));
 try {
   await writeFile(join(directory,"2024-01-01.md"),"# Invented journal\n\nThe violet comet is a synthetic example.\n",{mode:0o600});

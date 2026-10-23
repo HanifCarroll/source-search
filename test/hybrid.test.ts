@@ -4,11 +4,12 @@ import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultConfig } from "./helpers/config";
-import { querySchema, hash } from "../src/shared";
-import { annotateDuplicates, progress } from "../src/presentation";
-import { validateOptions } from "../src/query";
-import { qmdPath, qmdStatus, searchQmd, readQmd } from "../src/qmd";
-import { searchCass, readCass } from "../src/cass";
+import { querySchema } from "../src/domain/contracts";
+import { hash } from "../src/domain/identity";
+import { annotateDuplicates, progress } from "../src/domain/presentation";
+import { validateOptions } from "../src/domain/query";
+import { qmdPath, qmdStatus, searchQmd, readQmd } from "../src/search/qmd/vault";
+import { searchCass, readCass } from "../src/sources/agent-history/index";
 import type { CassRunnerRequest } from "../src/vendor/cass/contracts";
 
 async function fixture() {

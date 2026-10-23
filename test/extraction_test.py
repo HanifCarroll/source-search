@@ -1,6 +1,8 @@
 import importlib.util, tempfile, unittest, json, zipfile
 from pathlib import Path
-spec=importlib.util.spec_from_file_location('extract',Path(__file__).parent.parent/'scripts/extract-documents.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'src'))
+from maintenance.documents import pipeline as m, formats
 def fixture_pdf(path,pages,width=612,height=792):
  objects=[b'<< /Type /Catalog /Pages 2 0 R >>',b'',b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'];kids=[]
  for text in pages:
@@ -41,9 +43,9 @@ class ExtractionTests(unittest.TestCase):
   self.assertEqual(failures,[]);self.assertEqual(records,[{**entry,'source':'takeout-archive'}])
  def test_pdf_pages_docx_headings_and_html_no_script(self):
   from docx import Document
-  p=self.source/'invented.pdf';fixture_pdf(p,['Synthetic violet comet','Invented second page']);text,_=m.extract(p,self.cache);self.assertIn('## Page 2',text);self.assertIn('violet comet',text)
-  p=self.source/'invented.docx';d=Document();d.add_heading('Fixture heading',1);d.add_paragraph('Invented prose');d.save(p);text,_=m.extract(p,self.cache);self.assertIn('# Fixture heading',text);self.assertIn('Invented prose',text)
-  p=self.source/'invented.html';p.write_text('<h1>Fixture</h1><p>Visible prose</p><script>hiddenCode</script>');text,_=m.extract(p,self.cache);self.assertIn('Visible prose',text);self.assertNotIn('hiddenCode',text)
+  p=self.source/'invented.pdf';fixture_pdf(p,['Synthetic violet comet','Invented second page']);text,_=formats.extract(p,self.cache);self.assertIn('## Page 2',text);self.assertIn('violet comet',text)
+  p=self.source/'invented.docx';d=Document();d.add_heading('Fixture heading',1);d.add_paragraph('Invented prose');d.save(p);text,_=formats.extract(p,self.cache);self.assertIn('# Fixture heading',text);self.assertIn('Invented prose',text)
+  p=self.source/'invented.html';p.write_text('<h1>Fixture</h1><p>Visible prose</p><script>hiddenCode</script>');text,_=formats.extract(p,self.cache);self.assertIn('Visible prose',text);self.assertNotIn('hiddenCode',text)
  def test_snapshot_incremental_edit_delete_and_missing_root(self):
   p=self.source/'fixture.txt';p.write_text('Synthetic text');config={'maintenanceEnabled':True,'enabledSources':['documents'],'documentRoots':[str(self.source)],'libraryRoot':str(self.cache)};(self.cache/'mail-raw').mkdir()
   m.main(config);first=json.loads((self.cache/'documents.json').read_text());self.assertEqual(len(first['records']),1)
@@ -58,7 +60,7 @@ class ExtractionTests(unittest.TestCase):
   self.assertEqual(m.inventory({'documentRoots':[str(self.source)],**{k:[str(z)] for k in ('chatgpt','linkedin','takeout','twitter')}}),([],[]))
   self.assertFalse((self.root.parent/'outside.txt').exists())
  def test_book_length_pdf_is_skipped_and_stays_skipped(self):
-  p=self.source/'invented-book.pdf';fixture_pdf(p,[f'Invented page {n}' for n in range(m.BOOK_PAGES+1)]);config={'maintenanceEnabled':True,'enabledSources':['documents'],'documentRoots':[str(self.source)],'libraryRoot':str(self.cache)};(self.cache/'mail-raw').mkdir()
+  p=self.source/'invented-book.pdf';fixture_pdf(p,[f'Invented page {n}' for n in range(formats.BOOK_PAGES+1)]);config={'maintenanceEnabled':True,'enabledSources':['documents'],'documentRoots':[str(self.source)],'libraryRoot':str(self.cache)};(self.cache/'mail-raw').mkdir()
   for _ in range(2):
    m.main(config);result=json.loads((self.cache/'documents.json').read_text())
    self.assertEqual((result['records'],result['failures']),([],[]));self.assertIn('page budget',result['skipped'][0]['reason'])
@@ -77,9 +79,10 @@ class ExtractionTests(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,'disabled'):m.main({'documentRoots':['/does-not-exist'],'libraryRoot':str(self.cache)})
  def test_disabled_mail_source_does_not_download_old_attachment(self):
   raw=self.cache/'mail-raw';raw.mkdir();(raw/'fixture.json').write_text(json.dumps({'source':'mail-personal','id':'fixture','raw':{'message':{'payload':{'filename':'fixture.txt','body':{'attachmentId':'synthetic','size':3}}}}}))
-  old=m.command;m.command=lambda *a,**k:self.fail('disabled provider invoked')
+  from maintenance.documents import inventory as inputs
+  old=inputs.command;inputs.command=lambda *a,**k:self.fail('disabled provider invoked')
   try:self.assertEqual(m.mail_attachments({'enabledSources':['documents']},self.cache),([],[]))
-  finally:m.command=old
+  finally:inputs.command=old
  def test_isolated_worker_enforces_output_bound(self):
   p=self.source/'large.txt';p.write_text('a'*(4*1024*1024+1))
   with self.assertRaisesRegex(ValueError,'4 MB'):m.isolated_extract(p,self.cache,{})
@@ -87,17 +90,17 @@ class ExtractionTests(unittest.TestCase):
   link=self.root/'linked';link.symlink_to(self.cache)
   with self.assertRaisesRegex(ValueError,'links'):m.private_dir(link)
  def test_pdf_ocr_uses_rendered_page_and_cleans_temporary_image(self):
-  p=self.source/'blank.pdf';fixture_pdf(p,['']);old=m.command;calls=[]
+  p=self.source/'blank.pdf';fixture_pdf(p,['']);old=formats.command;calls=[]
   def ocr(args,*a,**k):
    from PIL import Image
    with Image.open(args[1]) as image:self.assertGreater(image.width,100)
    calls.append(args);return b'Synthetic recognized text'
-  m.command=ocr
+  formats.command=ocr
   try:
-   text,warnings=m.extract(p,self.cache,{'tesseractBinary':'/synthetic/ocr'})
+   text,warnings=formats.extract(p,self.cache,{'tesseractBinary':'/synthetic/ocr'})
    self.assertIn('Synthetic recognized text',text);self.assertTrue(warnings);self.assertEqual(calls[0][0],'/synthetic/ocr');self.assertEqual(list(self.cache.glob('ocr-*')),[])
-  finally:m.command=old
+  finally:formats.command=old
  def test_huge_pdf_page_fails_before_render(self):
   p=self.source/'huge.pdf';fixture_pdf(p,[''],100000,100000)
-  with self.assertRaisesRegex(ValueError,'pixel budget'):m.extract(p,self.cache)
+  with self.assertRaisesRegex(ValueError,'pixel budget'):formats.extract(p,self.cache)
 if __name__=='__main__':unittest.main()

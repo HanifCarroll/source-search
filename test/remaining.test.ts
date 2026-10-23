@@ -4,14 +4,14 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, chmod } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultConfig, type Config } from "./helpers/config";
-import { createRuntime } from "../src/runtime";
-import { querySchema, type Ref } from "../src/shared";
-import { rebuildArchive } from "../src/archive";
-import { exportRecords } from "../src/exports";
-import { searchCass, readCass, cassStatus } from "../src/cass";
+import { createRuntime } from "../src/application/runtime";
+import { querySchema, type Ref } from "../src/domain/contracts";
+import { rebuildArchive } from "../src/sources/archives/index";
+import { exportRecords } from "../src/sources/archives/originals";
+import { searchCass, readCass, cassStatus } from "../src/sources/agent-history/index";
 import type { CassRunnerRequest } from "../src/vendor/cass/contracts";
 import { createZip } from "./helpers/zip";
-import { notesStatus } from "../src/files";
+import { notesStatus } from "../src/sources/local/notes";
 let root: string, c: Config;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "source-search-more-"));

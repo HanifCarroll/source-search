@@ -4,16 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { defaultConfig } from "./helpers/config";
-import { createRuntime } from "../src/runtime";
-import { querySchema, textPage, assertPacket } from "../src/shared";
-import { matchesQuery } from "../src/query";
-import { readableMail, compactRecord, annotateDuplicates } from "../src/presentation";
-import { describeSource } from "../src/catalogue";
-import { scanRecords } from "../src/scan";
-import { runtimeLoader } from "../src/loader";
+import { createRuntime } from "../src/application/runtime";
+import { querySchema } from "../src/domain/contracts";
+import { textPage, assertPacket } from "../src/domain/results";
+import { matchesQuery } from "../src/domain/query";
+import { readableMail, compactRecord, annotateDuplicates } from "../src/domain/presentation";
+import { describeSource } from "../src/application/catalogue";
+import { scanRecords } from "../src/domain/scan";
+import { runtimeLoader } from "../src/interfaces/runtime-loader";
 import { searchMail } from "./helpers/mail";
 import { createZip } from "./helpers/zip";
-import { rebuildArchive } from "../src/archive";
+import { rebuildArchive } from "../src/sources/archives/index";
 import { parseSafeZipArchive } from "../src/vendor/takeout/zip";
 const roots: string[] = [];
 async function folder() { const r = await mkdtemp(join(tmpdir(), "source-search-ux-")); roots.push(r); return r; }
@@ -118,6 +119,15 @@ test("loader applies runtime changes without restarting its caller", async () =>
     await expect(load()).rejects.toThrow('could not load');
     await writeFile(entry, 'export async function invoke(){return {revision:3}}');
     expect(JSON.stringify(await (await load()).invoke('list_sources', {}))).toBe('{"revision":3}');
+});
+test("loader reloads an embedded Node worker when only its source changes", async () => {
+    const root = await folder(), entry = join(root, 'api.ts'), worker=join(root,'worker.mjs');
+    await writeFile(worker, 'export const revision=1;');
+    await writeFile(entry, 'import source from "./worker.mjs" with {type:"text"}; export async function invoke(){return {source}}');
+    const load=runtimeLoader(entry);
+    expect(JSON.stringify(await (await load()).invoke('list_sources',{}))).toContain('revision=1');
+    await writeFile(worker,'export const revision=2;');
+    expect(JSON.stringify(await (await load()).invoke('list_sources',{}))).toContain('revision=2');
 });
 test("archive type/date/sort filters and warm original reads retain stale-source checks", async () => {
     const root = await folder(), things = join(root, 'things');

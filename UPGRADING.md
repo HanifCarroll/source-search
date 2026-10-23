@@ -30,7 +30,7 @@ uv pip install --python /absolute/path/to/extract-env/bin/python \
 Validate your configured settings without accessing any source:
 
 ```sh
-bun -e 'import {loadConfig} from "./src/config"; await loadConfig(); console.log("Configuration is valid");'
+bun -e 'import {loadConfig} from "./src/platform/config"; await loadConfig(); console.log("Configuration is valid");'
 ```
 
 Set `SOURCE_SEARCH_CONFIG_FILE` for these commands if you use a different configuration location. Unknown settings and relative source paths fail validation. Keep your existing configuration; the example file is a starting point for new installations.
@@ -46,3 +46,5 @@ Keep configured cache and model paths stable. Maintenance updates changed projec
 Before adopting this release from an older private installation, configure the source paths previously supplied by defaults, mail account routing, `enabledSources`, and `maintenanceEnabled`. Existing derived records may need migration or regeneration because this release binds them to their source configuration.
 
 If an update fails, keep maintenance stopped and return to the recorded public commit or a preserved installation. Restore matching dependencies and configuration. Restore cache snapshots only if the update changed their format. Original source files stay in place.
+
+Hybrid QMD search now uses the configured `nodeBinary` and `qmdPackage` directly. Keep QMD at 1.0.7 for this adapter. Existing CLI, MCP and refresh launch paths are unchanged; implementation modules moved into the folders described in [architecture](docs/architecture.md).

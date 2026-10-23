@@ -1,7 +1,7 @@
 import {test,expect} from 'bun:test';
 import {defaultConfig} from './helpers/config';
-import {cassStatus,searchCass,readCass} from '../src/cass';
-import {querySchema} from '../src/shared';
+import {cassStatus,searchCass,readCass} from '../src/sources/agent-history/index';
+import { querySchema } from "../src/domain/contracts";
 import type {CassRunnerRequest} from '../src/vendor/cass/contracts';
 
 test('completed lexical assets remain readable during refresh without maintenance',async()=>{

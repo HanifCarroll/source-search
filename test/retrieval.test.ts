@@ -4,12 +4,14 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, defaultConfig, type Config } from "./helpers/config";
-import { createRuntime } from "../src/runtime";
-import { rebuildArchive } from "../src/archive";
+import { createRuntime } from "../src/application/runtime";
+import { rebuildArchive } from "../src/sources/archives/index";
 import {typedMessage} from "./helpers/messages";
-import { decodeAttributedBody, messagesTimestampToIso } from "../src/messages-reader";
+import { decodeAttributedBody, messagesTimestampToIso } from "../src/sources/messages/reader";
 import { searchMail } from "./helpers/mail";
-import { sourceIds, querySchema, queryKey, cursor, assertPacket } from "../src/shared";
+import { sourceIds, querySchema } from "../src/domain/contracts";
+import { queryKey, cursor } from "../src/domain/identity";
+import { assertPacket } from "../src/domain/results";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 

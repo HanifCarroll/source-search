@@ -4,13 +4,14 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createZip} from './helpers/zip';
 import {defaultConfig} from './helpers/config';
-import {rebuildArchive} from '../src/archive';
-import {createRuntime} from '../src/runtime';
-import {linkedInRecords} from '../src/linkedin';
-import {findRecordMatch} from '../src/content';
-import {matchesQuery} from '../src/query';
-import {compactRecord} from '../src/presentation';
-import {hit,querySchema} from '../src/shared';
+import {rebuildArchive} from '../src/sources/archives/index';
+import {createRuntime} from '../src/application/runtime';
+import {linkedInRecords} from '../src/sources/archives/linkedin';
+import {findRecordMatch} from '../src/domain/content';
+import {matchesQuery} from '../src/domain/query';
+import {compactRecord} from '../src/domain/presentation';
+import { hit } from "../src/domain/results";
+import { querySchema } from "../src/domain/contracts";
 
 const csv=(rows:string[][])=>rows.map(r=>r.map(v=>'"'+v.replaceAll('"','""')+'"').join(',')).join('\n')+'\n';
 test('LinkedIn projection retains original fields while presenting content, peers, attachments and calendar days',()=>{

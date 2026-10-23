@@ -4,8 +4,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-spec = importlib.util.spec_from_file_location('refresh', Path(__file__).parent.parent / 'scripts/qmd-auto-refresh.py')
-m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent/'src'))
+from maintenance import refresh as m
 
 class RefreshTests(unittest.TestCase):
     def setUp(self):

@@ -3,7 +3,7 @@ import {mkdtemp,writeFile,chmod,rm,mkdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {defaultConfig} from './helpers/config';
-import {createRuntime} from '../src/runtime';
+import {createRuntime} from '../src/application/runtime';
 
 test('CASS context continuation retains the neighboring-message window',async()=>{
  const root=await mkdtemp(join(tmpdir(),'cass-context-pages-'));

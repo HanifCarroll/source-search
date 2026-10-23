@@ -3,12 +3,12 @@ import {mkdtemp,mkdir,writeFile,rm,readFile,chmod,utimes,stat,truncate} from 'no
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {defaultConfig} from './helpers/config';
-import {createRuntime} from '../src/runtime';
-import {rebuildArchive,indexStatus} from '../src/archive';
-import {describeSource} from '../src/catalogue';
-import {chatGptGroups} from '../src/chatgpt';
-import {assertPacket} from '../src/shared';
-import {archiveSignature} from '../src/exports';
+import {createRuntime} from '../src/application/runtime';
+import {rebuildArchive,indexStatus} from '../src/sources/archives/index';
+import {describeSource} from '../src/application/catalogue';
+import {chatGptGroups} from '../src/sources/archives/chatgpt';
+import { assertPacket } from "../src/domain/results";
+import {archiveSignature} from '../src/sources/archives/originals';
 import {createZip} from './helpers/zip';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
