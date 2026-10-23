@@ -1,4 +1,4 @@
-// Message decoding adapted from LifeOS; provenance is recorded in THIRD_PARTY.md.
+// Message decoding adapted from LifeOS.
 export function decodeAttributedBody(value: unknown): AttributedBodyDecodeResult {
   const bytes = bytesValue(value);
   if (!bytes || bytes.byteLength === 0) {
@@ -33,7 +33,7 @@ function bytesValue(value: unknown): Uint8Array | null {
 const MAX_ATTRIBUTED_BODY_BYTES = 16 * 1024 * 1024;
 
 // The supported NSAttributedString prefix contains its NSString before any attributes.
-// Length tags follow the typedstream format documented by python-typedstream (THIRD_PARTY.md).
+// Length tags follow https://github.com/dgelessus/python-typedstream/blob/main/src/typedstream/stream.py
 function decodeMessageString(bytes: Uint8Array): string {
   const utf8 = new TextDecoder("utf-8", { fatal: true });
   let offset = 0;

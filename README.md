@@ -59,7 +59,7 @@ To build indexes for enabled exports, set `maintenanceEnabled` in local configur
 
 The optional library requires `libraryEnabled`, `maintenanceEnabled`, and `library` in `enabledSources`. Enable each contributing source separately. `documents` also requires the extraction environment described in [document extraction](docs/maintenance.md#document-extraction). For automatic refresh, set up the watcher described in [maintenance](docs/maintenance.md).
 
-Caches store retrieved text, attachments and previews. Disabling a source stops future access while retaining its cache. To remove cached data, stop maintenance and run `bun run start purge-cache` to preview the cleanup, then add `--apply`. The command handles the default managed cache; custom locations and backups need separate cleanup. See [SECURITY.md](SECURITY.md) for storage details.
+Caches store retrieved text, attachments and previews. Disabling a source stops future access while retaining its cache. To remove cached data, stop maintenance and run `bun run start purge-cache` to preview the cleanup, then add `--apply`. The command handles the default managed cache; custom locations and backups need separate cleanup.
 
 ## Agent contract
 
@@ -71,7 +71,7 @@ Caches store retrieved text, attachments and previews. Disabling a source stops 
 - Use `focus` to open a matching passage. Previews are private text files created on request.
 - Exact filters vary by source. Hybrid discovery rejects unsupported filters, and scores are not comparable across providers.
 
-The server exposes `list_sources`, `search_sources`, and `read_record` over stdio for a single local user. See [SECURITY.md](SECURITY.md).
+The server exposes `list_sources`, `search_sources`, and `read_record` over stdio for a single local user.
 
 ## Development
 
@@ -90,4 +90,4 @@ See [project architecture](docs/architecture.md) for module responsibilities and
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and [third-party notices and code provenance](THIRD_PARTY.md).
+MIT. See [LICENSE](LICENSE).
