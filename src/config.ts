@@ -59,8 +59,8 @@ export async function loadConfig(): Promise<Config> {
 
 export const configPath = () => process.env.SOURCE_SEARCH_CONFIG_FILE || join(home, ".config/source-search/config.json");
 export const sourceEnabled = (config:Config, source:string) => config.enabledSources.includes(source as typeof config.enabledSources[number]);
-export function requireSource(config:Config, source:string) { if(!sourceEnabled(config,source)) fail("SOURCE_DISABLED", "Enable this source explicitly in local configuration before accessing it"); }
-export function requireMaintenance(config:Config) { if(!config.maintenanceEnabled) fail("MAINTENANCE_DISABLED", "Enable maintenance explicitly in local configuration before building caches"); }
+export function requireSource(config:Config, source:string) { if(!sourceEnabled(config,source)) fail("SOURCE_DISABLED", "Enable this source in local configuration"); }
+export function requireMaintenance(config:Config) { if(!config.maintenanceEnabled) fail("MAINTENANCE_DISABLED", "Enable maintenance in local configuration to build caches"); }
 
 // Bind derived text to the selected locations/accounts, not just a stable source ID.
 export function sourceScope(config:Config,source:string):string {

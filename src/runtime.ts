@@ -25,7 +25,7 @@ export function createRuntime(config: Config, execute: Run = run) {
     const previews:PreviewBudget={remaining:0,records:new Map()};
     const sources = await boundedMap(sourceIds, async source => {
       const base = { source, readOnly: true, checkedAt: now() };
-      if(!sourceEnabled(config,source))return {...base,available:false,state:"disabled",error:{code:"SOURCE_DISABLED",message:"Enable this source explicitly in local configuration"}};
+      if(!sourceEnabled(config,source))return {...base,available:false,state:"disabled",error:{code:"SOURCE_DISABLED",message:"Enable this source in local configuration"}};
       try {
         if(source === "library")return {...base,...await libraryStatus(config)};
         if(source === "documents"){const status=await libraryStatus(config),doc=status.sources?.find(s=>s.source==="documents");return {...base,...doc,available:(doc?.embeddings?.indexedDocuments||0)>0,modelsPresent:status.modelsPresent};}
@@ -52,7 +52,7 @@ export function createRuntime(config: Config, execute: Run = run) {
           return { ...base, available: !!index, index, selectedExports: selected, coverage: "Selected original export snapshot; edits appear after explicit rebuild", filters: ["from", "to", ...(source === "chatgpt-archive" || source === "linkedin-archive" || source === "twitter-archive" ? ["conversation"] : [])], querySyntax: "literal full-text terms, all must match", pagination: true };
         }
         const originals = await thingsRecords(config);
-        let index: unknown; try { const state = await indexStatus(config); index = { ...JSON.parse(state["things-archive"] || "{}"), indexedAt:state.indexedAt, stale: state.generation !== originals.generation }; } catch (e) { index = { available: false, error: errorData(e), action: "Run source-search rebuild explicitly" }; }
+        let index: unknown; try { const state = await indexStatus(config); index = { ...JSON.parse(state["things-archive"] || "{}"), indexedAt:state.indexedAt, stale: state.generation !== originals.generation }; } catch (e) { index = { available: false, error: errorData(e), action: "Run source-search rebuild" }; }
         return { ...base, available: true, taskCount: originals.info.taskCount, dateRange: originals.info.createdDateRange, snapshotAt: originals.info.exportedAt, editedAt: originals.info.archiveEditedAt, index, filters: ["from", "to"], querySyntax: "literal full-text terms, all must match", coverage: "Edited historical archive; date filters use task creation time" };
       } catch (e) { return { ...base, available: false, error: errorData(e) }; }
     });

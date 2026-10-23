@@ -40,7 +40,7 @@ export async function rebuildArchive(config: Config) {
 export async function indexStatus(config: Config) {
   await regular(config.index); const db = new Database(config.index, { readonly: true });
   try {
-    if (!(db.query("PRAGMA table_info(records)").all() as {name:string}[]).some(c => c.name === "source")) fail("INDEX_NOT_READY", "Rebuild the archive index explicitly for the expanded source catalogue");
+    if (!(db.query("PRAGMA table_info(records)").all() as {name:string}[]).some(c => c.name === "source")) fail("INDEX_NOT_READY", "Rebuild the archive index for the expanded source catalogue");
     return Object.fromEntries((db.query("SELECT key,value FROM meta").all() as { key: string; value: string }[]).map(r => [r.key, r.value])); }
   finally { db.close(); }
 }
@@ -57,7 +57,7 @@ export async function searchArchive(config: Config, q: Query): Promise<Page> {
     if (!entry) fail("INDEX_NOT_READY", "Rebuild the disposable archive index for this selected source");
     const state = JSON.parse(entry.value);
     if(exportProjectionVersion(q.source as ArchiveSource)>1 && state.projectionVersion!==exportProjectionVersion(q.source as ArchiveSource))fail("INDEX_PROJECTION_UPGRADE","Updated export dates/formatting require an explicit source-search rebuild; original files are unchanged");
-    if(state.signature && state.signature!==await archiveSignature(config,q.source as ArchiveSource))fail("INDEX_STALE","Selected export changed; run source-search rebuild explicitly before searching");
+    if(state.signature && state.signature!==await archiveSignature(config,q.source as ArchiveSource))fail("INDEX_STALE","Selected export changed; run source-search rebuild before searching");
     const availableTypes=[...new Set<string>([...(state.recordTypes || []),...(state.categories || []).map((c:any)=>c.recordType).filter(Boolean)])];
     if(q.source==="linkedin-archive" && q.types)q={...q,types:[...new Set(q.types.map(t=>linkedInFilterType(t,state.categories || [])))]};
     const unavailable=q.types?.find(t=>!availableTypes.includes(t));
@@ -93,7 +93,7 @@ export async function searchArchive(config: Config, q: Query): Promise<Page> {
       checked++;const metadata=JSON.parse(row.data),r={...metadata,body:formatVersion === "2" ? row.body : row.body.slice(metadata.title.length+1)} as RecordData;
       if(!findRecordMatch(r,q))continue;
       const item=hit(r,q,start+checked);item.cursorAfter=cursor(key,start+checked);
-      if(formatVersion!=="2"){delete item.focus;item.match.explanation="Legacy index preview; rebuild explicitly for precise original-text focus";}
+      if(formatVersion!=="2"){delete item.focus;item.match.explanation="Legacy index preview; rebuild for precise original-text focus";}
       items.push(item);if(items.length>=q.limit)break;
     }
     const warnings=[...new Set(items.flatMap(r=>r.warnings || []))];

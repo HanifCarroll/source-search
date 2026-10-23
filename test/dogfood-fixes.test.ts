@@ -48,7 +48,7 @@ test("CASS stale fingerprint diagnosis and recovery never start maintenance",asy
  const runner=async(r:any)=>{calls.push(r.args);return {exitCode:1,stdout:JSON.stringify(raw),stderr:"",timedOut:false,outputLimitExceeded:false};};
  const c=defaultConfig(),status=await cassStatus(c,runner),described=describeSource(c,{source:"agent-history",...status});
  expect(status.health.index.databaseFingerprint).toBe("current");expect(status.health.explanation).toContain("fingerprint");expect(described.state).toBe("stale");expect(described.recovery).toContain("Run cass index");expect(described.recovery).toContain("export indexes");
- await expect(searchCass(c,querySchema.parse({source:"agent-history",query:"fixture"}),runner)).rejects.toThrow("No rebuild is active");expect(calls.every(args=>!args.includes("index") && !args.includes("search"))).toBe(true);
+ await expect(searchCass(c,querySchema.parse({source:"agent-history",query:"fixture"}),runner)).rejects.toThrow("Refresh the configured CASS index");expect(calls.every(args=>!args.includes("index") && !args.includes("search"))).toBe(true);
  const fallback=await cassStatus(c,async(r:any)=>r.args.includes("status") ? {exitCode:1,stdout:"",stderr:"",timedOut:true,outputLimitExceeded:false} : runner(r));expect(fallback.available).toBe(false);expect(fallback.health.index.reason).toContain("fingerprint");expect(fallback.health.warnings[0]).toContain("readiness remains false");
 });
 

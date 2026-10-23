@@ -11,7 +11,7 @@ export async function helper(config: Config, args: string[]) {
   if (r.outputLimitExceeded) fail("SOURCE_LIMIT", "Native source helper exceeded its output budget; use a smaller calendar window");
   const records = r.stdout.split("\n").filter(Boolean).map(s => JSON.parse(s));
   const error = records.find(r => r.type === "error");
-  if (error && /authorization/.test(error.code)) fail("PERMISSION_DENIED", `Native ${error.source} read access is ${error.authorization}; no authorization request was made`);
+  if (error && /authorization/.test(error.code)) fail("PERMISSION_DENIED", `Native ${error.source} read access is ${error.authorization}`);
   if (r.exitCode !== 0 && !records.some(r => r.type === "scan_finished")) fail("SOURCE_UNAVAILABLE", "Native helper could not complete the read");
   return records;
 }

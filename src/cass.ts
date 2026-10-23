@@ -5,13 +5,13 @@ import { fail, now, hash, querySchema, queryKey, position, cursor, hit, versione
 const provider = (c: Config, runner?: CassRunner) => createCassProvider({ binaryPath: c.cassBinary, dataDir: c.cassData, maxSnippetChars: 10000, searchTimeoutMs: 120000, slowSearchTimeoutMs: 120000, runner });
 export async function cassStatus(c: Config, runner?: CassRunner) {
   const h = await provider(c, runner).health();
-  return { available: h.readyForSearch, health: h, warnings: h.rebuilding && h.readyForSearch ? [h.stalled ? stalledWarning : refreshWarning] : [], coverage: "Existing CASS local index only; no initialization, models, repair or rebuild is started", querySyntax: "CASS lexical, semantic or hybrid query (hybrid by default)", filters: ["from", "to"], dataDir: c.cassData };
+  return { available: h.readyForSearch, health: h, warnings: h.rebuilding && h.readyForSearch ? [h.stalled ? stalledWarning : refreshWarning] : [], coverage: "Local CASS conversation index", querySyntax: "CASS lexical, semantic or hybrid query (hybrid by default)", filters: ["from", "to"], dataDir: c.cassData };
 }
 const refreshWarning = "CASS refresh is running; searches use committed search assets. Results and pagination may change; retry if context reports a stale record.";
 const stalledWarning = "CASS refresh is running but has reported no progress recently; searches use committed search assets. Results and pagination may change; retry if context reports a stale record.";
 async function ready(c: Config, runner?: CassRunner) {
   const state = await cassStatus(c, runner);
-  if (!state.available) fail("SOURCE_NOT_READY", state.health.rebuilding ? "CASS is rebuilding; wait for the existing job." : `CASS is ${state.health.index.stale ? "stale" : "not ready"}: ${state.health.errors.join("; ") || state.health.explanation || state.health.status || "readiness unknown"}. ${state.health.index.stale ? "No rebuild is active. Explicitly refresh CASS (cass index); Source Search does not run maintenance. " : ""}Data directory: ${c.cassData}`);
+  if (!state.available) fail("SOURCE_NOT_READY", state.health.rebuilding ? "CASS is rebuilding; wait for the existing job." : `CASS is ${state.health.index.stale ? "stale" : "not ready"}: ${state.health.errors.join("; ") || state.health.explanation || state.health.status || "readiness unknown"}. ${state.health.index.stale ? "Refresh the configured CASS index. " : ""}Data directory: ${c.cassData}`);
   return state.warnings;
 }
 function request(q: Query, native?: string) { return { query: q.query, limit: q.limit, cursor: native, since: q.from, until: q.to, mode: q.mode ?? "hybrid", source: "local" as const }; }
