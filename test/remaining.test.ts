@@ -26,7 +26,7 @@ test("WhatsApp direct/group text, authors, continuation, context and unchanged o
   const db = new Database(c.whatsapp);
   db.exec("CREATE TABLE ZWACHATSESSION(Z_PK INTEGER,ZCONTACTJID TEXT,ZPARTNERNAME TEXT); CREATE TABLE ZWAMESSAGE(Z_PK INTEGER,ZCHATSESSION INTEGER,ZSTANZAID TEXT,ZMESSAGEDATE REAL,ZISFROMME INTEGER,ZTEXT TEXT,ZFROMJID TEXT,ZMEDIAITEM INTEGER); INSERT INTO ZWACHATSESSION VALUES(1,'group@g.us','Fixture group');");
   for(let i=1;i<=4;i++) db.query("INSERT INTO ZWAMESSAGE VALUES(?,1,?,700000000.25,?,?, 'friend',NULL)").run(i,"native"+i,i===4?1:0,"fixture "+i); db.close();
-  const before = await readFile(c.whatsapp), first = await search("whatsapp","fixture",{limit:1}); expect(first.items[0].author).toBe("Alex"); expect(first.items[0].metadata?.group).toBe(true);
+  const before = await readFile(c.whatsapp), first = await search("whatsapp","fixture",{limit:1}); expect(first.items[0].author).toBe("self"); expect(first.items[0].metadata?.group).toBe(true);
   const next = await search("whatsapp","fixture",{limit:1,cursor:first.nextCursor}); expect(next.items[0].ref.id).toBe("3");
   const r = await createRuntime(c).read_record({ref:first.items[0].ref,context:true}); expect(r.context).toHaveLength(3); expect(await readFile(c.whatsapp)).toEqual(before);
   const calls = new Database(c.muesli); calls.exec("CREATE TABLE meetings(id INTEGER,title TEXT,start_time TEXT,end_time TEXT,raw_transcript TEXT,formatted_notes TEXT,manual_notes TEXT,deleted_at INTEGER); INSERT INTO meetings VALUES(1,'Call','2024-01-01T00:00:00Z',NULL,'original fixture','Generated','Manual',NULL),(2,'Deleted',NULL,NULL,'fixture',NULL,NULL,1)"); calls.close();

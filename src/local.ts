@@ -26,7 +26,7 @@ export async function journalRecord(config: Config, ref: Ref): Promise<RecordDat
   const path = await contained(config.journals, ref.id), body = await textFile(path), version = hash(body);
   assertVersion(ref, version); const day = ref.id.match(/(\d{4}-\d{2}-\d{2})\.md$/)![1];
   return { ref: { source: "journals", id: ref.id, version }, title: day, body, type: "written-journal", locator: path,
-    occurredAt: day + "T00:00:00-03:00", observedAt: now(), author: "Alex", metadata: { datePrecision: "day", timezone: "America/Buenos_Aires", modifiedAt: (await lstat(path)).mtime.toISOString() } };
+    occurredAt: day + "T00:00:00-03:00", observedAt: now(), author: "self", metadata: { datePrecision: "day", timezone: "America/Buenos_Aires", modifiedAt: (await lstat(path)).mtime.toISOString() } };
 }
 export async function searchJournals(config: Config, q: Query): Promise<Page> {
   if (q.conversation) fail("UNSUPPORTED_FILTER", "Journals have no conversation filter");

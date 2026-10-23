@@ -34,7 +34,7 @@ function record(source: "whatsapp" | "calls", row: any): RecordData {
   }
   const group = row.chat?.endsWith("@g.us") || false;
   const senderId = group ? row.participant || (row.sender?.endsWith("@g.us") ? undefined : row.sender) : row.sender;
-  const actor = row.outgoing === 1n ? "Alex" : senderId ? row.participantName || (!group && row.name ? row.name : senderId) : "unknown sender";
+  const actor = row.outgoing === 1n ? "self" : senderId ? row.participantName || (!group && row.name ? row.name : senderId) : "unknown sender";
   return versioned({ ref: { source, id }, body: row.text || "", title: row.name || row.chat || "WhatsApp message", type: "message", locator: `source-search://whatsapp/${id}`, occurredAt: row.date && Number.isFinite(Number(row.date)) ? new Date(Number(row.date) * 1000 + 978307200000).toISOString() : undefined, observedAt: now(), author: actor, conversation: row.chat,
     metadata: { bodyStatus:row.text?.trim() ? "text" : "text-unavailable",senderId, senderIdentity: row.outgoing === 1n ? "self" : senderId ? "native" : "unknown", nativeId: row.stanza, direction: row.outgoing === 1n ? "outgoing" : "incoming", group: row.chat?.endsWith("@g.us") || false, hasMedia: row.media != null }, warnings: [...(row.media != null ? ["Attachment content is not searched; only the stored text is returned."] : []),...(!row.text?.trim() ? ["This local entry has no readable text; changing search terms cannot recover absent text. It may be a media/system entry or incomplete local history; its kind is not inferred."] : [])] });
 }

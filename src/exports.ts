@@ -110,7 +110,7 @@ export async function exportRecords(config: Config, source: ArchiveSource, only?
         for (const c of parseChatGptConversationShard(JSON.parse(text), shard)) {
           conversations.total++; conversations[c.messages.length ? "withMessages" : "empty"]++;
           for (const m of c.messages) {
-            const attachments = collectChatGptAttachments(m.rawMessage, { shardPath: shard, sourceAccountId: "person@example.test" });
+            const attachments = collectChatGptAttachments(m.rawMessage, { shardPath: shard, sourceAccountId: "selected-export" });
             add(versioned({ ref: { source, id: hash(JSON.stringify([part, c.conversationId, m.messageId])) }, title: c.title || "ChatGPT conversation", body: m.contentText || "", type: "chatgpt-message", author: m.role, conversation: c.conversationId, occurredAt: m.occurredAt?.toISOString(), observedAt: now(), locator: path + "#" + encodeURIComponent(shard) + "/" + encodeURIComponent(m.nodeId), metadata: { exportPath: path, shard, conversationId: c.conversationId, messageId: m.messageId, nodeId: m.nodeId, parentId: m.parentId, childIds: m.childIds, selectedBranch: m.selectedBranch, contentType: m.contentType, model: m.modelSlug, attachments, sourceTimestamp: m.sourceCreateTime,textAvailable:!!m.contentText,...(!m.contentText ? {originalContent:m.rawMessage.content} : {}) }, warnings: [...(attachments.length ? ["Attachment pointers are retained; attachment bytes are not searched."] : []),...(!m.contentText ? ["This message has no exported text. Its content structure is available with details:true; media bytes are not searched."] : [])] }));
           }
         }
@@ -122,7 +122,7 @@ export async function exportRecords(config: Config, source: ArchiveSource, only?
       for (const entry of zip.entries.filter(e => !e.isDirectory && (!only || e.path === only.entry))) {
         const classified = classifyTakeoutEntry(entry);
         if (classified.kind.startsWith("ignored")) { warnings.push(`Unsupported entry: ${basename(entry.path)}`); continue; }
-        const bytes = await zip.readEntry(entry), parsed = parseTakeoutEntry(classified, bytes, { archiveSha256: zip.archiveSha256, archiveBytes: zip.archiveBytes, importedAt: new Date(0), sourceAccountId: "person@example.test", entry, entrySha256: entry.sha256! },only?.messageIndex);
+        const bytes = await zip.readEntry(entry), parsed = parseTakeoutEntry(classified, bytes, { archiveSha256: zip.archiveSha256, archiveBytes: zip.archiveBytes, importedAt: new Date(0), sourceAccountId: "selected-export", entry, entrySha256: entry.sha256! },only?.messageIndex);
         if (parsed.incomplete) fail("INVALID_ARCHIVE", `Malformed export entry: ${entry.path}; old index retained`);
         if (parsed.warning) warnings.push(parsed.warning);
         for (const item of parsed.items) {

@@ -58,7 +58,7 @@ test("binary Messages are searchable, undecodable text is visible, context and a
   const second = (await runtime.search_sources({ queries: [{ source: "messages", query: "networking", limit: 1, cursor: first.nextCursor }] })).results[0];
   expect(second.status).toBe("partial"); expect(second.items[0].ref.id).toBe("message-2"); expect(second.items[0].author).toBe("friend@example.test");
   const read = await runtime.read_record({ ref: second.items[0].ref, context: true }); expect(read.record.body).toContain("binary text"); expect(read.context.length).toBe(3);
-  const own = await runtime.read_record({ ref: { source: "messages", id: "message-1" } }); expect(own.record.author).toBe("Alex");
+  const own = await runtime.read_record({ ref: { source: "messages", id: "message-1" } }); expect(own.record.author).toBe("self");
   expect(await readFile(config.messages)).toEqual(before);
   expect(decodeAttributedBody(Buffer.from([0, 255, 1])).status).toBe("undecodable");
   expect(messagesTimestampToIso(700_000_000_000_000_000n)).toBe("2023-03-08T20:26:40.000Z");

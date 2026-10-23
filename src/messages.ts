@@ -23,7 +23,7 @@ function record(db: Database, row: any): RecordData {
   const chats = db.query("SELECT c.guid FROM chat c JOIN chat_message_join j ON j.chat_id=c.ROWID WHERE j.message_id=? ORDER BY c.ROWID").all(row.rowid) as { guid: string }[];
   const outgoing = row.is_from_me === 1n, known = row.is_from_me === 1n || row.is_from_me === 0n;
   return { ref: { source: "messages", id, version: hash(JSON.stringify([body, String(row.date), String(row.is_from_me)])) }, title: body.slice(0, 120) || "(Message without readable text)", body, type: "message", locator: `source-search://messages/${encodeURIComponent(id)}`,
-    occurredAt: messagesTimestampToIso(row.date), observedAt: now(), author: row.itemType ? "unknown (system item)" : known ? outgoing ? "Alex" : row.sender || "unknown sender" : "unknown direction",
+    occurredAt: messagesTimestampToIso(row.date), observedAt: now(), author: row.itemType ? "unknown (system item)" : known ? outgoing ? "self" : row.sender || "unknown sender" : "unknown direction",
     conversation: chats.length === 1 ? chats[0].guid : undefined,
     metadata: { chats: chats.map(c => c.guid), direction: known ? outgoing ? "outgoing" : "incoming" : "unknown", service: row.service, hasAttachments: !!row.attachments, bodyStatus: decoded.status },
     warnings: decoded.status === "undecodable" ? ["Binary body could not be decoded safely; content is not invented"] : [] };
