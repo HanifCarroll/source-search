@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Private incremental extraction; originals are never modified. No remote content fetches."""
 import argparse, hashlib, json, os, stat, subprocess, tempfile, time, zipfile, codecs, mailbox, sys, uuid, resource
+from collections import Counter
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -187,9 +188,12 @@ def mail_attachments(config,root):
       else:continue
       entries.append({'path':str(target),'name':name})
     save(manifest,{'parent':parent_signature,'entries':entries})
-   for entry in json.loads(manifest.read_text())['entries']:
+   entries=list({(entry['path'],entry['name']):entry for entry in json.loads(manifest.read_text())['entries']}.values())
+   names=Counter(entry['name'] for entry in entries)
+   for entry in entries:
     p=Path(entry['path']);sig=signature(p)+[parent_signature]
-    candidates.append({**entry,'signature':sig,'locator':'source-search://'+source+'/'+mid+'#attachment/'+entry['name'],'mailRef':item.get('ref',{'source':source,'id':mid}),'guardPath':str(rawfile),'guardSignature':signature(rawfile),'accountSignature':item.get('accountSignature')})
+    suffix='attachment/'+entry['name'] if names[entry['name']]==1 else 'attachment-id/'+digest(str(p))+'/'+entry['name']
+    candidates.append({**entry,'signature':sig,'locator':'source-search://'+source+'/'+mid+'#'+suffix,'mailRef':item.get('ref',{'source':source,'id':mid}),'guardPath':str(rawfile),'guardSignature':signature(rawfile),'accountSignature':item.get('accountSignature')})
   except Exception as e:failures.append({'source':rawfile.name,'error':type(e).__name__+': '+str(e)[:160]})
  return candidates,failures
 
@@ -229,7 +233,7 @@ def takeout_attachments(config,root):
           entries.append({'path':str(out),'name':name,'signature':parent+[entry.CRC,index,part_index,hashlib.sha256(payload).hexdigest()],'locator':identity,'source':'takeout-archive','messageId':message.get('Message-ID')})
        finally:box.close()
     save(manifest,{'parent':parent,'entries':entries})
-   candidates.extend(json.loads(manifest.read_text())['entries'])
+   candidates.extend({**entry,'source':'takeout-archive'} for entry in json.loads(manifest.read_text())['entries'])
   except Exception as e:failures.append({'source':str(p),'error':type(e).__name__+': '+str(e)[:180]})
  return candidates,failures
 

@@ -18,6 +18,27 @@ def fixture_pdf(path,pages,width=612,height=792):
 class ExtractionTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.root=Path(self.tmp.name);self.source=self.root/'sources';self.source.mkdir();self.cache=self.root/'cache';self.cache.mkdir(mode=0o700)
+ def test_same_named_attachments_keep_distinct_stable_references(self):
+  rawdir=self.cache/'mail-raw';rawdir.mkdir(mode=0o700)
+  raw=rawdir/'mail-fastmail-fixture.json';m.save(raw,{'source':'mail-fastmail','id':'fixture','raw':{},'accountSignature':'synthetic'})
+  m.private_dir(self.cache/'attachments');folder=m.private_dir(self.cache/'attachments'/'mail-fastmail-fixture')
+  first=folder/'one.txt';first.write_text('Invented first attachment')
+  second=folder/'two.txt';second.write_text('Invented second attachment')
+  entries=[{'path':str(first),'name':'note.txt'},{'path':str(second),'name':'note.txt'},{'path':str(first),'name':'note.txt'}]
+  m.save(folder/'manifest.json',{'parent':m.signature(raw),'entries':entries})
+  config={'maintenanceEnabled':True,'enabledSources':['documents','mail-fastmail'],'documentRoots':[],'libraryRoot':str(self.cache),'mailAccounts':{'mail-fastmail':{'account':'fixture'}}}
+  m.main(config);records=json.loads((self.cache/'documents.json').read_text())['records']
+  self.assertEqual(len(records),2);self.assertEqual(len({r['ref']['id'] for r in records}),2)
+  self.assertEqual({r['body'].strip() for r in records},{'Invented first attachment','Invented second attachment'})
+  m.main(config);self.assertEqual(json.loads((self.cache/'documents.json').read_text())['records'],records)
+ def test_cached_takeout_entries_retain_the_selected_source(self):
+  archive=self.source/'invented.zip'
+  with zipfile.ZipFile(archive,'w') as z:z.writestr('fixture.txt','Invented export')
+  folder=m.private_dir(self.cache/'takeout-attachments');attachment=folder/'fixture.txt';attachment.write_text('Invented attachment')
+  entry={'path':str(attachment),'name':'fixture.txt','signature':m.signature(archive)+[1,0,0,'synthetic'],'locator':str(archive)+'#attachment/fixture'}
+  m.save(folder/(m.digest(str(archive))+'.json'),{'parent':m.signature(archive),'entries':[entry]})
+  records,failures=m.takeout_attachments({'enabledSources':['takeout-archive'],'takeout':[str(archive)]},self.cache)
+  self.assertEqual(failures,[]);self.assertEqual(records,[{**entry,'source':'takeout-archive'}])
  def test_pdf_pages_docx_headings_and_html_no_script(self):
   from docx import Document
   p=self.source/'invented.pdf';fixture_pdf(p,['Synthetic violet comet','Invented second page']);text,_=m.extract(p,self.cache);self.assertIn('## Page 2',text);self.assertIn('violet comet',text)
