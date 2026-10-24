@@ -1,3 +1,4 @@
+import {syncConnected} from './connected';
 import {nativeCache} from './native-cache';
 import {syncTasks} from './tasks';
 import {sourceFiles} from '../sources/local/notes';
@@ -161,7 +162,7 @@ export async function syncLibrary(c:Config){
  await markManagedCache(c.libraryRoot);await privateDirectory(c.libraryRoot);await privateDirectory(join(c.libraryRoot,"mail-raw"));
  const db=libraryDB(c,true);for(const source of configuredSourceIds(c).filter(s=>sourceEnabled(c,s) && isProjected(s,c)))if(!getState(db,source).state)setState(db,source,{state:"queued",records:0,chunks:0});db.close();
  // Independent source failures are recorded without starving healthy sources.
- for(const [name,work] of [["native",native],["archives",archives],["tasks",syncTasks],["mail",syncMail],["documents",documents]] as const){
+ for(const [name,work] of [["native",native],["archives",archives],["tasks",syncTasks],["connected",syncConnected],["mail",syncMail],["documents",documents]] as const){
   try{await work(c);const d=libraryDB(c,true);d.query("DELETE FROM states WHERE source=?").run("maintenance-"+name);d.close();}catch(e){const d=libraryDB(c,true);setState(d,"maintenance-"+name,{state:"error",error:errorData(e),checkedAt:now()});d.close();}
  }
 }

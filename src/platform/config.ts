@@ -1,8 +1,9 @@
+import {connectionIdentity} from './auth-settings';
 import {createHash} from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { z } from "zod";
-import {sourceKind,isMail,adapterKinds} from "../domain/source-catalog";
+import {sourceKind,isMail,adapterKinds,connectedKinds} from "../domain/source-catalog";
 import {sourcesSchema,accountSchema,timeZoneSchema,type MarkdownSettings} from "./source-settings";
 import { sourceId } from "../domain/contracts";
 import { fail } from "../domain/identity";
@@ -97,6 +98,7 @@ export function sourceScope(config:Config,source:string):string {
     messages:["messages"],whatsapp:["whatsapp"],calls:["muesli"],documents:["documentRoots","takeout","mailAccounts","enabledSources"]
   };
   const kind=sourceKind(source,config),definition=config.sources[source];
+  if(definition && connectedKinds.includes(kind as typeof connectedKinds[number]))return createHash('sha256').update(JSON.stringify(connectionIdentity(definition))).digest('hex');
   if(definition && /^(firefox|safari)-/.test(kind) && 'profiles' in definition)return createHash('sha256').update(JSON.stringify({adapter:kind,profiles:definition.profiles})).digest('hex');
   if(definition?.adapter==='tasks'){
     const connector=definition.connector;

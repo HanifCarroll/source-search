@@ -1,9 +1,10 @@
+import {connectedStatus,searchConnected,readConnected} from '../sources/connected';
 import {browserStatus,searchBrowser,readBrowser} from '../sources/browser';
 import {thingsRecords} from '../sources/tasks/things';
 import {taskStatus,searchTasks,readTask} from '../sources/tasks';
 import {bindFocus} from '../domain/content';
 import {filePimStatus,searchFilePim,readFilePim} from '../sources/local/pim-files';
-import {sourceKind,isMail} from '../domain/source-catalog';
+import {sourceKind,isMail,connectedKinds} from '../domain/source-catalog';
 import { searchMessages, readMessage, messagesStatus } from "../sources/messages/index";
 import type { Query, Ref, RecordData, Page } from '../domain/contracts';
 import { assertVersion, errorData, fail, cursor, position, hash } from '../domain/identity';
@@ -121,6 +122,7 @@ export function createSourceAccess(config: Config, execute: Run = run, bound = f
     const kind=sourceKind(id,config);
     if(isMail(id,config))adapters[id]=mail(id);
     else if(/^(firefox|safari)-/.test(kind))adapters[id]={status:()=>browserStatus(config,id),search:q=>searchBrowser(config,q),read:recordOnly(ref=>readBrowser(config,ref))};
+    else if(connectedKinds.includes(kind as typeof connectedKinds[number]))adapters[id]={status:()=>connectedStatus(config,id),search:q=>searchConnected(config,q),read:recordOnly(ref=>readConnected(config,ref))};
     else if(kind==='tasks')adapters[id]={status:()=>taskStatus(config,id),search:q=>searchTasks(config,q),read:recordOnly(ref=>readTask(config,ref))};
     else if(kind==='markdown')adapters[id]=isDailyJournal(config,id)?{status:async()=>({available:true,dailyNotes:(await journalPaths(markdownSettings(config,id).root,markdownSettings(config,id).exclude)).paths.length,filters:['from','to'],coverage:'Daily Markdown journals'}),search:q=>searchJournals(config,q),read:recordOnly(ref=>journalRecord(config,ref))}:notes(id);
     else if(kind==='muesli' || kind==='whatsapp')adapters[id]=database(id);

@@ -14,3 +14,12 @@ export type MicrosoftOAuth=z.infer<typeof microsoftOAuthSchema>;
 export const googleAuth={token:secretSchema.optional(),oauth:googleOAuthSchema.optional()};
 export const microsoftAuth={token:secretSchema.optional(),oauth:microsoftOAuthSchema.optional()};
 export const oneCredential=(s:{token?:unknown;oauth?:unknown})=>!!s.token!==!!s.oauth;
+
+// Credential locators can rotate without invalidating saved record references.
+// Account identity, endpoints, selected collections and OAuth cache still bind
+// a snapshot to the exact configured connection.
+export function connectionIdentity(value:unknown):unknown{
+  if(Array.isArray(value))return value.map(connectionIdentity);
+  if(!value||typeof value!=='object')return value;
+  return Object.fromEntries(Object.entries(value).filter(([key])=>!['token','password','clientSecret','label'].includes(key)).map(([key,v])=>[key,connectionIdentity(v)]));
+}

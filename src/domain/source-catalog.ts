@@ -1,5 +1,6 @@
+export const connectedKinds=['calendars','address-books'] as const;
 // Source IDs name configured instances; adapters describe their behavior.
-export const adapterKinds = ['firefox-history','firefox-bookmarks','safari-history','safari-bookmarks','tasks','browser-history','browser-bookmarks','browser-downloads','gmail','fastmail','jmap','imap','markdown','muesli','whatsapp','messages','things-archive','chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive','calendar','contacts','ical','vcard','chrome-history','chrome-bookmarks','chrome-downloads','agent-history','vault','library','documents'] as const;
+export const adapterKinds = [...connectedKinds,'firefox-history','firefox-bookmarks','safari-history','safari-bookmarks','tasks','browser-history','browser-bookmarks','browser-downloads','gmail','fastmail','jmap','imap','markdown','muesli','whatsapp','messages','things-archive','chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive','calendar','contacts','ical','vcard','chrome-history','chrome-bookmarks','chrome-downloads','agent-history','vault','library','documents'] as const;
 export type AdapterKind = typeof adapterKinds[number];
 export type SourceCatalog = {sources?:Record<string,{adapter:AdapterKind}>};
 
@@ -15,8 +16,8 @@ export function sourceCategory(source:string,catalog:SourceCatalog={}){
  const kind=sourceKind(source,catalog);
  if(kind==='tasks'||kind==='things-archive')return 'tasks';
  if(['gmail','fastmail','jmap','imap'].includes(kind))return 'mail';
- if(['calendar','ical'].includes(kind))return 'calendars';
- if(['contacts','vcard'].includes(kind))return 'contacts';
+ if(['calendar','ical','calendars'].includes(kind))return 'calendars';
+ if(['contacts','vcard','address-books'].includes(kind))return 'contacts';
  if(/^(firefox|safari)-/.test(kind))return 'browser-'+kind.split('-')[1];
  if(kind.startsWith('chrome-'))return kind.replace('chrome-','browser-');
  if(kind==='markdown'||kind==='vault')return 'notes';

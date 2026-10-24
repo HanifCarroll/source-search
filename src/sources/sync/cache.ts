@@ -21,7 +21,7 @@ export function snapshotStore(c:Config,source:string,namespace:'task-snapshots'|
   return {path,read,
     async status(){const saved=await read();return {available:!!saved,state:saved?.lastError?'error':undefined,records:saved?.records.length,coverage:saved?.coverage,checkedAt:saved?.checkedAt,syncStrategy:saved?.strategy,
       filters:['from','to','types'],warnings:saved?.warnings||[],...(saved?.lastError?{error:saved.lastError}:!saved?{error:{code:'NEEDS_SYNC',message:`Run source-search ${command} to load the selected source`}}:{})};},
-    async search(q:Query){const saved=await read();if(!saved)fail('NEEDS_SYNC',`Run source-search ${command} before searching this source`);return recordPage(saved.records,q,[...saved.warnings,...(saved.lastError?['Using the last successful snapshot; latest sync failed: '+saved.lastError.code]:[])]);},
+    async search(q:Query){const saved=await read();if(!saved)fail('NEEDS_SYNC',`Run source-search ${command} before searching this source`);return recordPage(saved.records,q,[...saved.warnings,...(saved.coverageWindow&&((q.from&&Date.parse(q.from)<Date.parse(saved.coverageWindow.from))||(q.to&&Date.parse(q.to)>Date.parse(saved.coverageWindow.to)))?['Calendar snapshot covers '+saved.coverageWindow.from+' to '+saved.coverageWindow.to+'; widen the configured window and sync to search outside it']:[]),...(saved.lastError?['Using the last successful snapshot; latest sync failed: '+saved.lastError.code]:[])]);},
     async original(ref:Ref,provider:SourceProvider){const saved=await read(),record=await provider.read(ref.id,saved?.checkpoint);assertVersion(ref,record.ref.version!);return record;},
   };
 }

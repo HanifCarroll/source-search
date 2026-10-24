@@ -44,7 +44,7 @@ Search/read also accept JSON on stdin. Run `bun run start mcp-config` to print a
 | Sources | Configuration |
 | --- | --- |
 | Markdown folders (`markdown`) | Named folders, file patterns, date fields, timezone and note/journal/transcript labels |
-| Task apps (`tasks`) | `connector`: Things, Todoist, TickTick, Apple Reminders, Microsoft To Do, or an app-neutral JSON file; run `sync-tasks` |
+| Task apps (`tasks`) | `connector`: Things, Todoist, TickTick, Apple Reminders, Microsoft To Do, Google Tasks, or an app-neutral JSON file; run `sync-tasks` |
 | `chatgpt-archive`, `takeout-archive`, `linkedin-archive`, `twitter-archive` | `paths`: selected export files; enable maintenance and run `rebuild` |
 | Messages (`messages`), WhatsApp (`whatsapp`) and Muesli (`muesli`) | `database`: a local application database and existing OS permissions |
 | Chromium metadata (`browser-history`, `browser-bookmarks`, `browser-downloads`) | `profiles`: stable IDs and Chrome, Edge, Brave or other compatible Chromium profile directories; downloads are metadata only |
@@ -219,6 +219,10 @@ On macOS, semantic and hybrid search also require Homebrew SQLite (`brew install
 
 For a derived library of mail, messages and selected archives, enable `libraryEnabled`, `maintenanceEnabled`, the `library` source and each contributing source, then run `bun run start index --library --embed`. The library works without a vault. Mail backfills may need several runs; `sources` reports progress. Omit `--embed` for keyword-only indexing. Changing the embedding model requires rebuilding embeddings; old vectors are not interchangeable.
 
+## Connected accounts
+
+Google and Outlook calendars and contacts use named `calendars` and `address-books` sources. Enable each source explicitly, authenticate, then run `sync-sources`. Search uses the last complete local snapshot; opening a result checks the current original. See [connector setup](docs/connectors.md) for configuration, selection and coverage.
+
 ## Connecting mail
 
 For JMAP, get the session URL and credentials from your provider. Fastmail documents its [session URL](https://www.fastmail.com/dev/) and [API tokens](https://www.fastmail.help/hc/en-us/articles/5254602856719-API-tokens). Put the token alone in a private file, set its permissions to `0600`, and use the JMAP configuration above. The connector discovers the primary mail account; set `accountId` to select another accessible account. Servers using HTTP Basic authentication accept `auth: {"type":"basic","username":"user@example.com","password":{"file":"/absolute/private/path/password"}}`.
@@ -241,7 +245,7 @@ For IMAP, add a source like this and include its ID in `enabledSources`:
 
 Use your provider's IMAP settings and app password if required. For port 143, set `security: "starttls"`; the connection must upgrade to TLS. Private certificate authorities can be supplied with `caFile`. Certificates are always verified.
 
-Every credential reference accepts one of `{"file":"/absolute/path"}`, `{"env":"VARIABLE_NAME"}` or `{"command":["/absolute/path/to/token-tool","argument"]}`. Commands run without a shell and must print one credential. They run again for each connection, allowing an existing credential tool to refresh tokens. For IMAP OAuth, use `auth: {"type":"oauth2","accessToken":{"command":["/path/to/token-tool"]}}`. Source Search does not register OAuth applications or perform browser sign-in; provider token scopes and refresh remain the credential tool's responsibility. Existing Gmail accounts can continue using `gog`.
+Every credential reference accepts one of `{"file":"/absolute/path"}`, `{"env":"VARIABLE_NAME"}` or `{"command":["/absolute/path/to/token-tool","argument"]}`. Commands run without a shell and must print one credential. They run again for each connection, allowing an existing credential tool to refresh tokens. For IMAP OAuth, use `auth: {"type":"oauth2","accessToken":{"command":["/path/to/token-tool"]}}`. For mail, Source Search does not perform browser sign-in; provider token scopes and refresh remain the credential tool's responsibility. Existing Gmail accounts can continue using `gog`.
 
 ### Search behavior
 
@@ -295,9 +299,3 @@ See [project architecture](docs/architecture.md) for module responsibilities and
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-### Google Tasks
-
-Use a task connector with `type: "google-tasks"`, a stable `account` name, and optional `lists` containing selected task-list IDs. Authenticate with either `token: {"env": "GOOGLE_ACCESS_TOKEN"}` or `oauth: {"clientId": "YOUR_DESKTOP_CLIENT_ID", "clientSecret": {"file": "/absolute/private/client-secret"}, "cache": "/absolute/private/google-login.json"}`. Create a Desktop OAuth client in Google Cloud and enable the Tasks API. The client secret field is optional when your client supports token exchange without it.
-
-Run `bun src/cli.ts login-google SOURCE_ID`, open the displayed sign-in URL, then use `task-lists SOURCE_ID` and `sync-tasks SOURCE_ID`. Login requests read-only Tasks access and uses a local callback; later syncs refresh silently. Completed, hidden and assigned tasks are included. Due dates are dates, as supplied by Google. Modified-since updates include deletions, with a complete daily reconciliation.

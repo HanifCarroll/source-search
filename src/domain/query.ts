@@ -1,4 +1,4 @@
-import {sourceKind,isMail,type SourceCatalog} from './source-catalog';
+import {sourceKind,isMail,connectedKinds,type SourceCatalog} from './source-catalog';
 import { isProjected, usesLibrary } from "./source-policy";
 import { fail } from "./identity";
 import { type Query, type RecordData } from "./contracts";
@@ -36,7 +36,7 @@ export function validateOptions(q: Query,catalog:SourceCatalog={}) {
     if(source === "vault" && (q.from || q.to || q.conversation || q.match || q.sections || q.types || (q.sort && q.sort!=="relevance")))fail("UNSUPPORTED_FILTER","QMD supports relevance ordering and mode only; use the original source readers for date/section filters");
     if(q.sections && (mail || source === "agent-history"))fail("UNSUPPORTED_FILTER","Provider-native searches cannot filter text sections; read the record and inspect its match/section instead");
     if(source !== "chatgpt-archive" && (q.roles !== undefined || q.contentTypes !== undefined || q.selectedBranch !== undefined))fail("UNSUPPORTED_FILTER","Role, contentTypes and selectedBranch filters are available only for the ChatGPT export");
-    if (q.types?.length && source !== "tasks" && source !== "takeout-archive" && source !== "things-archive" && source !== "chatgpt-archive" && source !== "linkedin-archive" && source !== "twitter-archive")
+    if (q.types?.length && !connectedKinds.includes(source as typeof connectedKinds[number]) && source !== "tasks" && source !== "takeout-archive" && source !== "things-archive" && source !== "chatgpt-archive" && source !== "linkedin-archive" && source !== "twitter-archive")
         fail("UNSUPPORTED_FILTER", `${source} has one record family; omit types. Use list_sources for supported filters.`);
     if (q.folders?.length && !mail)
         fail("UNSUPPORTED_FILTER", "Folder filters are available only for live mail sources");
@@ -46,7 +46,7 @@ export function validateOptions(q: Query,catalog:SourceCatalog={}) {
         fail("UNSUPPORTED_SORT", "Contacts have no occurrence date; use relevance or omit sort");
     if (q.match && source === "agent-history")
         fail("UNSUPPORTED_FILTER", "Agent history uses CASS native search syntax; omit match");
-    if (q.sort === "relevance" && !["markdown", "tasks", "things-archive", "takeout-archive", "chatgpt-archive", "linkedin-archive", "twitter-archive", "calendar", "contacts", "ical", "vcard", "chrome-bookmarks", "firefox-bookmarks", "safari-bookmarks", "agent-history", "vault"].includes(source))
+    if (q.sort === "relevance" && !connectedKinds.includes(source as typeof connectedKinds[number]) && !["markdown", "tasks", "things-archive", "takeout-archive", "chatgpt-archive", "linkedin-archive", "twitter-archive", "calendar", "contacts", "ical", "vcard", "chrome-bookmarks", "firefox-bookmarks", "safari-bookmarks", "agent-history", "vault"].includes(source))
         fail("UNSUPPORTED_SORT", `${source} supports newest/oldest, not relevance ranking`);
     if (source === "agent-history" && q.sort && q.sort !== "relevance")
         fail("UNSUPPORTED_SORT", "CASS uses native relevance ordering");
