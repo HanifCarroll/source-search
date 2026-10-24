@@ -25,7 +25,7 @@ src/
     sources.ts       Task and connected-source synchronization
     snapshots.ts     Atomic source snapshot/checkpoint writes
     library-sync.ts  Explicit projection orchestration
-    refresh.py       Existing optional refresh process
+    refresh.py       Independent source-sync and optional index workers
     documents/       Inventory, format readers, incremental pipeline, worker CLI
     embeddings/      Compatibility launcher for managed SDK embedding
   vendor/            Self-contained upstream-derived parsers and CASS protocol code
@@ -49,7 +49,7 @@ Library provenance validation uses original reads directly. It never recursively
 
 Presentation is a pure record-to-response transformation. Source adapters gather current availability information, such as whether a Chrome download still exists. That availability does not become part of the original record's version. Adapter identity is separate from a record version, so moving settings into an explicit source definition does not change unchanged originals. Cache guards bind mail to its provider/account and databases to their selected locations. Shared SQLite snapshots and column checks live in `platform/sqlite.ts`; Chrome and WhatsApp do not depend on Messages internals.
 
-Maintenance may use source readers and projection storage. The read interface cannot import maintenance. `test/architecture.test.ts` checks these import directions, runtime cycles, the retrieval graph, and the absence of direct file, network, or process access in domain modules. Put new behavior in its owning module rather than adding a generic shared helper file.
+Maintenance may use source readers and projection storage. The read interface cannot import maintenance. The source-sync import graph cannot load search modules. The optional refresh process runs snapshot sync independently of indexing and model work, using the same CLI commands as manual maintenance. `test/architecture.test.ts` checks these import directions, runtime cycles, the retrieval graph, and the absence of direct file, network, or process access in domain modules. Put new behavior in its owning module rather than adding a generic shared helper file.
 
 ## Search engines
 

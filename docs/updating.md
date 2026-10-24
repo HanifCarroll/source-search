@@ -41,7 +41,7 @@ Finally, run `bun run start sources` to check the enabled sources. This performs
 
 ## Existing indexes and rollback
 
-The maintenance separation keeps existing cache paths, checkpoints and references. `sync-sources` now also accepts tasks; `sync-tasks` remains available. Both commands save source snapshots without writing library projections. Run `index --library` when you want to update the combined library; `--update-only` only indexes already-published projections. No cache migration or embedding rebuild is needed for this change.
+The maintenance separation keeps existing cache paths, checkpoints and references. `sync-sources` now also accepts tasks; `sync-tasks` remains available. Both commands save source snapshots without writing library projections. Run `index --library` when you want to update the combined library; `--update-only` only indexes already-published projections. No cache migration or embedding rebuild is needed for this change. Restart the existing optional refresh job to load its independent source-sync worker. That worker also works with the library off; installations without configured models perform keyword indexing only.
 
 Keep configured cache and model paths stable. Maintenance updates changed projections incrementally; lexical search may be available while their embeddings catch up.
 

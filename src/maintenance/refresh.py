@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Refresh the private QMD index after stable changes; never edit originals."""
+"""Refresh selected source snapshots and optional search indexes; never edit originals."""
 import argparse
 import datetime
 import fcntl
@@ -140,6 +140,90 @@ class Refresher:
             self.status(state='error', error=str(error)[:500], retryInSeconds=delay)
 
 
+def embedding_enabled(config):
+    """Models are optional; keyword indexing never needs an embedding pass."""
+    models = config.get('searchModels')
+    if models:
+        return all(models.get(kind) for kind in ('embed', 'rerank', 'generate'))
+    return len(config.get('qmdModels', [])) == 3
+
+
+def index_commands(config, library=False):
+    # The separate source worker owns provider synchronization.
+    args = ['index', '--library', '--skip-source-sync'] if library else ['index']
+    commands = [(args, 3600 if library else 600)]
+    if embedding_enabled(config):
+        commands.append((['index', *(['--library'] if library else []), '--embed-only'], 1800))
+    return commands
+
+
+class CommandRunner:
+    """One worker's child process, with shared logging and cancellation behavior."""
+    def __init__(self, config_path, state_dir, stopping):
+        self.config_path, self.state_dir = str(config_path), Path(state_dir)
+        self.stopping, self.child = stopping, None
+        self.guard = threading.Lock()
+
+    def stop(self):
+        with self.guard:
+            if self.child and self.child.poll() is None:
+                try:
+                    os.killpg(self.child.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+
+    def run(self, config, commands, log_name):
+        binary = executable(config, 'bunBinary', 'bun')
+        cli = str(Path(__file__).resolve().parents[2] / 'src/cli.ts')
+        log = self.state_dir / (log_name + '.log')
+        if log.exists() and log.stat().st_size > 2 * 1024 * 1024:
+            os.replace(log, self.state_dir / (log_name + '.previous.log'))
+        with log.open('a') as output:
+            for args, timeout in commands:
+                with self.guard:
+                    if self.stopping.is_set():
+                        raise RuntimeError('Refresh interrupted; will resume after restart')
+                    output.write('\n' + stamp() + ' ' + ' '.join(args) + '\n'); output.flush()
+                    child = subprocess.Popen([binary, cli, *args], stdin=subprocess.DEVNULL, stdout=output, stderr=output,
+                                             start_new_session=True, env={**os.environ, 'SOURCE_SEARCH_CONFIG_FILE': self.config_path})
+                    self.child = child
+                try:
+                    # Short waits make shutdown responsive even if a child ignores SIGTERM.
+                    deadline = time.monotonic() + timeout
+                    while child.poll() is None and not self.stopping.is_set() and time.monotonic() < deadline:
+                        self.stopping.wait(0.25)
+                    if self.stopping.is_set():
+                        raise RuntimeError('Refresh interrupted; will resume after restart')
+                    if child.poll() is None:
+                        raise RuntimeError('Maintenance timed out; see private ' + log.name)
+                    if child.returncode:
+                        raise RuntimeError('Maintenance failed (exit ' + str(child.returncode) + '); see private ' + log.name)
+                finally:
+                    if child.poll() is None:
+                        self.stop()
+                        try:
+                            child.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            os.killpg(child.pid, signal.SIGKILL); child.wait()
+                    with self.guard:
+                        self.child = None
+
+
+def periodic_refresh(config_path, state_dir, name, enabled, refresh):
+    """Record each independent stage's outcome, retaining retryable failures."""
+    path = Path(state_dir) / (name + '-status.json')
+    try:
+        config = json.loads(Path(config_path).read_text())
+        if not config.get('maintenanceEnabled') or not enabled(config):
+            save(path, {'state': 'disabled', 'checkedAt': stamp()})
+            return
+        save(path, {'state': 'refreshing', 'checkedAt': stamp()})
+        refresh(config)
+        save(path, {'state': 'idle', 'checkedAt': stamp()})
+    except Exception as error:
+        save(path, {'state': 'error', 'error': str(error)[:500], 'checkedAt': stamp()})
+
+
 def run(config_path, state_dir):
     state_dir = Path(state_dir)
     state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -147,90 +231,48 @@ def run(config_path, state_dir):
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
+        lock.close()
         return
     stopping = threading.Event()
-    child = None
+    indexes = CommandRunner(config_path, state_dir, stopping)
+    sources = CommandRunner(config_path, state_dir, stopping)
 
     def stop(_signum, _frame):
+        # Workers observe this event and terminate their own process groups.
+        # Do not acquire a worker lock inside a signal handler.
         stopping.set()
-        if child and child.poll() is None:
-            os.killpg(child.pid, signal.SIGTERM)
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
     def refresh(config):
-        nonlocal child
-        binary = executable(config, 'bunBinary', 'bun')
-        cli = str(Path(__file__).resolve().parents[2] / 'src/cli.ts')
-        log = state_dir / 'refresh.log'
-        if log.exists() and log.stat().st_size > 2 * 1024 * 1024:
-            os.replace(log, state_dir / 'refresh.previous.log')
-        if not config.get('maintenanceEnabled') or not vault_roots(config):
-            raise RuntimeError('Vault maintenance is disabled')
         materialize(config)
-        with log.open('a') as output:
-            for command, timeout in [([], 600), (['--embed-only'], 1800)]:
-                if stopping.is_set():
-                    raise RuntimeError('Refresh interrupted; will resume after restart')
-                output.write('\n' + stamp() + ' Search index ' + ' '.join(command) + '\n'); output.flush()
-                child = subprocess.Popen([binary, cli, 'index', *command], stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True, env={**os.environ,"SOURCE_SEARCH_CONFIG_FILE":str(config_path)})
-                try:
-                    code = child.wait(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    os.killpg(child.pid, signal.SIGTERM)
-                    try:
-                        child.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(child.pid, signal.SIGKILL); child.wait()
-                    raise RuntimeError('Search index timed out')
-                finally:
-                    child = None
-                if code:
-                    raise RuntimeError('Search index failed (exit ' + str(code) + '); see private refresh.log')
-    def library_refresh(config):
-        nonlocal child
-        if not config.get('maintenanceEnabled') or 'library' not in config.get('enabledSources',[]):
-            return
-        log = state_dir / 'library-refresh.log'
-        if log.exists() and log.stat().st_size > 2 * 1024 * 1024:
-            os.replace(log, state_dir / 'library-refresh.previous.log')
-        cli = str(Path(__file__).resolve().parents[2] / 'src/cli.ts')
-        bun = executable(config, 'bunBinary', 'bun')
-        commands = [([bun, cli, 'index', '--library'], 3600),
-                    ([bun, cli, 'index', '--library', '--embed-only'], 1800)]
-        with log.open('a') as output:
-            for args, timeout in commands:
-                if stopping.is_set(): return
-                save(state_dir / 'library-status.json', {'state':'refreshing','step':Path(args[0]).name + ' ' + args[-1], 'checkedAt':stamp()})
-                child = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True, env={**os.environ,"SOURCE_SEARCH_CONFIG_FILE":str(config_path)})
-                timed_out = False
-                try:
-                    code = child.wait(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    timed_out = True
-                    os.killpg(child.pid, signal.SIGTERM)
-                    try: child.wait(timeout=10)
-                    except subprocess.TimeoutExpired: os.killpg(child.pid, signal.SIGKILL); child.wait()
-                    code = child.returncode
-                finally:
-                    child = None
-                if code:
-                    raise RuntimeError('Library maintenance failed (exit ' + str(code) + '); see private log')
-        save(state_dir / 'library-status.json', {'state':'idle','checkedAt':stamp()})
+        indexes.run(config, index_commands(config), 'refresh')
 
+    def sync_loop():
+        while not stopping.is_set():
+            periodic_refresh(config_path, state_dir, 'sources', lambda c: bool(c.get('enabledSources')),
+                             lambda c: sources.run(c, [(['sync-sources'], 3600)], 'sources-refresh'))
+            stopping.wait(60)
+
+    # Snapshot sources stay current even while embeddings load or an index fails.
+    source_worker = threading.Thread(target=sync_loop, name='source-sync')
+    source_worker.start()
     worker = Refresher(config_path, state_dir, refresh)
     next_library = 0
-    while not stopping.is_set():
-        worker.step(time.monotonic())
-        try:
-            config = json.loads(Path(config_path).read_text())
-            if config.get('libraryEnabled') and time.monotonic() >= next_library and not stopping.is_set():
-                library_refresh(config)
+    try:
+        while not stopping.is_set():
+            worker.step(time.monotonic())
+            if time.monotonic() >= next_library and not stopping.is_set():
+                periodic_refresh(config_path, state_dir, 'library',
+                                 lambda c: c.get('libraryEnabled') and 'library' in c.get('enabledSources', []),
+                                 lambda c: indexes.run(c, index_commands(c, library=True), 'library-refresh'))
                 next_library = time.monotonic() + 60
-        except Exception as error:
-            save(state_dir / 'library-status.json', {'state':'error','error':str(error)[:500],'checkedAt':stamp()})
-            next_library = time.monotonic() + 60
-        stopping.wait(30)
+            stopping.wait(30)
+    finally:
+        stopping.set()
+        sources.stop(); indexes.stop()
+        source_worker.join()
+        lock.close()
 
 
 def main():
