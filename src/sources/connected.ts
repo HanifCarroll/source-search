@@ -4,6 +4,7 @@ import {providerHttp} from '../platform/http';
 import {scopedProvider,snapshotStore} from './sync/cache';
 import {googleCalendarProvider,googleContactsProvider} from './pim/google';
 import {microsoftCalendarProvider,microsoftContactsProvider} from './pim/microsoft';
+import {davProvider} from './pim/dav';
 import {graphOrigin,graphHeaders} from './sync/graph';
 import {fail} from '../domain/identity';
 import type {SourceProvider} from './sync/model';
@@ -15,6 +16,7 @@ export function connectedProvider(c:Config,source:string):SourceProvider{
   requireSource(c,source);const s=c.sources[source];
   if(s?.adapter!=='calendars'&&s?.adapter!=='address-books')fail('SOURCE_NOT_CONFIGURED','Configure a connected source');
   const connector=s.connector,bind=(p:SourceProvider)=>scopedProvider(p,sourceScope(c,source));
+  if(connector.type==='caldav'||connector.type==='carddav')return bind(davProvider(source,connector,s.adapter==='calendars'?s.window:{pastDays:730,futureDays:365}));
   if(connector.type==='google'){
     const http=providerHttp(s.adapter==='calendars'?'https://www.googleapis.com/calendar/v3':'https://people.googleapis.com/v1',{token:sourceToken(c,source)}).json;
     return bind(s.adapter==='calendars'?googleCalendarProvider(source,'collections' in connector?connector.collections:undefined,s.window,http):googleContactsProvider(source,http));

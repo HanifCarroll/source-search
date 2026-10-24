@@ -42,3 +42,26 @@ For Outlook, use `type: "microsoft"` and `oauth: {"clientId": "YOUR_APPLICATION_
 Either provider accepts `token` instead of `oauth`, using an environment variable, private file, or token command. Supply a current access token with the corresponding read scope. Keep `account` stable for one account and change it when switching accounts; rotating a credential does not invalidate saved references.
 
 Calendar snapshots contain occurrences in the configured window, including recurring exceptions and all-day events. The window advances daily. Search outside it reports the coverage limit; widen it and synchronize to include older or future events. Google uses sync tokens. Outlook uses delta queries for its primary calendar and full bounded views for other calendars. Contacts use Google sync tokens or Outlook folder deltas. Expired tokens trigger a complete replacement scan. Contact search has no occurrence-date filters.
+
+## CalDAV and CardDAV
+
+Use `calendars` with `type: "caldav"`, or `address-books` with `type: "carddav"`:
+
+```json
+{
+  "nextcloud-contacts": {
+    "adapter": "address-books",
+    "connector": {
+      "type": "carddav",
+      "account": "personal",
+      "serverUrl": "https://cloud.example.com/remote.php/dav",
+      "username": "user",
+      "password": {"file": "/absolute/private/dav-app-password"}
+    }
+  }
+}
+```
+
+Use your provider's DAV endpoint and app password. Fastmail uses `https://caldav.fastmail.com/` or `https://carddav.fastmail.com/`; Nextcloud provides its DAV URL in calendar/contact settings. `source-lists` discovers collection URLs; put selected URLs in `collections`. Calendar `window` works as above. `connector.timeZone` sets the IANA timezone for floating/all-day calendar values (UTC by default).
+
+The [tsdav client](https://tsdav.vercel.app/intro/) handles DAV discovery, XML and synchronization. Supported servers use sync tokens, including deletions and expired-token recovery. Other servers use collection tags, fetching a full collection only when changed (or when no tag is available). Calendar objects are retained for local recurrence expansion; searchable occurrences stay inside the configured window. Some providers discover a different host; list its exact HTTPS origin in `allowedOrigins`, or configure the provider's final endpoint directly.

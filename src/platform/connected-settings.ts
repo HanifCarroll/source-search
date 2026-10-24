@@ -1,12 +1,15 @@
 import {z} from 'zod';
-import {googleAuth,microsoftAuth,oneCredential} from './auth-settings';
+import {googleAuth,microsoftAuth,oneCredential,secretSchema} from './auth-settings';
 const account=z.string().min(1).max(200);
 const selected=z.array(z.string().min(1).max(2000)).min(1).max(100).optional();
 const google=z.object({type:z.literal('google'),account,collections:selected,...googleAuth}).strict().refine(oneCredential,'Select Google OAuth or an external token');
 const microsoft=z.object({type:z.literal('microsoft'),account,collections:selected,...microsoftAuth}).strict().refine(oneCredential,'Select Microsoft OAuth or an external token');
 export const calendarWindowSchema=z.object({pastDays:z.number().int().min(0).max(36500).default(730),futureDays:z.number().int().min(1).max(36500).default(365)}).strict().default({pastDays:730,futureDays:365});
-export const calendarSettings=z.object({adapter:z.literal('calendars'),label:z.string().max(120).optional(),window:calendarWindowSchema,connector:z.discriminatedUnion('type',[google,microsoft])}).strict();
-export const contactSettings=z.object({adapter:z.literal('address-books'),label:z.string().max(120).optional(),connector:z.discriminatedUnion('type',[z.object({type:z.literal('google'),account,...googleAuth}).strict().refine(oneCredential,'Select Google OAuth or an external token'),microsoft])}).strict();
+const davFields={account,serverUrl:z.url().refine(v=>{const u=new URL(v);return u.protocol==='https:'&&!u.username&&!u.password&&!u.hash;},'Use an HTTPS DAV endpoint'),username:z.string().min(1),password:secretSchema,collections:selected,allowedOrigins:z.array(z.url().refine(v=>new URL(v).protocol==='https:'&&new URL(v).origin===v)).max(10).default([]),timeZone:z.string().default('UTC').refine(v=>{try{new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}},'Use an IANA timezone')};
+const caldav=z.object({type:z.literal('caldav'),...davFields}).strict(),carddav=z.object({type:z.literal('carddav'),...davFields}).strict();
+export type DavSettings=z.infer<typeof caldav>|z.infer<typeof carddav>;
+export const calendarSettings=z.object({adapter:z.literal('calendars'),label:z.string().max(120).optional(),window:calendarWindowSchema,connector:z.discriminatedUnion('type',[google,microsoft,caldav])}).strict();
+export const contactSettings=z.object({adapter:z.literal('address-books'),label:z.string().max(120).optional(),connector:z.discriminatedUnion('type',[z.object({type:z.literal('google'),account,...googleAuth}).strict().refine(oneCredential,'Select Google OAuth or an external token'),microsoft,carddav])}).strict();
 export type CalendarSettings=z.infer<typeof calendarSettings>;
 export type ContactSettings=z.infer<typeof contactSettings>;
 export const connectedSettings=[calendarSettings,contactSettings] as const;
