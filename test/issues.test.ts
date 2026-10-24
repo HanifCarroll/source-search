@@ -31,6 +31,19 @@ test('GitHub rejects pagination that leaves the selected repository',async()=>{
   await expect(provider.sync()).rejects.toMatchObject({code:'INVALID_PROVIDER_RESPONSE'});
 });
 
+test('GitHub resolves numeric repository pagination aliases and rejects a different repository ID',async()=>{
+  for(const origin of ['https://api.github.com','https://github.example.test/api/v3'])for(const correct of [true,false]){
+    const seen:string[]=[],provider=githubProvider('github',['example/lab'],async path=>{
+      seen.push(path);
+      if(path==='/repos/example/lab')return {data:{id:42,full_name:'example/lab'},headers:new Headers()};
+      const link=path.startsWith('/repos/example/lab/issues?')?`<${origin}/repositories/${correct?42:999}/issues?page=2>; rel="next"`:'';
+      return {data:[],headers:new Headers(link?{link}:{})};
+    },origin);
+    if(correct){expect((await provider.sync()).records).toEqual([]);expect(seen).toContain('/repositories/42/issues?page=2');}
+    else{await expect(provider.sync()).rejects.toMatchObject({code:'INVALID_PROVIDER_RESPONSE'});expect(seen.some(v=>v.startsWith('/repositories/999'))).toBe(false);}
+  }
+});
+
 const issue={id:'i',identifier:'LAB-1',title:'Invented telescope',description:'Mirror tests',url:'https://linear.app/example/issue/LAB-1',createdAt:'2026-10-01T12:00:00Z',updatedAt:'2026-10-24T12:00:00Z',archivedAt:null,dueDate:null,priorityLabel:'High',state:{name:'Started'},assignee:null,team:{id:'team',name:'Lab'},project:null};
 const comment={id:'c',body:'Use a prism',url:issue.url+'#comment-c',createdAt:issue.createdAt,updatedAt:issue.updatedAt,archivedAt:null,user:{name:'Invented'},parent:null,issue};
 test('Linear polls comments independently, rejects partial GraphQL errors, and checks original team scope',async()=>{
