@@ -45,7 +45,8 @@ export function memoryTools(config:Config,read:(ref:Ref)=>Promise<{record:Record
         return {source:e.ref.source,status:'current' as const,checkedAt:now()};
       }catch(error){return {source:e.ref.source,status:'unavailable' as const,checkedAt:now(),error:errorData(error)};}
     }):undefined;
-    const result={memory:visible(saved),evidenceChecks};assertPacket(result);return result;
+    const corrections=await list_memories({corrects:{id:saved.id,revision:saved.revision},limit:5});
+    const result={memory:visible(saved),evidenceChecks,corrections};assertPacket(result);return result;
   }
   async function list_memories(input:unknown):Promise<{items:{id:string;revision:number;kind:string;status:string;text:string;truncated:boolean;entities:string[];updatedAt:string;knowledge:string}[];nextCursor?:string}>{
     const request=listMemoriesSchema.parse(input),result=await store.list(request);

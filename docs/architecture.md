@@ -1,13 +1,13 @@
 # Project architecture
 
-Source Search has one read interface: `createRuntime(config)` supplies source status, search, record reads, and evidence-based context. CLI and MCP call that interface. Explicit maintenance builds disposable projections; retrieval does not start maintenance.
+Source Search has one application interface: `createRuntime(config)` supplies source retrieval, evidence-based context, deliberate local memory, and change feeds. CLI and MCP call that interface. Explicit maintenance builds disposable projections; retrieval does not start maintenance or save memories.
 
 ```
 src/
   application/       Source registration, request orchestration, catalogue, previews
   interfaces/        CLI, guided setup, diagnostics, MCP transport, runtime reload
   domain/            Record/query contracts, matching, identity, pagination, presentation
-  platform/          Configuration, private storage, files, SQLite snapshots
+  platform/          Configuration, private storage, snapshots, memory revisions/backup
   formats/           HTML, MIME, calendar and YAML format adapters
   sources/
     mail/            Shared mail records, JMAP/IMAP connectors, legacy CLI adapters
@@ -60,6 +60,16 @@ Providers attach `RecordData.identifiers` from structured headers, participants 
 `application/context.ts` coordinates existing original reads and searches through two injected operations. It owns bounded meeting/project retrieval, per-request read deduplication, evidence attribution, and partial results. It has no provider registry, model dependency, persistence or maintenance side effects. `runtime.ts` binds it to the same source access and search behavior used by the ordinary tools. The calling agent interprets the evidence; Source Search does not turn text into asserted decisions or commitments.
 
 Context packets distinguish configured record/identifier links from saved-query candidates. They retain source coverage, original-read failures, ambiguous links, and search continuation tokens. A meeting anchor must still exist at the saved version. `coverage.planComplete` describes completion of the configured retrieval plan only. `library` and `documents` remain discovery projections; context uses original source references to avoid treating a projection as independent evidence.
+
+## Durable continuity
+
+`domain/memory.ts` defines deliberate statements, correction links, outcome attestations and revision requests. `application/memory.ts` checks selected original evidence through the existing reader, binds it to its source selection, and exposes revisions and active corrections. An evidence read establishes that a pinned record/quote was available at that time; it does not establish the truth of the authored claim. Verification remains an explicit, attributed attestation.
+
+`platform/memory-store.ts` owns one durable SQLite database outside cache roots. An immediate transaction commits the immutable revision and operation receipt together. The revision sequence is also the memory feed, avoiding a second write or reconciliation process. Expected revisions prevent lost updates; a unique operation ID makes an uncertain retry return its original receipt. Historical reads, list pagination and exports use committed revisions. Export reads one transaction; restore validates its checksum, schema and history before writing into an empty destination and starts a new feed identity. Private backups retain authored content and evidence even when a source is disabled. Normal tools hide disabled or reselected evidence; re-enabling the same selection makes it readable again.
+
+`platform/record-store.ts` appends source change events in the same transaction as snapshot records and checkpoints. Initialization and changed selections produce baseline resets; unchanged observations produce no events. Added/updated/removed events describe selected snapshots, not all changes in a provider. The source feed stays with the disposable record cache; its identity and selected scopes are part of each cursor. Cleanup or replacement requires a rescan, never silent continuation across lost history. Direct readers and independently indexed sources report unsupported coverage. Neither feed starts a watcher, sync, or external action.
+
+The runtime composes these small owners without a graph store, model, queue or second provider registry. Context assembly remains read-only; callers can separately retrieve memories for its configured entity ID. Only `write_memory` mutates durable memory through MCP. File export/restore remains explicit CLI maintenance.
 
 ## Search engines
 

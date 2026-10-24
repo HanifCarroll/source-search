@@ -116,3 +116,60 @@ Book formats (EPUB, MOBI, AZW/AZW3, FB2 and DJVU) are excluded, including previo
 ## Cache retention
 
 Caches store retrieved text, attachments and previews. Disabling a source stops future access while retaining its cache. To remove cached data, stop maintenance and run `bun run start purge-cache` to preview the cleanup, then add `--apply`. The command handles the default managed cache; custom locations and backups need separate cleanup.
+
+## Deliberate memory
+
+Memory is local authored information: `decision`, `preference`, `commitment`, `correction` or `outcome`. Search and context tools never create it automatically. Originals remain in their apps. No additional service or model is required.
+
+CLI commands share the MCP schemas:
+
+| CLI | MCP | Purpose |
+| --- | --- | --- |
+| `memories '[JSON]'` | `list_memories` | Filter by `query` (case-insensitive substring), `kind`, `entity` or `corrects: {id, revision}`; follow `nextCursor` |
+| `memory '<JSON>'` | `read_memory` | Read by `id`, optionally `revision` and `checkEvidence: true`; includes active corrections |
+| `remember '<JSON>'` | `write_memory` | Create, replace or retract a memory with a reason |
+| `changes '<JSON>'` | `list_changes` | Read changes since a saved cursor |
+
+All accept JSON on stdin (`memories` defaults to an empty filter). A new memory request looks like this; generate a new UUID for each distinct operation:
+
+```json
+{
+  "operationId": "9a810dac-26da-4e4a-9c33-a9af2d39e1f7",
+  "reason": "The user asked to remember this preference",
+  "memory": {"kind": "preference", "text": "Use concise meeting summaries."}
+}
+```
+
+After an uncertain response, retry the **same input and operationId**. To edit, supply the returned `id`, `expectedRevision`, a new operation ID and the complete replacement `memory`. `REVISION_CONFLICT` means read the current revision before editing. To withdraw an entry, use `action: "retract"`, its `id`/`expectedRevision` and a reason, omitting `memory`. Retraction preserves history; normal lists exclude it. Earlier revisions remain readable.
+
+Use `entities` for IDs from private `contextEntities`. A correction needs `corrects: {id, revision}`. It appears when reading that original revision without rewriting it; use an edit when replacing the current statement. Read full memories and their corrections before using list previews as facts. Context packets and durable memories remain separate: for a project, call `build_context`, then `list_memories` with its entity ID.
+
+Optional `evidence` entries contain the original `{source, id, version}` reference and an optional exact `quote`. Save at most five citations. If a search preview has no version, call `read_record` first and use the returned versioned reference. Writes reopen pinned originals and check quotes. Use the original reference behind library/document hits. Some references, especially CASS query-bound references, can expire; `read_memory` with `checkEvidence: true` reports this while preserving the authored memory and its historical check time. Disabled or reselected sources hide their stored citation details in ordinary tool responses. Authored memory text remains available independently.
+
+An outcome is a statement unless it includes `verification: {method, observation, by}` and evidence. This records the caller's explicit verification attestation and citation-check time. Source Search checks the cited record and quote, not whether they prove the outcome. Changed or missing evidence is reported separately; a failed recheck never silently rewrites history.
+
+### Backup and restore
+
+`memoryRoot` defaults to `~/.local/share/source-search/memory`. It must be separate from every cache path. The directory is created on the first write. Cache cleanup leaves it intact. Include it in your normal private backups, or export a portable JSON snapshot:
+
+```sh
+bun run start memory-export /absolute/private/backup/memory.json
+```
+
+Export includes all revisions, retractions, citations and retry receipts. The destination must be new; its directory must be private (0700). The export is private (0600), checksummed and limited to 60 MiB of revision data. For a larger store use SQLite's supported backup tooling. Avoid copying an active database file without a consistent SQLite snapshot.
+
+To recover, set `memoryRoot` in the destination config to an empty private location, then run:
+
+```sh
+bun run start memory-restore /absolute/private/backup/memory.json
+```
+
+Restore validates the format, checksum and revision history, preserves IDs and receipts, and refuses to overwrite existing memories. It starts a new feed identity; consumers must rescan. A checksum detects accidental changes, not who authored a backup. Restored verification is historical; recheck important evidence in the destination setup. Export files include the original stored evidence even if its source is currently disabled.
+
+### Resuming changes
+
+Call `list_changes` with `{"feed":"memory"}` or `{"feed":"sources","sources":["todo","agenda"]}`. Save the returned `cursor` **after** processing that page, including empty pages. Pass it in the next request; drain pages while `hasMore` is true. A consumer interrupted before saving its cursor may see events again, so use feed identity plus sequence (or memory ID/revision) to deduplicate its own work.
+
+The memory feed retains every deliberate revision. The source feed covers adapters loaded by `sync-sources`: tasks, calendars, address books, notes, files, issues, chat and repositories. Read `coverage` for sync freshness/failures and sources without tracking. Direct notes/mail/messages, native PIM, archives, browsers, CASS and QMD do not publish source events in this phase. Their current read/search behavior is unchanged.
+
+The first sync, an upgraded pre-existing snapshot, or a changed account/selection emits `reset`: enumerate the current snapshot using ordinary search pagination to establish a baseline. Later events are `added`, `updated` or `removed` from the selected snapshot; removal can reflect a changed coverage window rather than upstream deletion. Events describe observations, so changes between syncs may be absent. Unchanged syncs and failed syncs add no events; failures remain in coverage. After cache cleanup or restore, `FEED_RESET` requires rescan and a fresh cursor. Changing the selected source IDs/scopes requires a new cursor. This pull interface adds no schedules or actions.

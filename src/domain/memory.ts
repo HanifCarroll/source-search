@@ -22,7 +22,7 @@ export const writeMemorySchema=z.object({
   if(Buffer.byteLength(JSON.stringify(r))>16000)ctx.addIssue({code:'custom',message:'Memory request exceeds 16,000 bytes'});
 });
 export const readMemorySchema=z.object({id:z.uuid(),revision:z.number().int().positive().optional(),checkEvidence:z.boolean().default(false)}).strict();
-export const listMemoriesSchema=z.object({query:z.string().max(500).default(''),kind:memoryKind.optional(),entity:sourceId.optional(),includeRetracted:z.boolean().default(false),cursor:z.string().max(2000).optional(),limit:z.number().int().min(1).max(50).default(20)}).strict();
+export const listMemoriesSchema=z.object({query:z.string().max(500).default(''),kind:memoryKind.optional(),entity:sourceId.optional(),corrects:memoryRefSchema.optional(),includeRetracted:z.boolean().default(false),cursor:z.string().max(2000).optional(),limit:z.number().int().min(1).max(50).default(20)}).strict();
 export const checkedEvidenceSchema=evidenceSchema.extend({checkedAt:z.iso.datetime(),scope:z.string().min(1).max(100)});
 export const memoryRevisionSchema=z.object({
   id:z.uuid(),revision:z.number().int().positive(),sequence:z.number().int().positive(),operationId:z.uuid(),requestHash:z.string().regex(/^[a-f0-9]{64}$/),

@@ -63,8 +63,11 @@ test('corrections cite a specific previous memory without silently rewriting it'
   await expect(rt.write_memory({...request(),memory:{kind:'correction',text:'Use detailed summaries',corrects:{id:randomUUID(),revision:1}}})).rejects.toMatchObject({code:'MISSING_MEMORY'});
   const correction=(await rt.write_memory({...request(),memory:{kind:'correction',text:'Use detailed summaries',corrects:{id:first.id,revision:1}}})).memory;
   expect(correction.corrects).toEqual({id:first.id,revision:1});
-  expect((await rt.read_memory({id:first.id})).memory.text).toBe(first.text);
+  const read=await rt.read_memory({id:first.id});expect(read.memory.text).toBe(first.text);
+  expect(read.corrections.items[0]!.id).toBe(correction.id);
   expect((await rt.list_memories({kind:'correction',query:'DETAILED'})).items).toHaveLength(1);
+  await rt.write_memory({operationId:randomUUID(),action:'retract',id:correction.id,expectedRevision:1,reason:'Correction withdrawn'});
+  expect((await rt.read_memory({id:first.id})).corrections.items).toEqual([]);
 }));
 
 test('pagination stays stable while memories change and the feed resumes after a restart',()=>fixture(async(_root,c,rt)=>{

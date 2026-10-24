@@ -169,14 +169,15 @@ test("mail context follows the selected message, handles the Fastmail envelope, 
   expect(partial.record.body).toBe("original body"); expect(partial.contextWarnings.length).toBe(1);
 });
 
-test("real MCP transport exposes only reads and returns the same substantive search as the CLI runtime", async () => {
+test("real MCP transport distinguishes memory writes and returns the same substantive search as the CLI runtime", async () => {
   config.voiceNotes = join(root, "voice"); await mkdir(config.voiceNotes); await writeFile(join(config.voiceNotes, "2024-01-01 - Voice - Fixture.md"), "networking voice fixture");
   const configPath = join(root, "config.json"); await writeFile(configPath, JSON.stringify(config));
   const transport = new StdioClientTransport({ command: process.execPath, args: [join(import.meta.dir, "../src/mcp.ts")], env: { ...process.env as Record<string, string>, SOURCE_SEARCH_CONFIG_FILE: configPath }, stderr: "pipe" });
   const client = new Client({ name: "source-search-test", version: "1" });
   try {
-    await client.connect(transport); const tools = await client.listTools(); expect(tools.tools.map(t => t.name).sort()).toEqual(["build_context", "list_context_entities", "list_sources", "read_record", "search_sources"]);
-    expect(tools.tools.every(t => t.annotations?.readOnlyHint)).toBe(true);
+    await client.connect(transport); const tools = await client.listTools(); expect(tools.tools.map(t => t.name).sort()).toEqual(["build_context", "list_changes", "list_context_entities", "list_memories", "list_sources", "read_memory", "read_record", "search_sources", "write_memory"]);
+    expect(tools.tools.filter(t=>t.name!=='write_memory').every(t => t.annotations?.readOnlyHint)).toBe(true);
+    expect(tools.tools.find(t=>t.name==='write_memory')!.annotations?.readOnlyHint).toBe(false);
     const response = await client.callTool({ name: "search_sources", arguments: { queries: [{ source: "journals", query: "networking" }] } });
     const data = JSON.parse((response.content as any[])[0].text); expect(data.results[0].items[0].ref.id).toBe("2024/01-January/2024-01-01.md");
     const schema = tools.tools.find(t => t.name === "search_sources")!.inputSchema as any;

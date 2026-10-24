@@ -7,7 +7,7 @@ import {regular} from './source-files';
 import {fail,hash,stableJson,now,cursor,position} from '../domain/identity';
 import {changeCursor,changePosition} from '../domain/changes';
 import {memoryRevisionSchema,type MemoryRevision,type WriteMemory,type CheckedEvidence,type listMemoriesSchema} from '../domain/memory';
-import type {z} from 'zod';
+import {z} from 'zod';
 
 type Row={data:string};
 const parse=(row:Row|null)=>row?JSON.parse(row.data) as MemoryRevision:undefined;
@@ -71,13 +71,15 @@ export function memoryStore(root:string){
     try{return db.transaction(()=>{
       const {cursor:token,limit,...filters}=q,key=hash(stableJson(filters)+epoch(db)),top=high(db);
       let point={high:top,before:top+1};
-      if(token){try{point=JSON.parse(String(position(token,key)));}catch{fail('INVALID_CURSOR','Invalid memory-list cursor');}}
+      if(token){try{point=z.object({high:z.number().int(),before:z.number().int()}).strict().parse(JSON.parse(String(position(token,key))));}catch{fail('INVALID_CURSOR','Invalid memory-list cursor');}}
       if(!Number.isSafeInteger(point.high)||point.high<0||point.high>top||!Number.isSafeInteger(point.before)||point.before<1||point.before>point.high+1)fail('INVALID_CURSOR','Invalid memory-list position');
       const rows=db.query(`WITH latest AS (SELECT id,MAX(sequence) AS sequence FROM revisions WHERE sequence<=? GROUP BY id)
         SELECT r.data FROM revisions r JOIN latest l ON r.sequence=l.sequence
         WHERE r.sequence<? AND (? OR json_extract(r.data,'$.status')='active')
         AND (? IS NULL OR json_extract(r.data,'$.content.kind')=?)
-        AND (? IS NULL OR EXISTS (SELECT 1 FROM json_each(r.data,'$.content.entities') WHERE value=?)) ORDER BY r.sequence DESC`).iterate(point.high,point.before,q.includeRetracted?1:0,q.kind||null,q.kind||null,q.entity||null,q.entity||null) as Iterable<Row>;
+        AND (? IS NULL OR EXISTS (SELECT 1 FROM json_each(r.data,'$.content.entities') WHERE value=?))
+        AND (? IS NULL OR (json_extract(r.data,'$.content.corrects.id')=? AND json_extract(r.data,'$.content.corrects.revision')=?))
+        ORDER BY r.sequence DESC`).iterate(point.high,point.before,q.includeRetracted?1:0,q.kind||null,q.kind||null,q.entity||null,q.entity||null,q.corrects?.id||null,q.corrects?.id||null,q.corrects?.revision||null) as Iterable<Row>;
       const items:MemoryRevision[]=[];
       for(const row of rows){const r=parse(row)!;if(r.content.text.normalize('NFKC').toLowerCase().includes(q.query.normalize('NFKC').toLowerCase()))items.push(r);if(items.length>limit)break;}
       const more=items.length>limit;items.length=Math.min(items.length,limit);

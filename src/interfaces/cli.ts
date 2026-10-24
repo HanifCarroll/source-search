@@ -12,6 +12,7 @@ import {indexSources} from "../maintenance/search-index";
 import { errorData,fail } from "../domain/identity";
 import {taskProvider} from '../sources/tasks';
 import {microsoftToken} from '../platform/microsoft-auth';
+import {exportMemory,restoreMemory} from '../platform/memory-backup';
 
 const [command, argument] = process.argv.slice(2);
 try {
@@ -27,6 +28,14 @@ try {
   else if (command === "read") result = await runtime.read_record(JSON.parse(argument || await Bun.stdin.text()));
   else if (command === 'entities') result = await runtime.list_context_entities(JSON.parse(argument || '{}'));
   else if (command === 'context') result = await runtime.build_context(JSON.parse(argument || await Bun.stdin.text()));
+  else if (command === 'memories') result = await runtime.list_memories(JSON.parse(argument || '{}'));
+  else if (command === 'memory') result = await runtime.read_memory(JSON.parse(argument || await Bun.stdin.text()));
+  else if (command === 'remember') result = await runtime.write_memory(JSON.parse(argument || await Bun.stdin.text()));
+  else if (command === 'changes') result = await runtime.list_changes(JSON.parse(argument || await Bun.stdin.text()));
+  else if (command === 'memory-export' || command === 'memory-restore') {
+    if(!argument)fail('INVALID_REQUEST',command+' requires an absolute file path');
+    result=await (command==='memory-export'?exportMemory:restoreMemory)(config.memoryRoot,argument);
+  }
   else if (command === "rebuild") result = await rebuildConfiguredArchives(config);
   else if(command === 'sync-sources'){result=await syncSources(config,argument);if(!(result as {ok:boolean}).ok)process.exitCode=1;}
   else if(command === 'source-lists'){
@@ -55,7 +64,7 @@ try {
   else if (command === "purge-cache") result = await purgeCache(config,argument === "--apply");
   else if (command === "mcp") { await import("./mcp"); }
   else {
-    console.log("source-search setup [--notes /folder] | doctor | mcp-config | models download | index [--source ID | --library] [--embed] | sources | search '<JSON>' | read '<JSON>' | entities '[JSON]' | context '<JSON>' | rebuild | sync-tasks [SOURCE_ID] | sync-sources [SOURCE_ID] | source-lists SOURCE_ID | task-lists SOURCE_ID | login-microsoft SOURCE_ID | login-google SOURCE_ID | purge-cache [--apply] | mcp\nSearch input: {\"queries\":[{\"source\":\"notes\",\"query\":\"meeting\"}]}\nRead input: {\"ref\":{\"source\":\"notes\",\"id\":\"<returned ID>\"}}\nSearch, read and context accept JSON on stdin. Rebuild changes only the disposable archive index.");
+    console.log("source-search setup [--notes /folder] | doctor | mcp-config | models download | index [--source ID | --library] [--embed] | sources | search '<JSON>' | read '<JSON>' | entities '[JSON]' | context '<JSON>' | memories '[JSON]' | memory '<JSON>' | remember '<JSON>' | changes '<JSON>' | memory-export PATH | memory-restore PATH | rebuild | sync-tasks [SOURCE_ID] | sync-sources [SOURCE_ID] | source-lists SOURCE_ID | task-lists SOURCE_ID | login-microsoft SOURCE_ID | login-google SOURCE_ID | purge-cache [--apply] | mcp\nSearch input: {\"queries\":[{\"source\":\"notes\",\"query\":\"meeting\"}]}\nRead input: {\"ref\":{\"source\":\"notes\",\"id\":\"<returned ID>\"}}\nJSON commands accept stdin. Rebuild changes only the disposable archive index; remember writes durable local memory.");
   }
   if (result !== undefined) console.log(JSON.stringify({ ok: true, data: result }));
 } catch (error) { console.error(JSON.stringify({ ok: false, error: errorData(error) })); process.exitCode = 1; }
