@@ -19,7 +19,7 @@ The pinned QMD dependency has a Bun patch for [slow collection-scoped vector loo
 
 | Sources | Update behavior |
 | --- | --- |
-| JMAP mail | One initial inventory, then `Email/changes` for additions, updates and removals. Expired change history or changed mailbox definitions trigger a new inventory. |
+| JMAP mail | Capture the initial ID inventory before downloading bodies in resumable batches, then drain `Email/changes` for activity during the scan. Later passes retrieve additions, updates and removals. Expired change history or changed mailbox definitions trigger a new inventory. |
 | IMAP mail | Retain UIDVALIDITY and UID inventories per mailbox. Unchanged HIGHESTMODSEQ/UIDNEXT/count skips message retrieval where available. Other servers list UIDs and fetch only new envelopes and changed folder memberships. UIDVALIDITY changes reset that mailbox. |
 | Gmail through `gog` | Additions history between daily full reconciliations. The supported CLI exposes only additions, so full scans remain necessary for deletions and labels. Older versions without history use paginated reconciliation. |
 | Legacy mailbridge | Paginated reconciliation; unchanged message summaries reuse cached bodies. Native JMAP offers a complete change feed. |

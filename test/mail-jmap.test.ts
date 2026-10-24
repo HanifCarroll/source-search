@@ -32,6 +32,35 @@ test('JMAP expired history re-enumerates before pruning and captures the pre-sca
   const reset=await backend.sync(initial.checkpoint);expect(reset.inventory).toHaveLength(7);expect(reset.checkpoint).toMatchObject({state:'expired-next'});
   const methods=f.state.requests.map(r=>r.method);expect(methods.indexOf('Email/get')).toBeLessThan(methods.indexOf('Email/query'));
 }));
+test('JMAP inventories IDs before body downloads and reconciles mailbox activity before completion',()=>fixture(async(f,c)=>{
+  const sample=f.state.emails[0]!;
+  f.state.emails=Array.from({length:60},(_,i)=>({...sample,id:'fixture'+i,receivedAt:new Date(Date.UTC(2026,0,1+i)).toISOString()}));
+  const backend=connector(c,'team-mail')!,first=await backend.sync(),records=new Set(first.messages.map(m=>m.summary.message_id));
+  expect(first.hasMore).toBe(true);expect(first.messages).toHaveLength(25);expect(first.inventory).toBeUndefined();
+  expect(first.checkpoint).toMatchObject({pending:{offset:25}});expect(Array.isArray((first.checkpoint as any).pending.ids)).toBe(true);
+  const trashed=first.messages[0]!.summary.message_id;
+  f.state.emails.find(e=>e.id===trashed)!.mailboxIds={inbox:false,trash:true} as any;
+  f.state.emails=f.state.emails.filter(e=>e.id!=='fixture30');
+  f.state.emails.push({...sample,id:'arrival',receivedAt:'2026-12-01T00:00:00Z'});f.state.version='state2';
+  f.state.changes.push({oldState:'state1',newState:'state2',created:['arrival'],updated:[trashed],destroyed:['fixture30'],hasMoreChanges:false});
+  let page=first;
+  for(let i=0;page.hasMore && i<5;i++){
+    page=await backend.sync(page.checkpoint);
+    for(const m of page.messages)records.add(m.summary.message_id);
+    for(const id of page.removed)records.delete(id);
+  }
+  expect(page.hasMore).toBe(false);expect(page.checkpoint).toMatchObject({state:'state2'});
+  expect([...records].sort()).toEqual(f.state.emails.filter(e=>e.mailboxIds.inbox).map(e=>e.id).sort());
+  expect(f.state.requests.filter(r=>r.method==='Email/query')).toHaveLength(1);
+  expect(f.state.requests.filter(r=>r.method==='Email/get' && r.args.fetchTextBodyValues).flatMap(r=>r.args.ids)).not.toContain('fixture30');
+}));
+test('JMAP bounds ID inventory work and rejects changed query pages before fetching bodies',()=>fixture(async(f,c)=>{
+  const sample=f.state.emails[0]!;f.state.emails=Array.from({length:30},(_,i)=>({...sample,id:'fixture'+i,receivedAt:new Date(Date.UTC(2026,0,1+i)).toISOString()}));
+  f.state.queryPageSize=2;const backend=connector(c,'team-mail')!,first=await backend.sync();
+  expect(first.checkpoint).toMatchObject({inventory:{position:16}});expect(first.messages).toEqual([]);expect(first.hasMore).toBe(true);
+  f.state.version='state2';await expect(backend.sync(first.checkpoint)).rejects.toMatchObject({code:'STALE_CURSOR'});
+  expect(f.state.requests.some(r=>r.method==='Email/get' && r.args.fetchTextBodyValues)).toBe(false);
+}));
 test('mail maintenance commits checkpoints only after successful bodies and retries publication',()=>fixture(async(f,c)=>{
   const {syncMail}=await import('../src/maintenance/library-sync'),{libraryDB,getState,setState}=await import('../src/search/library/store');
   const {mkdir}=await import('node:fs/promises'),root=await mkdtemp(join(tmpdir(),'ss-jmap-deltas-'));

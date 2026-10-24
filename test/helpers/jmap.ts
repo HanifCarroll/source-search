@@ -2,7 +2,7 @@ export function jmapFixture(){
   const mail='urn:ietf:params:jmap:mail',core='urn:ietf:params:jmap:core';
   const boxes=[{id:'inbox',name:'Inbox',role:'inbox'},{id:'sent',name:'Sent',role:'sent'},{id:'junk',name:'Junk',role:'junk'},{id:'trash',name:'Trash',role:'trash'}];
   const emails=Array.from({length:7},(_,i)=>({id:'m'+i,threadId:'t1',mailboxIds:{inbox:true},receivedAt:`2026-10-${String(i+1).padStart(2,'0')}T12:00:00Z`,subject:'Planning '+i,from:[{name:'Alice',email:'alice@example.test'}],to:[{name:null,email:'bob@example.test'}],preview:'Preview '+i,textBody:[{partId:'1'}],htmlBody:[],bodyValues:{'1':{value:'Body '+i,isTruncated:false}},attachments:[{name:'agenda.pdf',type:'application/pdf',blobId:'blob',size:13}]}));
-  const state={changes:[] as any[],version:'state1',status:200,delay:0,methodError:'',wrongAccount:false,missing:false,reverse:true,primary:'one',maxGet:3,requests:[] as any[],auth:[] as string[],blob:'invented file',blobStatus:200,downloads:[] as string[],emails,boxes};
+  const state={changes:[] as any[],version:'state1',status:200,delay:0,methodError:'',wrongAccount:false,missing:false,reverse:true,primary:'one',maxGet:3,queryPageSize:500,requests:[] as any[],auth:[] as string[],blob:'invented file',blobStatus:200,downloads:[] as string[],emails,boxes};
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(req):Promise<Response>{
     if(new URL(req.url).pathname==='/.well-known/jmap')return new Response(null,{status:307,headers:{location:'/session'}});
     state.auth.push(req.headers.get('authorization')||'');
@@ -25,7 +25,7 @@ export function jmapFixture(){
     if(method==='Email/query'){
       const matching=(e:any,f:any):boolean=>!f || (f.operator==='AND'?f.conditions.every((x:any)=>matching(e,x)):f.operator==='OR'?f.conditions.some((x:any)=>matching(e,x)):f.operator==='NOT'?!f.conditions.some((x:any)=>matching(e,x)):f.inMailbox?!!e.mailboxIds[f.inMailbox]:f.after?Date.parse(e.receivedAt)>=Date.parse(f.after):f.before?Date.parse(e.receivedAt)<Date.parse(f.before):true);
       const found=state.emails.filter(e=>matching(e,args.filter)).sort((a,b)=>a.receivedAt.localeCompare(b.receivedAt)*(args.sort[0].isAscending?1:-1));
-      Object.assign(result,{ids:found.slice(args.position,args.position+args.limit).map(e=>e.id),position:args.position,queryState:state.version,total:found.length});
+      Object.assign(result,{ids:found.slice(args.position,args.position+Math.min(args.limit,state.queryPageSize)).map(e=>e.id),position:args.position,queryState:state.version,total:found.length});
     }
     if(method==='Email/get'){
       if(args.ids.length>state.maxGet)return Response.json({methodResponses:[['error',{type:'tooManyObjects'},tag]]});

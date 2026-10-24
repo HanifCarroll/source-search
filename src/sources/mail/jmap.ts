@@ -94,11 +94,15 @@ class Session {
   async status(){const boxes=await this.boxes();return {folders:this.settings.folders?resolveFolders(boxes,this.settings.folders):boxes,warnings:[]};}
   async sync(checkpoint?:unknown):Promise<MailSyncPage>{
     const boxes=await this.boxes(),boxKey=hash(stableJson([...boxes].sort((a,b)=>a.id.localeCompare(b.id))));
-    const saved=checkpoint as {kind?:string;state?:string;boxes?:string;position?:number;queryState?:string;ids?:string[]}|undefined;
-    let previous=saved?.kind==='jmap' && saved.boxes===boxKey?saved:undefined;
+    type Inventory={ids:string[];position:number;queryState?:string};
+    type Pending={ids:string[];offset:number};
+    const saved=checkpoint as {kind?:string;state?:string;boxes?:string;position?:number;inventory?:Inventory;pending?:Pending}|undefined;
+    // Older checkpoints interleaved query pages and body downloads. Start a
+    // fresh ID inventory instead of carrying their stale positional cursor.
+    let previous=saved?.kind==='jmap' && saved.boxes===boxKey && saved.position===undefined?saved:undefined;
     const eligible=(e:Email)=>!boxes.some(b=>(b.role==='junk'||b.role==='trash') && e.mailboxIds[b.id]) && (!this.settings.folders || resolveFolders(boxes,this.settings.folders).some(b=>e.mailboxIds[b.id]));
     const base={kind:'jmap',boxes:boxKey};
-    if(previous?.state && previous.position===undefined){
+    if(previous?.state && !previous.inventory && !previous.pending){
       try {
         const changes=parse(z.object({oldState:z.string(),newState:z.string().min(1),hasMoreChanges:z.boolean(),created:z.array(idSchema),updated:z.array(idSchema),destroyed:z.array(idSchema)}),await this.call('Email/changes',{sinceState:previous.state,maxChanges:25}));
         if(changes.oldState!==previous.state || changes.hasMoreChanges && changes.newState===previous.state)fail('INVALID_PROVIDER_RESPONSE','JMAP did not advance its change checkpoint');
@@ -113,24 +117,40 @@ class Session {
     // Capture Email state BEFORE enumeration. After the snapshot, changes since
     // this token cover modifications made while bodies were being downloaded.
     const state=previous?.state || parse(z.object({state:z.string().min(1)}),await this.call('Email/get',{ids:[],properties:['id']})).state;
-    const position=previous?.position||0;
-    const page=await this.search({source:'sync',query:'',limit:25,excludeSpamTrash:true},position?{position,state:previous!.queryState!}:undefined);
-    const ids=[...(previous?.ids||[]),...page.messages.map(m=>m.message_id)],messages:MailDetail[]=[];
-    for(const m of page.messages){const [e]=await this.emails([m.message_id],true);if(eligible(e!))messages.push(this.detail(e!,boxes));else fail('STALE_CURSOR','Mail folders changed during inventory');}
-    const end=position+page.messages.length,hasMore=end<page.total;
-    return {checkpoint:{...base,state,...(hasMore?{position:end,queryState:page.queryState,ids}:{})},messages,removed:[],...(!hasMore?{inventory:ids}:{}),hasMore,strategy:'jmap-changes'};
+    const inventory=previous?.inventory||{ids:[],position:0};
+    let pending=previous?.pending;
+    // Query only IDs before downloading bodies. Query state can change even
+    // when membership does not; body downloads must not hold a query cursor.
+    for(let page=0;!pending && page<8;page++){
+      const result=await this.query({source:'sync',query:'',limit:500,excludeSpamTrash:true},inventory.position?{position:inventory.position,state:inventory.queryState!}:undefined);
+      inventory.ids.push(...result.ids);inventory.position=result.position+result.ids.length;inventory.queryState=result.queryState;
+      if(inventory.position>=result.total)pending={ids:inventory.ids,offset:0};
+    }
+    if(!pending)return {checkpoint:{...base,state,inventory},messages:[],removed:[],hasMore:true,strategy:'jmap-changes'};
+    const messages:MailDetail[]=[],removed:string[]=[];
+    const end=Math.min(pending.ids.length,pending.offset+25);
+    const ids=pending.ids.slice(pending.offset,end),metadata=new Map((await this.emails(ids,false,true)).map(e=>[e.id,e]));
+    for(const id of ids){
+      if(!metadata.has(id) || !eligible(metadata.get(id)!)){removed.push(id);continue;}
+      try{const [e]=await this.emails([id],true);if(eligible(e!))messages.push(this.detail(e!,boxes));else removed.push(id);}
+      catch(e){if((e as any).code==='NOT_FOUND')removed.push(id);else throw e;}
+    }
+    const moreBodies=end<pending.ids.length;
+    // After the final body page, drain changes since the pre-inventory state
+    // before declaring completion, including removals and new arrivals.
+    return {checkpoint:{...base,state,...(moreBodies?{pending:{ids:pending.ids,offset:end}}:{})},messages,removed,...(!moreBodies?{inventory:pending.ids}:{}),hasMore:true,strategy:'jmap-changes'};
   }
-  async emails(ids:string[],body:boolean){
+  async emails(ids:string[],body:boolean,allowMissing=false){
     const records:Email[]=[];
     for(let i=0;i<ids.length;i+=Math.min(this.maxGet,body?1:100)){
       const batch=ids.slice(i,i+Math.min(this.maxGet,body?1:100));
       batch.forEach(providerId);
       const result=await this.call('Email/get',{ids:batch,properties:['id','threadId','mailboxIds','receivedAt','from','to','cc','messageId','subject','preview','textBody','htmlBody','bodyValues','attachments'],bodyProperties:['partId','blobId','size','name','type','charset','disposition','cid'],fetchTextBodyValues:body,fetchHTMLBodyValues:body,fetchAllBodyValues:false,maxBodyValueBytes:2000000});
       const list=parse(z.array(emailSchema),result.list);
-      if(result.notFound?.length)fail('NOT_FOUND','A requested email no longer exists');
-      const byId=new Map(list.map(e=>[e.id,e]));
-      if(byId.size!==batch.length || list.length!==batch.length || batch.some(id=>!byId.has(id)))fail('INVALID_PROVIDER_RESPONSE','JMAP returned different email IDs');
-      records.push(...batch.map(id=>byId.get(id)!));
+      if(result.notFound?.length && !allowMissing)fail('NOT_FOUND','A requested email no longer exists');
+      const byId=new Map(list.map(e=>[e.id,e])),missing=new Set(parse(z.array(idSchema),result.notFound||[]));
+      if(byId.size!==list.length || byId.size+missing.size!==batch.length || batch.some(id=>!byId.has(id)&&!missing.has(id)) || [...missing].some(id=>!batch.includes(id)||byId.has(id)))fail('INVALID_PROVIDER_RESPONSE','JMAP returned different email IDs');
+      records.push(...batch.filter(id=>byId.has(id)).map(id=>byId.get(id)!));
     }
     return records;
   }
@@ -147,7 +167,7 @@ class Session {
     return {summary:this.summary(e,boxes),body_text:value(e.textBody),body_html:value(e.htmlBody),attachments:(e.attachments||[]).map(a=>({filename:a.name??'attachment.bin',mime_type:a.type})),warnings:[...(Object.values(e.bodyValues||{}).some(v=>v.isTruncated)?['Message body is truncated at the 2 MB provider limit.']:[]),...(Object.values(e.bodyValues||{}).some(v=>v.isEncodingProblem)?['Provider reported a text decoding problem.']:[])]};
   }
   checkAccess(e:Email,boxes:Folder[]){if(this.settings.folders && !resolveFolders(boxes,this.settings.folders).some(b=>e.mailboxIds[b.id]))fail('SOURCE_RESTRICTED','Email is outside the configured folders');}
-  async search(q:Query,page?:MailContinuation){
+  private async query(q:Query,page?:MailContinuation){
     const boxes=await this.boxes(),extra:unknown[]=[];
     if(q.from)extra.push({after:new Date(q.from).toISOString()});
     if(q.to)extra.push({before:new Date(q.to).toISOString()});
@@ -161,6 +181,10 @@ class Session {
     const result=parse(z.object({ids:z.array(idSchema),position:z.number().int().nonnegative(),queryState:z.string().min(1).max(1000),total:z.number().int().nonnegative()}),await this.call('Email/query',{limit:q.limit,position:offset,calculateTotal:true,sort:[{property:'receivedAt',isAscending:q.sort==='oldest'}],...(conditions.length?{filter:{operator:'AND',conditions}}:{})}));
     if(page && page.state!==result.queryState)fail('STALE_CURSOR','Mail search changed; restart without its cursor');
     if(result.position!==offset || result.ids.length>q.limit || new Set(result.ids).size!==result.ids.length || offset+result.ids.length>result.total || (!result.ids.length && offset<result.total))fail('INVALID_PROVIDER_RESPONSE','Invalid JMAP search page');
+    return {...result,boxes};
+  }
+  async search(q:Query,page?:MailContinuation){
+    const result=await this.query(q,page),boxes=result.boxes;
     const emails=await this.emails(result.ids,false);
     emails.forEach(e=>this.checkAccess(e,boxes));
     return {messages:emails.map(e=>this.summary(e,boxes)),position:result.position,queryState:result.queryState,total:result.total,warnings:[]};
