@@ -9,6 +9,8 @@ Choose the sources to search in your local configuration. Sources and maintenanc
 Requires Bun 1.3.14 or later. macOS is required for native application integrations; the synthetic example and portable readers can run without those applications.
 
 ```sh
+git clone https://github.com/HanifCarroll/source-search.git
+cd source-search
 bun install --frozen-lockfile
 bun run demo
 bun run start sources
@@ -16,7 +18,7 @@ bun run start sources
 
 The demo uses sample notes in a temporary directory and removes them afterwards. `sources` shows the status of your configured sources.
 
-Copy `config.example.json` to a private location outside this checkout, use absolute paths, and set `SOURCE_SEARCH_CONFIG_FILE` to that file. The default configuration location is `~/.config/source-search/config.json`; personal credentials stay with the existing provider tools.
+Copy `config.example.json` to a private location outside this checkout, use absolute paths, and set `SOURCE_SEARCH_CONFIG_FILE` to that file. The default configuration location is `~/.config/source-search/config.json`; credentials are supplied through private files, environment variables or existing credential tools.
 
 ```json
 {
@@ -46,17 +48,18 @@ Search/read also accept JSON on stdin. Register MCP with the absolute Bun execut
 | `messages`; named WhatsApp (`whatsapp`) and Muesli (`muesli`) sources | Local application databases and existing OS permissions |
 | `chrome-history`, `chrome-bookmarks`, `chrome-downloads` | Chrome profile directories; downloads are metadata only |
 | Named Gmail accounts (`gmail`) | A compatible `gog` executable and configured account routing |
-| Named Fastmail accounts (`fastmail`) | A compatible `mailbridge` executable and configured account routing |
+| Named JMAP accounts (`jmap`) | Session URL and bearer token or username/password; Fastmail and other JMAP Mail servers |
+| Named IMAP accounts (`imap`) | Server, username, password/app password or OAuth token; TLS or required STARTTLS |
 | `calendar`, `contacts` | Optional helper built with your own signing identity and bundle ID |
 | `agent-history` | An existing compatible CASS index and executable |
 | `vault` | QMD collections, index and installed models |
 | `library`, `documents` | Enable these and their contributing sources; configure maintenance |
 
-Adapters were developed against CASS 0.10.0 and QMD 1.0.7. The hybrid and embedding adapters require QMD 1.0.7 because they use its internal APIs. Mail tools need the commands and response formats in `src/sources/mail/index.ts`, including `gog --gmail-no-send` and mailbridge paginated search.
+Adapters were developed against CASS 0.10.0 and QMD 1.0.7. The hybrid and embedding adapters require QMD 1.0.7 because they use its internal APIs. The Gmail connector uses `gog --gmail-no-send`. Existing `fastmail` configurations using mailbridge remain supported; new accounts can use JMAP directly. JMAP and IMAP need no separate mail executable.
 
 ## Source configuration
 
-A source ID is your name for an instance; `adapter` selects its integration. Gmail, Fastmail, Markdown, Muesli and WhatsApp support multiple independently named instances. Other integrations retain the IDs in the table and use their existing path/index settings; an optional `label` changes their display name. Up to 100 source instances are supported.
+A source ID is your name for an instance; `adapter` selects its integration. Gmail, JMAP, IMAP, Markdown, Muesli and WhatsApp support multiple independently named instances. Other integrations retain the IDs in the table and use their existing path/index settings; an optional `label` changes their display name. Up to 100 source instances are supported.
 
 ```json
 {
@@ -64,7 +67,11 @@ A source ID is your name for an instance; `adapter` selects its integration. Gma
   "timeZone": "Europe/London",
   "sources": {
     "work-mail": {"adapter": "gmail", "account": "work", "email": "work@example.com"},
-    "receipts": {"adapter": "fastmail", "account": "receipts", "email": "receipts@example.com"},
+    "receipts": {
+      "adapter": "jmap", "account": "receipts", "email": "receipts@example.com",
+      "sessionUrl": "https://api.fastmail.com/jmap/session",
+      "auth": {"type": "bearer", "token": {"file": "/absolute/private/path/mail-token"}}
+    },
     "research": {
       "adapter": "markdown",
       "root": "/absolute/path/to/research",
@@ -80,9 +87,45 @@ Use lowercase source IDs with letters, digits and hyphens. Keep IDs stable: save
 
 Markdown sources default to ordinary notes, `**/*.md`, the `date` frontmatter field, and exclusions for `.git` and `node_modules`. Set `exclude` to your own glob list, `dateFromFilename` to read a leading `YYYY-MM-DD`, and `content` to `journal` or `transcript` when appropriate. Transcripts can set `reviewed: true`; `journal: true` includes a transcribed journal in `all-journals`. Attribution is unspecified unless you set `author`. For daily date-named journals, use `pattern: "**/????-??-??.md"`, `dateFromFilename: true`, `dateFields: []`, and `content: "journal"`.
 
-Date-only and offset-free note dates use the source's `timeZone`, then the global `timeZone`, then UTC. Dates with an explicit offset retain their instant. Each mailbox has an `account`, `email`, and optional `aliases`; account authentication stays in its provider tool.
+Date-only and offset-free note dates use the source's `timeZone`, then the global `timeZone`, then UTC. Dates with an explicit offset retain their instant. Each mailbox has a stable local `account` name, an `email` for attribution, and optional `aliases`.
 
 Executables are discovered on `PATH`, with explicit paths taking precedence. Background jobs may have a shorter `PATH`; set `gmailBinary`, `mailbridgeBinary`, `cassBinary`, `qmdBinary`, or other executable overrides there. QMD's package, models and indexes still need explicit configuration. See `src/platform/source-settings.ts` and `src/platform/config.ts` for the complete schemas.
+
+## Connecting mail
+
+For JMAP, get the session URL and credentials from your provider. Fastmail documents its [session URL](https://www.fastmail.com/dev/) and [API tokens](https://www.fastmail.help/hc/en-us/articles/5254602856719-API-tokens). Put the token alone in a private file, set its permissions to `0600`, and use the JMAP configuration above. The connector discovers the primary mail account; set `accountId` to select another accessible account. Servers using HTTP Basic authentication accept `auth: {"type":"basic","username":"user@example.com","password":{"file":"/absolute/private/path/password"}}`.
+
+For IMAP, add a source like this and include its ID in `enabledSources`:
+
+```json
+{
+  "other-mail": {
+    "adapter": "imap",
+    "account": "other",
+    "email": "user@example.com",
+    "host": "imap.example.com",
+    "port": 993,
+    "username": "user@example.com",
+    "auth": {"type": "password", "password": {"file": "/absolute/private/path/app-password"}}
+  }
+}
+```
+
+Use your provider's IMAP settings and app password if required. For port 143, set `security: "starttls"`; the connection must upgrade to TLS. Private certificate authorities can be supplied with `caFile`. Certificates are always verified.
+
+Every credential reference accepts one of `{"file":"/absolute/path"}`, `{"env":"VARIABLE_NAME"}` or `{"command":["/absolute/path/to/token-tool","argument"]}`. Commands run without a shell and must print one credential. They run again for each connection, allowing an existing credential tool to refresh tokens. For IMAP OAuth, use `auth: {"type":"oauth2","accessToken":{"command":["/path/to/token-tool"]}}`. Source Search does not register OAuth applications or perform browser sign-in; provider token scopes and refresh remain the credential tool's responsibility. Existing Gmail accounts can continue using `gog`.
+
+### Search behavior
+
+- Both connectors return newest first; `sort: "oldest"` reverses the order. `from` is inclusive and `to` exclusive, using the provider's received timestamp. Native searches do not offer relevance ranking.
+- IMAP treats whitespace-separated terms as an AND. `match: "phrase"` searches the literal phrase. JMAP uses the server's text search; `words` and `phrase` request the corresponding protocol behavior. Word stemming, Unicode matching and indexed content depend on the server. Gmail query operators are specific to the Gmail connector.
+- An optional source-level `folders` list restricts searches, original reads and thread context. A query's `folders` narrows that selection. `list_sources` reports folder names, IDs and roles. Unknown or ambiguous folders produce an error.
+- Spam and trash are excluded by default; `excludeSpamTrash: false` includes them within the configured selection. IMAP uses server roles and recognized names. Set `folderRoles`, for example `{"Correo no deseado":"junk","Papelera":"trash"}`, for missing or localized roles. Missing roles produce a warning.
+- IMAP merges results across folders and orders by received time, not UID order. Stable server IDs deduplicate copies; otherwise copies remain separate. Header `Message-ID` alone never removes a result. Without stable IDs, moved messages or changed mailbox identities need a new reference; stale references return an error.
+- Continue `nextCursor` until absent. A changed result set requires restarting the query. IMAP sorts matching metadata locally, with a default ceiling of 20,000 candidates per search and a 30-second operation timeout. Broader requests fail explicitly: narrow dates/folders, or configure `maxSearchMessages` and `timeoutMs`. These limits also apply to optional library backfills.
+- Reads fetch text and attachment names/types. IMAP decodes MIME through mailparser without downloading attachment bodies. Its text budget is configurable with `maxMessageBytes` (10 MB by default). JMAP reports truncated or undecodable provider body values. IMAP thread context requires server-provided thread IDs; messages are never grouped by subject alone.
+
+The connectors follow [JMAP Mail](https://www.rfc-editor.org/rfc/rfc8621.html) and use [ImapFlow](https://imapflow.com/docs/) for IMAP. Reads preserve message flags. Authentication failures, timeouts and provider failures are errors, not empty mailboxes.
 
 ## Maintenance and retention
 
@@ -113,6 +156,8 @@ bun run check
 bun test
 python -m unittest discover -s test -p '*_test.py'
 bun audit
+# Independent-server test (Docker and openssl):
+bun test/imap-server.integration.ts
 ```
 
 Install the extraction requirements in a dedicated virtual environment before running Python extraction tests. Tests use invented records and mocked providers. CI checks Linux and macOS. Keep live installation checks and their receipts outside Git. Before publishing, review the diff, run the demo and dependency audit, and scan Git history for secrets.

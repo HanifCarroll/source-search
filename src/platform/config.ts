@@ -73,7 +73,7 @@ export const configPath = () => process.env.SOURCE_SEARCH_CONFIG_FILE || join(ho
 export function configuredSourceIds(c:Config){return [...new Set([...Object.keys(c.sources),...Object.keys(c.mailAccounts),...c.enabledSources])];}
 export function mailAccount(c:Config,id:string){
  const s=c.sources[id];
- if(s && (s.adapter==='gmail' || s.adapter==='fastmail'))return {account:s.account,email:s.email,aliases:s.aliases};
+ if(s && ('account' in s && isMail(id,c)))return {account:s.account,email:s.email,aliases:s.aliases};
  return c.mailAccounts[id];
 }
 export function databasePath(c:Config,id:string){const s=c.sources[id];return s && 'database' in s ? s.database : sourceKind(id,c)==='muesli'?c.muesli:c.whatsapp;}
@@ -95,6 +95,12 @@ export function sourceScope(config:Config,source:string):string {
   const kind=sourceKind(source,config),definition=config.sources[source];
   if(isMail(source,config)){
     const account=mailAccount(config,source);
+    if(definition?.adapter==='jmap' || definition?.adapter==='imap'){
+      const endpoint=definition.adapter==='jmap'
+        ? {sessionUrl:definition.sessionUrl,accountId:definition.accountId,recordFormat:definition.recordFormat,username:definition.auth.type==='basic'?definition.auth.username:undefined}
+        : {host:definition.host,port:definition.port,username:definition.username,folderRoles:definition.folderRoles};
+      return createHash('sha256').update(JSON.stringify({adapter:kind,...account,...endpoint,folders:definition.folders})).digest('hex');
+    }
     return createHash('sha256').update(JSON.stringify(kind===sourceKind(source)?account:{adapter:kind,...account})||'unconfigured').digest('hex');
   }
   if(definition && 'database' in definition){

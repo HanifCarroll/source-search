@@ -63,3 +63,11 @@ Existing source IDs and flat configuration fields remain supported. For new sett
 Keep account values, aliases, database locations and source IDs unchanged to retain existing library identities. If switching an instance to a different account or provider, use a new ID or clear its old cache. Renaming an ID creates a new reference namespace and QMD collection; it does not migrate old references.
 
 For media extraction without adjacent transcripts, choose `transcriptionBackend` and `transcriptionModel` explicitly. The previous choices were `mlx-whisper` and `large-v3`. Extraction remains disabled unless its sources and maintenance are enabled.
+
+## Native mail connectors
+
+New sources can use `jmap` or `imap` directly; see the README for authentication and search behavior. Existing Gmail and mailbridge configurations continue working.
+
+For an existing Fastmail source, keep its source ID, account, email and aliases, and select `adapter: "jmap"`, the provider session URL, `accountId` and private authentication. Set `recordFormat: "mailbridge-v1"` to retain the original body and metadata format used by saved references. New JMAP sources default to `complete`, which includes every text body part, CC and the message header ID.
+
+Changing the connector changes its cache scope. Migrate an existing cache only after comparing its saved IDs and record versions against the new connection: back up the private configuration and library, stop maintenance, and rebind the verified source's scope in cached state, chunk guards and raw-response envelopes. Preserve chunk IDs, content hashes and references. Otherwise use a fresh source ID for a new cache, while keeping the old source available for existing references. Changing only the adapter field does not migrate a cache.

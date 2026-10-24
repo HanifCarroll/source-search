@@ -1,128 +1,65 @@
 import {sourceKind} from '../../domain/source-catalog';
-import {mailAccount, defaultConfig, requireSource, type Config} from "../../platform/config";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { readableMail } from "../../domain/presentation";
-import { words } from "../../domain/query";
-import { fail, now, versioned, queryKey, cursor, position } from "../../domain/identity";
-import { hit } from "../../domain/results";
-import { type Query, type Page, type RecordData } from "../../domain/contracts";
+import {defaultConfig,mailAccount,requireSource,sourceScope,type Config} from '../../platform/config';
+import {cursor,fail,now,position,queryKey,versioned} from '../../domain/identity';
+import {readableMail} from '../../domain/presentation';
+import {hit} from '../../domain/results';
+import type {Page,Query,RecordData} from '../../domain/contracts';
+import {jmapConnector} from './jmap';
+import {imapConnector} from './imap';
+import type {MailConnector,MailContinuation,MailDetail,MailSummary} from './types';
+import * as legacy from './legacy';
+export {run,type Run,type PreviewBudget,type MailSource} from './legacy';
 
-export type Run = (argv: string[]) => Promise<unknown>;
-export type PreviewBudget = { remaining: number; records: Map<string,RecordData> };
-export const run: Run = async argv => {
-  const process = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      (async () => {
-        const readBounded = async (stream: ReadableStream<Uint8Array>) => {
-          const reader = stream.getReader(); const chunks: Uint8Array[] = []; let size = 0;
-          while (true) { const { done, value } = await reader.read(); if (done) break; size += value.length; if (size > 4 * 1024 * 1024) { process.kill(); fail("OUTPUT_LIMIT", "Mail command exceeded its output budget"); } chunks.push(value); }
-          return Buffer.concat(chunks).toString("utf8");
-        };
-        const [stdout, , code] = await Promise.all([readBounded(process.stdout), readBounded(process.stderr), process.exited]);
-        if (code) fail("MAIL_COMMAND_FAILED", `Read-only mail command exited with code ${code}; check the existing tool's account access`);
-        try { return JSON.parse(stdout); } catch { return fail("INVALID_PROVIDER_RESPONSE", "Mail command did not return JSON"); }
-      })(),
-      new Promise((_, reject) => { timer = setTimeout(() => { process.kill(); reject(Object.assign(new Error("Mail read timed out"), { code: "TIMEOUT" })); }, 30_000); })
-    ]);
-  } finally { if (timer) clearTimeout(timer); }
-};
-export type MailSource = string;
-function accountFor(config:Config,source:MailSource){
+function connector(config:Config,source:string):MailConnector|undefined{
   requireSource(config,source);
-  const account=mailAccount(config,source);
-  if(!account)fail("SOURCE_NOT_CONFIGURED","Configure an account for this mail source");
-  return account;
+  const setting=config.sources[source];
+  if(setting?.adapter==='jmap')return jmapConnector(setting);
+  if(setting?.adapter==='imap')return imapConnector(setting);
 }
-function providerId(id: string) { if (!/^[A-Za-z0-9_-]{1,200}$/.test(id)) fail("INVALID_REFERENCE", "Invalid provider record identifier"); return id; }
-export async function searchMail(q: Query, execute: Run = run, previews:PreviewBudget = {remaining:3,records:new Map()}, config:Config = defaultConfig()): Promise<Page> {
-  const source = q.source as MailSource, account = accountFor(config,source);
+export async function mailStatus(config:Config,source:string){return connector(config,source)?.status();}
+function presentationAdapter(config:Config,source:string){const s=config.sources[source];return s?.adapter==='jmap' && s.recordFormat==='mailbridge-v1' && new URL(s.sessionUrl).hostname==='api.fastmail.com'?'fastmail':sourceKind(source,config);}
+function metadata(summary:MailSummary,config:Config,source:string){
+  return {dateKind:'provider-received-at',direction:summary.folders.some(f=>f.role==='sent')?'outgoing':'unknown',account:mailAccount(config,source)!.email,to:summary.to,cc:summary.cc,bodyFormat:'text',folders:summary.folders,labels:[],messageId:summary.messageId};
+}
+export function formatMail(source:string,raw:MailDetail,config:Config):RecordData{
+  const s=raw.summary;
+  return versioned({adapter:presentationAdapter(config,source),ref:{source,id:s.message_id},title:s.subject||'(No subject)',body:readableMail(raw.body_text||raw.body_html||''),type:'email',observedAt:now(),locator:`source-search://${source}/${s.message_id}`,author:s.from||'unknown',occurredAt:s.date?new Date(s.date).toISOString():undefined,conversation:s.thread_id||undefined,metadata:{...metadata(s,config,source),attachments:raw.attachments.map(a=>({name:a.filename,type:a.mime_type}))},warnings:raw.warnings||[]});
+}
+export async function searchMail(q:Query,execute:legacy.Run=legacy.run,previews:legacy.PreviewBudget={remaining:3,records:new Map()},config:Config=defaultConfig()):Promise<Page>{
+  const backend=connector(config,q.source);if(!backend)return legacy.searchMail(q,execute,previews,config);
+  if(q.conversation)fail('UNSUPPORTED_FILTER','Use read_record with context to open the mail thread');
   q={...q,excludeSpamTrash:q.excludeSpamTrash!==false};
-  const fastmail = sourceKind(source,config) === "fastmail", key = queryKey(q), page = position(q.cursor, key);
-  if (q.conversation) fail("UNSUPPORTED_FILTER", "Use read_record with context to open the mail thread");
-  if (page !== undefined && typeof page !== "string") fail("INVALID_CURSOR", "Expected a provider page token");
-  let continuation: { position: number; state: string } | undefined;
-  if (fastmail && page !== undefined) {
-    try {
-      continuation = JSON.parse(page as string);
-      if (!continuation || !Number.isSafeInteger(continuation.position) || continuation.position < 1 || typeof continuation.state !== "string" || !continuation.state.length || continuation.state.length > 1000) throw Error();
-    } catch { fail("INVALID_CURSOR", "Invalid Fastmail continuation"); }
+  const key=queryKey(q),encoded=position(q.cursor,key),scope=sourceScope(config,q.source);
+  let page:MailContinuation|undefined;
+  if(encoded!==undefined){
+    try{if(typeof encoded!=='string')throw Error();page=JSON.parse(encoded);if(!page || !Number.isSafeInteger(page.position) || page.position<1 || typeof page.state!=='string' || !page.state.length || page.state.length>1000)throw Error();}
+    catch{fail('INVALID_CURSOR','Invalid mail continuation');}
+    const setting=config.sources[q.source];
+    if(!page.scope && !(setting?.adapter==='jmap' && setting.recordFormat==='mailbridge-v1'))fail('INVALID_CURSOR','Mail continuation is missing its account scope');
+    if(page.scope && page.scope!==scope)fail('STALE_CURSOR','Mail account or folder configuration changed; restart the query');
   }
-  let query = q.query;
-  if(q.match) query=q.match === "phrase" ? '"'+q.query.replaceAll('"','')+'"' : words(q.query).map(w=>'"'+w+'"').join(" ");
-  if(!fastmail && q.excludeSpamTrash!==false) query="-in:spam -in:trash "+query;
-  if(!fastmail && q.folders?.length) query="{"+q.folders.map(f=>'label:"'+f.replaceAll('"','')+'"').join(" ")+"} "+query;
-  if (!fastmail && q.from) query += ` after:${Math.floor(Date.parse(q.from) / 1000)}`;
-  if (!fastmail && q.to) query += ` before:${Math.floor(Date.parse(q.to) / 1000)}`;
-  if (q.conversation) fail("UNSUPPORTED_FILTER", "Use read_record with context to open the mail thread");
-  const argv = fastmail
-    ? [config.mailbridgeBinary, "--json", "search", "--account", account.account, "--paged", "--position", String(continuation?.position || 0), "--limit", String(q.limit), ...(q.from?["--after",q.from]:[]), ...(q.to?["--before",q.to]:[]), ...(q.folders||[]).flatMap(f=>["--folder",f]), ...(q.excludeSpamTrash!==false?["--exclude-spam-trash"]:[]), ...(q.sort === "oldest"?["--oldest"]:[]), "--", query]
-    : [config.gmailBinary, "gmail", "messages", "search", "--account", account.account, "--gmail-no-send", "--json", "--no-input", "--timezone", "UTC", "--max", String(q.limit), ...(page ? ["--page", page] : []), "--", query];
-  const data = await execute(argv) as any, observedAt = now();
-  const messages = data.messages;
-  if (!Array.isArray(messages)) fail("INVALID_PROVIDER_RESPONSE", "Missing mail search records");
-  if (fastmail) {
-    const offset = continuation?.position || 0, end = offset + messages.length;
-    if (continuation && typeof data.queryState === "string" && data.queryState !== continuation.state) fail("STALE_CURSOR", "Fastmail search results changed; restart this query without its cursor");
-    if (data.position !== offset || typeof data.queryState !== "string" || !data.queryState.length || data.queryState.length > 1000 || !Number.isSafeInteger(data.total) || data.total < 0 || messages.length > q.limit || (messages.length && end > data.total) || (!messages.length && offset < data.total) || data.nextPosition !== (end < data.total ? end : null)) fail("INVALID_PROVIDER_RESPONSE", "Invalid Fastmail page metadata");
-    if (new Set(messages.map((m: any) => m.message_id)).size !== messages.length) fail("INVALID_PROVIDER_RESPONSE", "Fastmail returned duplicate records in a page");
+  const result=await backend.search(q,page),observedAt=now();
+  const token=(position:number)=>JSON.stringify({position,state:result.queryState,scope});
+  if(sourceKind(q.source,config)==='imap')for(const s of result.messages){
+    const id=q.source+':'+s.message_id;
+    if(previews.remaining>0 && !previews.records.has(id)){
+      previews.remaining--;
+      try{previews.records.set(id,formatMail(q.source,await backend.read(s.message_id),config));}
+      catch{result.warnings.push('A message preview was unavailable; open its reference to retry.');}
+    }
   }
-  const warnings = fastmail ? ["Continue with nextCursor until it is absent; changed search results require a restart."] : [];
-  const next = fastmail ? (data.nextPosition !== null ? cursor(key, JSON.stringify({ position: data.nextPosition, state: data.queryState })) : undefined) : (data.nextPageToken ? cursor(key, String(data.nextPageToken)) : undefined);
-  if(!fastmail)for(const m of messages){const id=source+":"+m.id;if(!m.snippet && !m.body && !previews.records.has(id) && previews.remaining>0){previews.remaining--;try{previews.records.set(id,await readMail(source,m.id,execute,config));}catch{warnings.push(`Preview unavailable for ${m.id}; open its reference to retry`);}}}
-  const items = messages.slice(0, q.limit).map((m: any, index: number) => {
-    const id = providerId(fastmail ? m.message_id : m.id);
-    if(previews.records.has(source+":"+id))return hit(previews.records.get(source+":"+id)!,q,String(page || ""));
-    return hit({ adapter:sourceKind(source,config),ref: { source, id }, title: m.subject || "(No subject)", body: m.snippet || m.body || "", type: "email", locator: `source-search://${source}/${id}`, observedAt,
-      author: String(m.from || "unknown").slice(0, 500), occurredAt: mailDate(m.date,fastmail),
-      conversation: m.thread_id || m.threadId, metadata: { previewOnly:true,dateKind:fastmail ? "provider-received-at" : "provider-message-date", direction:mailDirection(m.labels,m.folders), account: account.email, to: m.to || [], labels: m.labels || [], folders:m.folders || [], messageId:m.message_id_header } }, q, fastmail ? JSON.stringify({ position: data.position + index + 1, state: data.queryState }) : String(page || ""));
-  });
-  return { source, status: "ok", totalMatches:fastmail?data.total:undefined, items, ...(next ? { nextCursor: next } : {}), warnings, observedAt };
+  const items=result.messages.map((s,index)=>hit(previews.records.get(q.source+':'+s.message_id) || {adapter:presentationAdapter(config,q.source),ref:{source:q.source,id:s.message_id},title:s.subject||'(No subject)',body:s.snippet||'',type:'email',locator:`source-search://${q.source}/${s.message_id}`,observedAt,author:String(s.from||'unknown').slice(0,500),occurredAt:s.date?new Date(s.date).toISOString():undefined,conversation:s.thread_id||undefined,metadata:{previewOnly:true,dateKind:'provider-received-at',direction:metadata(s,config,q.source).direction,account:mailAccount(config,q.source)!.email,to:s.to,labels:[],folders:s.folders,messageId:s.messageId}},q,token(result.position+index+1)));
+  const end=result.position+items.length;
+  return {source:q.source,status:'ok',items,totalMatches:result.total,...(sourceKind(q.source,config)==='imap'?{query:{match:q.match||'words'}}:{}),...(end<result.total?{nextCursor:cursor(key,token(end))}:{}),observedAt,warnings:result.warnings};
 }
-export async function readMail(source: MailSource, id: string, execute: Run = run, config:Config = defaultConfig()): Promise<RecordData> {
-  const account=accountFor(config,source); providerId(id); const fastmail = sourceKind(source,config) === "fastmail";
-  const data = await execute(fastmail ? [config.mailbridgeBinary, "--json", "read", "--account", account.account, "--message-id", id]
-    : [config.gmailBinary, "gmail", "get", id, "--account", account.account, "--gmail-no-send", "--json", "--no-input"]) as any;
-  const summary = fastmail ? data.summary : data.headers;
-  if (!summary || (fastmail ? summary.message_id : data.message?.id) !== id) fail("INVALID_PROVIDER_RESPONSE", "Provider returned a different or missing mail record");
-  const body = readableMail((fastmail ? (data.body_text || data.body_html) : data.body) || "");
-  const date=mailDate(summary.date,true),internal=new Date(Number(data.message?.internalDate));
-  const occurredAt=date || (!fastmail && Number.isFinite(internal.getTime()) ? internal.toISOString() : undefined);
-  return versioned({ adapter:sourceKind(source,config),ref: { source, id }, title: summary.subject || "(No subject)", body: body || "", type: "email", observedAt: now(), locator: `source-search://${source}/${id}`,
-    author: summary.from || "unknown", occurredAt,
-    conversation: fastmail ? summary.thread_id : data.message.threadId,
-    metadata: { dateKind:fastmail ? (date ? "provider-received-at" : "unknown") : date ? "message-date-header" : occurredAt ? "provider-internal-date" : "unknown", direction:mailDirection(data.message?.labelIds,summary.folders), account: account.email, to: summary.to, cc: summary.cc, bodyFormat:"text", folders:summary.folders || [], labels:data.message?.labelIds || [], messageId:summary["message-id"] || summary.messageId, attachments: fastmail ? data.attachments?.map((a: any) => ({ name: a.filename, type: a.mime_type })) : undefined },
-    warnings: ["Attachment reading is outside this first text-retrieval version.", ...(fastmail ? ["Existing Fastmail tool caps each body value at 2 MB; very large message bodies may be incomplete."] : [])] });
+export async function readMail(source:string,id:string,execute:legacy.Run=legacy.run,config:Config=defaultConfig(),capture?:(raw:unknown)=>void):Promise<RecordData>{
+  const backend=connector(config,source);
+  if(!backend)return legacy.readMail(source,id,async argv=>{const raw=await execute(argv);capture?.(raw);return raw;},config);
+  const raw=await backend.read(id);capture?.(raw);return formatMail(source,raw,config);
 }
-export async function mailContext(record: RecordData, execute: Run = run, config:Config = defaultConfig()) {
-  const account=accountFor(config,record.ref.source as MailSource);
-  if (!record.conversation) return { records: [], warnings: ["Provider did not return a thread identifier"] };
-  const source = record.ref.source as MailSource, fastmail = sourceKind(source,config) === "fastmail";
-  if (fastmail) {
-    const raw = await execute([config.mailbridgeBinary, "--json", "thread", "--account", account.account, "--thread-id", providerId(record.conversation), "--scan-limit", "200"]) as any;
-    if (!Array.isArray(raw.messages)) fail("INVALID_PROVIDER_RESPONSE", "Missing mail thread list");
-    const neighbors = nearby(raw.messages, record.ref.id, m => m.summary?.message_id);
-    return { records: neighbors.map(m => ({ ref: { source, id: m.summary.message_id }, excerpt: readableMail(String(m.body_text || m.summary.snippet || "")).slice(0, 500), title: m.summary.subject })), warnings: [...(raw.partial ? ["Thread lookup used a bounded recent-message fallback; context may be incomplete."] : []), "Context shows up to five neighbors on each side."] };
-  }
-  const raw = await execute([config.gmailBinary, "gmail", "thread", "get", providerId(record.conversation), "--account", account.account, "--gmail-no-send", "--json", "--no-input"]) as any;
-  const messages = raw.thread?.messages || raw.messages;
-  if (!Array.isArray(messages)) fail("INVALID_PROVIDER_RESPONSE", "Missing Gmail thread messages");
-  return { records: nearby(messages, record.ref.id, m => m.id).map((m: any) => ({ ref: { source, id: m.id }, excerpt: String(m.snippet || "").slice(0, 500), occurredAt: new Date(Number(m.internalDate)).toISOString() })), warnings: messages.length > 11 ? ["Context shows up to five neighbors on each side; open individual references for complete bodies."] : [] };
-}
-function nearby(messages: any[], id: string, getId: (m: any) => string) {
-  const i = messages.findIndex(m => getId(m) === id);
-  if (i < 0) fail("PARTIAL_CONTEXT", "Selected record is absent from the returned thread");
-  return [...messages.slice(Math.max(0, i - 5), i), ...messages.slice(i + 1, i + 6)];
-}
-
-function mailDate(value:unknown,hasZone:boolean) {
-  if(typeof value!=="string" || !value)return undefined;
-  const text=!hasZone && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(value) ? value.replace(" ","T")+":00Z" : value;
-  return Number.isFinite(Date.parse(text)) ? new Date(text).toISOString() : undefined;
-}
-
-function mailDirection(labels: string[] = [], folders: {role?:string}[] = []) {
-  return labels.includes("SENT") || folders.some(f=>f.role === "sent") ? "outgoing" : "unknown";
+export async function mailContext(record:RecordData,execute:legacy.Run=legacy.run,config:Config=defaultConfig()){
+  const backend=connector(config,record.ref.source);if(!backend)return legacy.mailContext(record,execute,config);
+  if(!record.conversation)return {records:[],warnings:['This server did not provide a thread identifier; open individual messages.']};
+  const result=await backend.thread(record.conversation,record.ref.id);
+  return {records:result.messages.filter(m=>m.summary.message_id!==record.ref.id).map(m=>({ref:{source:record.ref.source,id:m.summary.message_id},excerpt:readableMail(m.body_text||m.summary.snippet||'').slice(0,500),title:m.summary.subject})),warnings:result.warnings};
 }

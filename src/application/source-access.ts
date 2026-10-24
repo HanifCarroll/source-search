@@ -1,4 +1,4 @@
-import {sourceKind} from '../domain/source-catalog';
+import {sourceKind,isMail} from '../domain/source-catalog';
 import { searchMessages, readMessage, messagesStatus } from "../sources/messages/index";
 import type { Query, Ref, RecordData, Page } from '../domain/contracts';
 import { assertVersion, errorData, fail } from '../domain/identity';
@@ -13,7 +13,7 @@ import { databaseStatus, searchDatabase, readDatabase } from '../sources/local/d
 import { notesStatus, searchNotes, readNote } from '../sources/local/notes';
 import { pimStatus, searchPim, readPim } from '../sources/local/pim';
 import { chromeStatus, searchChrome, readChrome } from '../sources/local/chrome';
-import { searchMail, readMail, mailContext, run, type Run, type MailSource, type PreviewBudget } from '../sources/mail/index';
+import { searchMail, readMail, mailContext, mailStatus, run, type Run, type MailSource, type PreviewBudget } from '../sources/mail/index';
 import { searchArchive, indexStatus } from '../sources/archives/index';
 import { archiveSignature, checkExportSelection, readExport, exportPaths, exportProjectionVersion, chatGptContext, linkedInContext, twitterArchiveContext, type ArchiveSource } from '../sources/archives/originals';
 
@@ -33,9 +33,9 @@ export function createSourceAccess(config: Config, execute: Run = run) {
   function mail(source: MailSource): Adapter {
     return {
       async status() {
-        const result = await searchMail({source, query:sourceKind(source,config) === 'fastmail' ? '' : 'newer_than:1d', limit:1}, execute, {remaining:0,records:new Map()}, config);
+        const result = await mailStatus(config,source) || await searchMail({source, query:sourceKind(source,config) === 'gmail' ? 'newer_than:1d' : '', limit:1}, execute, {remaining:0,records:new Map()}, config);
         const account = mailAccount(config,source)!;
-        return {available:true, account:account.email, aliases:account.aliases, querySyntax:sourceKind(source,config) === 'fastmail' ? 'provider text' : 'Gmail query syntax', filters:['from','to','folders','excludeSpamTrash'], pagination:true, coverage:'Provider mailbox; full historical coverage has not been established', warnings:result.warnings};
+        return {available:true, account:account.email, aliases:account.aliases,...('folders' in result?{folders:result.folders}:{}), querySyntax:sourceKind(source,config) === 'gmail' ? 'Gmail query syntax' : 'text terms or phrase', filters:['from','to','folders','excludeSpamTrash'], pagination:true, coverage:'Provider mailbox; full historical coverage has not been established', warnings:result.warnings};
       },
       search: (q, previews) => searchMail(q, execute, previews, config),
       async read(ref, context) {
@@ -114,7 +114,7 @@ export function createSourceAccess(config: Config, execute: Run = run) {
   };
   for(const id of configuredSourceIds(config)){
     const kind=sourceKind(id,config);
-    if(kind==='gmail' || kind==='fastmail')adapters[id]=mail(id);
+    if(isMail(id,config))adapters[id]=mail(id);
     else if(kind==='markdown')adapters[id]=isDailyJournal(config,id)?{status:async()=>({available:true,dailyNotes:(await journalPaths(markdownSettings(config,id).root,markdownSettings(config,id).exclude)).paths.length,filters:['from','to'],coverage:'Daily Markdown journals'}),search:q=>searchJournals(config,q),read:recordOnly(ref=>journalRecord(config,ref))}:notes(id);
     else if(kind==='muesli' || kind==='whatsapp')adapters[id]=database(id);
   }

@@ -12,6 +12,20 @@
       "adapter": "gmail",
       "account": "work",
       "email": "work@example.com"
+    },
+    "other-mail": {
+      "adapter": "imap",
+      "account": "other",
+      "email": "user@example.com",
+      "username": "user@example.com",
+      "host": "imap.example.com",
+      "port": 993,
+      "auth": {
+        "type": "password",
+        "password": {
+          "file": "/absolute/private/path/app-password"
+        }
+      }
     }
   }
 }

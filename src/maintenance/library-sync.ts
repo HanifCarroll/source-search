@@ -10,7 +10,7 @@ import { allDatabaseRecords, databaseProjectionVersion } from "../sources/local/
 import { allMessageRecords } from "../sources/messages/index";
 import { archiveSources, exportPaths, archiveSignature, exportProjectionVersion } from "../sources/archives/originals";
 import { rebuildArchive } from "../sources/archives/index";
-import { readMail, searchMail, run, type Run, type MailSource } from "../sources/mail/index";
+import { readMail, searchMail, formatMail, run, type Run, type MailSource } from "../sources/mail/index";
 import { hash, now, errorData } from "../domain/identity";
 import { type Query } from "../domain/contracts";
 import { libraryDB, getState, setState, publish, privateJSON } from "../search/library/store";
@@ -65,9 +65,10 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
     // not leave HTML bodies in an older format or trigger a full account fetch.
     const cached=db.query("SELECT id FROM mail WHERE source=? ORDER BY id").all(source) as {id:string}[];
     for(const {id} of cached){
-     const saved=JSON.parse(await readFile(join(c.libraryRoot,"mail-raw",source+"-"+id+".json"),"utf8"));
+     const saved=JSON.parse(await readFile(join(c.libraryRoot,"mail-raw",source+"-"+(id.length>180?hash(id):id)+".json"),"utf8"));
      if(saved.source!==source || saved.id!==id || saved.accountSignature!==accountSignature)throw Error("Cached mail identity does not match the configured account");
-     const record=await readMail(source,id,async()=>saved.raw,c);
+     const kind=sourceKind(source,c);
+     const record=kind==='imap' || kind==='jmap' ? formatMail(source,saved.raw,c) : await readMail(source,id,async()=>saved.raw,c);
      db.query("UPDATE mail SET data=? WHERE source=? AND id=?").run(JSON.stringify(record),source,id);
     }
     const records=(db.query("SELECT data FROM mail WHERE source=? ORDER BY id").all(source) as {data:string}[]).map(row=>JSON.parse(row.data));
@@ -81,9 +82,9 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
      const batch=await Promise.allSettled(items.slice(offset,offset+4).map(async item=>{
       const old=db.query("SELECT summary FROM mail WHERE source=? AND id=?").get(source,item.id) as any;
       if(old?.summary!==item.summary){
-       let raw:any;const record=await readMail(source,item.id,async argv=>{raw=await execute(argv);return raw;},c);
+       let raw:any;const record=await readMail(source,item.id,execute,c,value=>{raw=value;});
        // Write attachment evidence before committing its cached-record checkpoint.
-       await privateJSON(join(c.libraryRoot,"mail-raw",source+"-"+item.id+".json"),{source,id:item.id,ref:record.ref,accountSignature,raw});
+       await privateJSON(join(c.libraryRoot,"mail-raw",source+"-"+(item.id.length>180?hash(item.id):item.id)+".json"),{source,id:item.id,ref:record.ref,accountSignature,raw});
        db.query("INSERT OR REPLACE INTO mail VALUES(?,?,?,?,?)").run(source,item.id,JSON.stringify(record),item.summary,state.cycle);changed=true;
       }else db.query("UPDATE mail SET seen=? WHERE source=? AND id=?").run(state.cycle,source,item.id);
      }));
@@ -99,6 +100,7 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
     if(!pending.length){
      const q={source,query:"",limit:25,excludeSpamTrash:true,...(next?{cursor:next}:{})} as Query;
      const result=await searchMail(q,execute,{remaining:0,records:new Map()},c);
+     if(result.status!=="ok" || result.scan?.exhausted===false && !result.nextCursor)throw Error("Incomplete mail scan; retaining cached records");
      pending=summaries(result.items);next=result.nextCursor;state.pageEnd=!next;
     }
     state={...state,pending,cursor:next};setState(db,source,state);
@@ -109,7 +111,7 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
     if(state.pageEnd){
      const removed=db.query("SELECT id FROM mail WHERE source=? AND seen!=?").all(source,state.cycle) as any[];
      db.query("DELETE FROM mail WHERE source=? AND seen!=?").run(source,state.cycle);
-     for(const row of removed)await rm(join(c.libraryRoot,"mail-raw",source+"-"+row.id+".json"),{force:true});
+     for(const row of removed)await rm(join(c.libraryRoot,"mail-raw",source+"-"+(row.id.length>180?hash(row.id):row.id)+".json"),{force:true});
      changed ||= removed.length>0;
      state={...state,cycle:null,cursor:undefined,pending:[],pageEnd:false,lastCompleteScan:now(),nextScanAt:Date.now()+15*60*1000,state:"ready"};break;
     }

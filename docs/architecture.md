@@ -10,7 +10,7 @@ src/
   platform/          Configuration, private storage, files, SQLite snapshots
   formats/           HTML, MIME, calendar and YAML format adapters
   sources/
-    mail/            Provider commands and mail records
+    mail/            Shared mail records, JMAP/IMAP connectors, legacy CLI adapters
     messages/        Messages queries, attributed-body decoding and timestamps
     local/           Journals, tasks, local databases, PIM, browser metadata
     archives/        Export indexing, original reads, per-export interpretation
@@ -73,3 +73,9 @@ Native database projections carry a version as well as a source fingerprint. Cha
 The Takeout ZIP wrapper retains application limits and stable entry hashes around zip.js. WhatsApp's source module owns its optional native-table joins and structured-message projection. Polls use a restricted protobuf schema; contact text uses ICAL's vCard parser. Changes to these projections invalidate the corresponding maintenance caches. The MCP runtime fingerprint includes package.json and bun.lock so dependency-only updates also rebuild the retrieval bundle. Transport dependencies load when the client reconnects.
 
 The ZIP adapter keeps strict archive checks enabled. It validates redundant optional ZIP64 footer values before requesting ZIP64 interpretation from zip.js; original bytes and hashes are preserved. Library status includes failed maintenance stages even when an older searchable projection remains available.
+
+## Mail connectors
+
+`mail/index.ts` owns record formatting, source opt-in and continuation. JMAP and IMAP implement the same small search/read/thread interface in `mail/types.ts`. JMAP uses bounded HTTP requests and validates protocol responses; IMAP uses ImapFlow for connections, mailbox locks, UID search and MIME part fetching. `credentials.ts` resolves private credentials at connection time. `legacy.ts` retains the existing Gmail and mailbridge commands.
+
+Identity is separate from transport. JMAP retains provider email IDs. IMAP uses account-wide server IDs when available, otherwise mailbox path plus UIDVALIDITY and UID. Cache scopes bind mail to its configured account, endpoint and folder selection. Provider errors cannot become successful empty scans that would prune the library. The Dovecot integration test runs independently of the protocol fixtures and is included in Linux CI.
