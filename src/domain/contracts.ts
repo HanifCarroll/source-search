@@ -35,11 +35,14 @@ export const refSchema = z.object({ source: sourceId, id: z.string().min(1).max(
 export const readSchema = z.object({ ref: refSchema, cursor: z.string().max(4000).optional(), focus:z.string().max(1000).optional(), preview:z.boolean().default(false), context: z.boolean().default(false), details: z.boolean().default(false) }).strict();
 export type Query = z.infer<typeof querySchema>;
 export type Ref = z.infer<typeof refSchema>;
+export type RecordIdentifier = {kind: 'email' | 'phone' | 'person-id' | 'project-id' | 'repository'; value: string};
 export type RecordData = {
   adapter?: string; ref: Ref; title: string; body: string; type: string; locator: string;
   occurredAt?: string; observedAt: string; author?: string; conversation?: string;
   metadata?: Record<string, unknown>; warnings?: string[]; sections?: TextSection[];
   task?:TaskFields;
+  // Derived identifiers are not part of the original content version.
+  identifiers?:RecordIdentifier[];
 };
 export type Hit = Omit<RecordData, "body" | "locator" | "observedAt"> & { locator?:string; excerpt: string; cursorAfter: string; match: MatchInfo; focus?: string };
 export type Page = { retrieval?: { requestedMode: string; effectiveMode: string | null; fallbackReason?: string | null }; source: Query["source"]; status: "ok" | "partial" | "error"; items: Hit[]; nextCursor?: string; warnings: string[]; error?: { code: string; message: string }; observedAt: string; totalMatches?: number; coverage?:SnapshotCoverage; budgetReduced?:boolean; reduction?: { requested:number; returned:number; reason:string }; scan?: {checked:number; undecodable:number; missingText?:number; exhausted:boolean; dateSpan?: {from?:string;to?:string}; workLimit?:string}; progress?: { returned:number; hasMore:boolean; totalMatches:number|null; continuation:string }; query?: Record<string,unknown>; sourceWarnings?: string[] };

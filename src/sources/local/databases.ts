@@ -1,3 +1,4 @@
+import {identifiers} from '../../domain/identifiers';
 import {sourceKind} from '../../domain/source-catalog';
 import {databasePath} from '../../platform/config';
 import {whatsappStructuredText} from "./whatsapp-content";
@@ -48,6 +49,7 @@ function record(family: "whatsapp" | "calls", row: any,source:string=family): Re
   const messageBody = distinctCaption ? [text, "Media caption\n" + caption].filter(Boolean).join("\n\n") : text;
   const body=[messageBody,structured.text].filter(Boolean).join("\n\n");
   return versioned({adapter:"whatsapp", ref: { source, id }, body, title: row.name || row.chat || "WhatsApp message", type: "message", locator: `source-search://${source}/${id}`, occurredAt: row.date && Number.isFinite(Number(row.date)) ? new Date(Number(row.date) * 1000 + 978307200000).toISOString() : undefined, observedAt: now(), author: actor, conversation: row.chat,
+    identifiers:row.outgoing === 0n && senderId?[...identifiers('person-id',[senderId]),...identifiers('phone',[/^\d+@s\.whatsapp\.net$/.test(senderId)?'+'+senderId.split('@')[0]:undefined])]:[],
     metadata: {...(structured.origin ? {textOrigin:structured.origin} : {}), bodyStatus:body.trim() ? "text" : "text-unavailable",...(distinctCaption ? {textOrigin:text.trim() ? "message-and-caption" : "media-caption"} : {}),senderId, senderIdentity: row.outgoing === 1n ? "self" : senderId ? "native" : "unknown", nativeId: row.stanza, direction: row.outgoing === 1n ? "outgoing" : "incoming", group: row.chat?.endsWith("@g.us") || false, hasMedia: row.media != null }, warnings: [...(structured.warning ? [structured.warning] : []),...(row.media != null ? ["Attachment files are not searched; stored message text, captions, polls and contact cards are returned."] : []),...(!body.trim() ? ["This local entry has no readable text; changing search terms cannot recover absent text. It may be a media/system entry or incomplete local history; its kind is not inferred."] : [])] });
 }
 function family(config:Config,source:string):'whatsapp'|'calls'{const kind=sourceKind(source,config);if(kind!=='whatsapp' && kind!=='muesli')fail('SOURCE_NOT_CONFIGURED','Expected WhatsApp or Muesli source');return kind==='muesli'?'calls':'whatsapp';}

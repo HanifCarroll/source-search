@@ -1,3 +1,4 @@
+import {identifiers} from '../../domain/identifiers';
 import {z} from 'zod';
 import {fail,versioned,now} from '../../domain/identity';
 import type {HttpRead} from '../../platform/http';
@@ -50,7 +51,7 @@ export function slackProvider(source:string,selection:Selection,http:HttpRead):S
     const mentions=[...new Set([...body.matchAll(/<@([UW][A-Z0-9]+)>/g)].map(v=>v[1]!))];for(const id of mentions)body=body.replaceAll('<@'+id+'>','@'+await userName(id));
     body=body.replace(/<(https?:\/\/[^>|]+)\|([^>]+)>/g,'$2 ($1)').replace(/<(https?:\/\/[^>]+)>/g,'$1').replace(/<#([^>|]+)(?:\|([^>]+))?>/g,(_all,id,name)=>'#'+(name||id)).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&');
     const author=p.user?await userName(p.user):p.bot_profile?.name||p.username||p.bot_id||'Slack';
-    return versioned({adapter:'chat',ref:{source,id:identity([selection.workspace,c.id,p.thread_ts||p.ts,p.ts])},title:`#${c.name||c.id} — ${author}`,body:body||`[${p.subtype||'Message without text'}]`,type:'slack-message',locator:workspaceUrl+'/archives/'+encodeURIComponent(c.id)+'/p'+p.ts.replace('.',''),occurredAt:new Date(Number(p.ts)*1000).toISOString(),observedAt:now(),author,conversation:c.id,metadata:{provider:'slack',workspace:selection.workspace,channel:c.id,thread:p.thread_ts||p.ts,subtype:p.subtype||'message'}});
+    return versioned({adapter:'chat',ref:{source,id:identity([selection.workspace,c.id,p.thread_ts||p.ts,p.ts])},title:`#${c.name||c.id} — ${author}`,body:body||`[${p.subtype||'Message without text'}]`,type:'slack-message',locator:workspaceUrl+'/archives/'+encodeURIComponent(c.id)+'/p'+p.ts.replace('.',''),occurredAt:new Date(Number(p.ts)*1000).toISOString(),observedAt:now(),author,conversation:c.id,identifiers:identifiers('person-id',[p.user]),metadata:{provider:'slack',workspace:selection.workspace,channel:c.id,thread:p.thread_ts||p.ts,subtype:p.subtype||'message'}});
   }
   return {async lists(){await authorize();const result=[];for(const id of selection.channels){const c=await info(id);result.push({id,name:c.name||id});}return result;},async sync(previous){
     await authorize();const parsed=state.safeParse(previous),old=parsed.success&&parsed.data.workspace===selection.workspace?parsed.data:undefined;users=old?.users||{};

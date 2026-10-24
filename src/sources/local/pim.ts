@@ -1,3 +1,4 @@
+import {identifiers} from '../../domain/identifiers';
 import type { Config } from "../../platform/config";
 import { runLocalCass } from "../../vendor/cass/runner";
 import { fail, now, queryKey, position, cursor, stableJson, versioned, assertVersion } from "../../domain/identity";
@@ -42,7 +43,8 @@ async function records(config: Config, source: "calendar" | "contacts", range?: 
     }
     if (typeof raw.id !== "string" || !raw.id) fail("UNSUPPORTED_SCHEMA", "Native record lacks an identifier");
     const identity = source === "calendar" ? [raw.id, raw.start, raw.calendar?.identifier, range] : raw.id;
-    return versioned({ ref: { source, id: Buffer.from(JSON.stringify(identity)).toString("base64url") }, title: raw.title || raw.displayName || [raw.names?.given, raw.names?.family].filter(Boolean).join(" ") || "(Unnamed contact)", body: readablePim(source,raw), type: source === "calendar" ? "calendar-event" : "contact", locator: `source-search://${source}/${encodeURIComponent(raw.id)}`, occurredAt: source === "calendar" ? raw.start : undefined, observedAt: now(), metadata: source === "calendar" ? { originalContent:raw, calendar: raw.calendar, endedAt: raw.end, dateWindow: range, allDay: raw.allDay } : { originalContent:raw, identity: "Source-specific contact; possible matches are not merged" } });
+    const ids=source==='calendar'?identifiers('email',(raw.attendees||[]).map((a:any)=>a.email||a.url)):[...identifiers('person-id',[raw.id]),...identifiers('email',(raw.emails||[]).map((v:any)=>typeof v==='string'?v:v.value)),...identifiers('phone',(raw.phones||[]).map((v:any)=>typeof v==='string'?v:v.value))];
+    return versioned({ identifiers:ids, ref: { source, id: Buffer.from(JSON.stringify(identity)).toString("base64url") }, title: raw.title || raw.displayName || [raw.names?.given, raw.names?.family].filter(Boolean).join(" ") || "(Unnamed contact)", body: readablePim(source,raw), type: source === "calendar" ? "calendar-event" : "contact", locator: `source-search://${source}/${encodeURIComponent(raw.id)}`, occurredAt: source === "calendar" ? raw.start : undefined, observedAt: now(), metadata: source === "calendar" ? { originalContent:raw, calendar: raw.calendar, endedAt: raw.end, dateWindow: range, allDay: raw.allDay } : { originalContent:raw, identity: "Source-specific contact; possible matches are not merged" } });
   });
   if (new Set(out.map(r => r.ref.id)).size !== out.length) fail("UNSUPPORTED_SCHEMA", "Native helper returned duplicate record identities");
   return { records: out, warnings };

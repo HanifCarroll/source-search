@@ -41,6 +41,9 @@ export function recordLink(r: RecordData) {
     return undefined;
 }
 export function compactRecord(r: RecordData, details = false): RecordData {
+    // Large participant lists remain available on detailed reads; ordinary
+    // search packets stay bounded. Context matching uses the original record.
+    if(!details){const {identifiers,...rest}=r;r=rest;}
     const m = { ...r.metadata }, source=r.adapter || sourceKind(r.ref.source);
     const originalRecord=m.originalRecord;
     const headers = m.headers as Record<string, string[]> | undefined;

@@ -1,3 +1,4 @@
+import {identifiers} from '../domain/identifiers';
 import ICAL from 'ical.js';
 import {Temporal} from '@js-temporal/polyfill';
 import {parseCalendarComponent} from './calendar';
@@ -24,7 +25,7 @@ export function parsePimText(text:string,options:{source:string;path:string;form
     const title=String(card.getFirstPropertyValue('fn')||card.getFirstPropertyValue('n')||'Contact');
     const labels:Record<string,string>={fn:'Name',n:'Name',nickname:'Nickname',email:'Email',tel:'Phone',org:'Organization',title:'Title',adr:'Address',url:'URL',note:'Note',bday:'Birthday'};
     const body=card.getAllProperties().flatMap(p=>{const label=labels[p.name.split('.').at(-1)!];return label?[`${label}: ${p.getValues().flat(3).join('; ')}`]:[];}).join('\n');
-    add(versioned({ref:{source,id:encode({file,uid})},title,body,type:'contact',locator:path+'#'+encodeURIComponent(uid),observedAt:now(),metadata:{format:'vcard'}}));
+    add(versioned({ref:{source,id:encode({file,uid})},title,body,identifiers:[...identifiers('person-id',[encode({file,uid})]),...identifiers('email',card.getAllProperties('email').flatMap(p=>p.getValues())),...identifiers('phone',card.getAllProperties('tel').flatMap(p=>p.getValues()))],type:'contact',locator:path+'#'+encodeURIComponent(uid),observedAt:now(),metadata:{format:'vcard'}}));
     if(!card.hasProperty('uid'))warnings.push('A contact without UID uses its content as identity; editing it creates a new reference.');
    }
   }else{
@@ -44,7 +45,7 @@ export function parsePimText(text:string,options:{source:string;path:string;form
      const actual=detail.item.component;if(String(actual.getFirstPropertyValue('status')||'').toUpperCase()==='CANCELLED')continue;
      const title=String(actual.getFirstPropertyValue('summary')||'(Untitled event)'),description=String(actual.getFirstPropertyValue('description')||'');
      const body=[title,`Start: ${start}`,`End: ${end}`,actual.getFirstPropertyValue('location')&&`Location: ${actual.getFirstPropertyValue('location')}`,readableHtml(description),...actual.getAllProperties('attendee').map(p=>'Attendee: '+p.getFirstValue())].filter(Boolean).join('\n\n');
-     add(versioned({ref:{source,id:encode({file,uid,occurrence:occurrence.toICALString(),at:start})},title,body,type:'calendar-event',locator:path+'#'+encodeURIComponent(uid),occurredAt:start,observedAt:now(),metadata:{endedAt:end,allDay:detail.startDate.isDate,timezone:zone,format:'ical'}}));
+     add(versioned({ref:{source,id:encode({file,uid,occurrence:occurrence.toICALString(),at:start})},title,body,identifiers:identifiers('email',actual.getAllProperties('attendee').map(p=>p.getFirstValue())),type:'calendar-event',locator:path+'#'+encodeURIComponent(uid),occurredAt:start,observedAt:now(),metadata:{endedAt:end,allDay:detail.startDate.isDate,timezone:zone,format:'ical'}}));
     }
    }
    if(components.some(p=>p.hasProperty('recurrence-id')&&!components.some(master=>!master.hasProperty('recurrence-id')&&master.getFirstPropertyValue('uid')===p.getFirstPropertyValue('uid'))))warnings.push('Calendar contains an exception without its recurring series; export the complete calendar.');

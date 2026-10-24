@@ -6,6 +6,7 @@ import { z } from "zod";
 import {sourceKind,isMail,adapterKinds,connectedKinds} from "../domain/source-catalog";
 import {sourcesSchema,accountSchema,timeZoneSchema,type MarkdownSettings} from "./source-settings";
 import { sourceId } from "../domain/contracts";
+import {contextEntitiesSchema} from '../domain/context';
 import { fail } from "../domain/identity";
 import { readFile } from "node:fs/promises";
 
@@ -15,6 +16,7 @@ const state = join(home, ".cache/source-search");
 const executable=(name:string)=>Bun.which(name) || join(home,".config/source-search/unconfigured/bin",name);
 export const configSchema = z.object({
   sources: sourcesSchema,
+  contextEntities: contextEntitiesSchema,
   timeZone: timeZoneSchema.default("UTC"),
   enabledSources: z.array(sourceId).default([]),
   maintenanceEnabled: z.boolean().default(false),

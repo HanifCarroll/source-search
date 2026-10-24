@@ -8,6 +8,7 @@ import {jmapConnector} from './jmap';
 import {imapConnector} from './imap';
 import type {MailConnector,MailContinuation,MailDetail,MailSummary} from './types';
 import * as legacy from './legacy';
+import {mailIdentifiers} from '../../formats/mail-identifiers';
 export {run,type Run,type PreviewBudget,type MailSource} from './legacy';
 
 export function connector(config:Config,source:string):MailConnector|undefined{
@@ -54,8 +55,10 @@ export async function searchMail(q:Query,execute:legacy.Run=legacy.run,previews:
 }
 export async function readMail(source:string,id:string,execute:legacy.Run=legacy.run,config:Config=defaultConfig(),capture?:(raw:unknown)=>void):Promise<RecordData>{
   const backend=connector(config,source);
-  if(!backend)return legacy.readMail(source,id,async argv=>{const raw=await execute(argv);capture?.(raw);return raw;},config);
-  const raw=await backend.read(id);capture?.(raw);return formatMail(source,raw,config);
+  const record=backend
+    ? await backend.read(id).then(raw=>{capture?.(raw);return formatMail(source,raw,config);})
+    : await legacy.readMail(source,id,async argv=>{const raw=await execute(argv);capture?.(raw);return raw;},config);
+  return {...record,identifiers:await mailIdentifiers(record)};
 }
 export async function mailContext(record:RecordData,execute:legacy.Run=legacy.run,config:Config=defaultConfig()){
   const backend=connector(config,record.ref.source);if(!backend)return legacy.mailContext(record,execute,config);

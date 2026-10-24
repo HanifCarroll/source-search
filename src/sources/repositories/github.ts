@@ -1,3 +1,4 @@
+import {identifiers} from '../../domain/identifiers';
 import {createHash} from 'node:crypto';
 import {z} from 'zod';
 import type {RepositorySettings} from '../../platform/connected-settings';
@@ -115,7 +116,7 @@ export function githubRepositoryProvider(source:string,options:Options,http:Http
       locator:meta.html_url+'/blob/'+commit+'/'+entry.path.split('/').map(encodeURIComponent).join('/'),
       // The locator pins the observed commit. The record version uses the blob,
       // so an unrelated commit or adding another repository keeps it readable.
-      metadata:{provider:'github',account:connector.account,apiUrl:connector.apiUrl,repository:meta.full_name,repositoryId:meta.id,branch,path:entry.path,blobSha:entry.sha,mode:entry.mode,bytes:entry.size},
+      identifiers:identifiers('repository',[meta.full_name]),metadata:{provider:'github',account:connector.account,apiUrl:connector.apiUrl,repository:meta.full_name,repositoryId:meta.id,branch,path:entry.path,blobSha:entry.sha,mode:entry.mode,bytes:entry.size},
       sections:[{kind:'primary',start:0,end:text.length}],
     });
   }
