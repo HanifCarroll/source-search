@@ -29,5 +29,6 @@ test('module dependencies keep transport and maintenance out of retrieval and do
  // Every source is a root here; this also checks modules outside the MCP graph.
  for(const name of graph.keys())visit(name);
  function reachable(name:string,seen=new Set<string>()):Set<string>{if(seen.has(name))return seen;seen.add(name);for(const dep of graph.get(name)||[])reachable(dep,seen);return seen;}
+ for(const name of reachable('maintenance/sources.ts'))expect(name,`Source synchronization must not load search indexes: ${name}`).not.toMatch(/^search\//);
  for(const name of reachable('application/api.ts'))expect(name).not.toMatch(/^(maintenance|interfaces)\//);
 });

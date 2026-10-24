@@ -1,12 +1,12 @@
-import {syncConnected} from './connected';
+import {syncSources,snapshotSources} from './sources';
+import {snapshotStore} from '../sources/sync/cache';
 import {nativeCache} from './native-cache';
-import {syncTasks} from './tasks';
 import {sourceFiles} from '../sources/local/notes';
 import {syncNativeMail,syncGmailChanges,gmailAnchor} from './mail-sync';
 import {archiveInstances,archiveConfig} from './archives';
 import {sourceKind,isMail} from '../domain/source-catalog';
 import { isProjected } from "../domain/source-policy";
-import {privateDirectory,markManagedCache} from "../platform/storage";
+import {privateDirectory,privateJSON,markManagedCache} from "../platform/storage";
 /** Explicit maintenance entry point. Never imported by the read-only MCP gateway. */
 import { lstat, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -17,9 +17,25 @@ import { allMessageRecords } from "../sources/messages/index";
 import { exportPaths, archiveSignature, exportProjectionVersion, type ArchiveSource } from "../sources/archives/originals";
 import { rebuildArchive, indexStatus } from "../sources/archives/index";
 import { readMail, searchMail, formatMail, connector, run, type Run, type MailSource } from "../sources/mail/index";
-import { hash, now, errorData } from "../domain/identity";
+import { hash, now, errorData, fail } from "../domain/identity";
 import { type Query } from "../domain/contracts";
-import { libraryDB, getState, setState, publish, privateJSON } from "../search/library/store";
+import { libraryDB, getState, setState, publish } from "../search/library/store";
+
+// Only consume committed snapshots. Publication failure cannot roll back a
+// provider checkpoint, and a failed sync keeps its previous searchable records.
+export async function publishSnapshots(c:Config){
+ requireMaintenance(c);
+ if(!c.libraryEnabled||!sourceEnabled(c,'library'))return;
+ await privateDirectory(c.libraryRoot);
+ const db=libraryDB(c,true);
+ try{for(const source of snapshotSources(c)){
+  try{
+   const saved=await snapshotStore(c,source,sourceKind(source,c)==='tasks'?'task-snapshots':'source-snapshots').read();
+   if(!saved)fail('NEEDS_SYNC','Run sync-sources to load this source before indexing it');
+   await publish(c,source,saved.records,{snapshot:source},{state:saved.lastError?'error':'ready',error:saved.lastError||null,checkedAt:saved.lastAttemptAt||saved.checkedAt,lastSuccessfulSync:saved.checkedAt,syncStrategy:saved.strategy,coverage:saved.coverage});
+  }catch(e){setState(db,source,{...getState(db,source),state:'error',error:errorData(e),checkedAt:now()});}
+ }}finally{db.close();}
+}
 
 export async function stampPaths(paths:string[]){const values=[];for(const p of paths){try{const s=await lstat(p);values.push([p,s.size,s.mtimeMs,s.ctimeMs,s.ino]);}catch(e){if((e as any).code!=="ENOENT")throw e;values.push([p,null]);}}return hash(JSON.stringify(values));}
 async function native(c:Config){
@@ -156,14 +172,16 @@ async function documents(c:Config){
  const inventory=JSON.parse(await readFile(join(c.libraryRoot,"documents.json"),"utf8"));
  await publish(c,"documents",inventory.records,{documents:true},{state:inventory.pending?"backfilling":inventory.failures.length?"partial":"ready",pending:inventory.pending,discovered:inventory.discovered,failures:inventory.failures,skipped:inventory.skipped,checkedAt:now(),coverage:"Configured local roots, cached mail and selected Takeout attachments; document text, OCR and local transcription; skipped inputs include PDFs over the page budget and files with no detected text or audio"});
 }
-export async function syncLibrary(c:Config){
+export async function syncLibrary(c:Config,{refreshSources=true}={}){
  requireMaintenance(c);
  if(!c.libraryEnabled || !sourceEnabled(c,"library"))return;
+ if(refreshSources)await syncSources(c);
  await markManagedCache(c.libraryRoot);await privateDirectory(c.libraryRoot);await privateDirectory(join(c.libraryRoot,"mail-raw"));
  const db=libraryDB(c,true);for(const source of configuredSourceIds(c).filter(s=>sourceEnabled(c,s) && isProjected(s,c)))if(!getState(db,source).state)setState(db,source,{state:"queued",records:0,chunks:0});db.close();
  // Independent source failures are recorded without starving healthy sources.
- for(const [name,work] of [["native",native],["archives",archives],["tasks",syncTasks],["connected",syncConnected],["mail",syncMail],["documents",documents]] as const){
+ for(const [name,work] of [["native",native],["archives",archives],["snapshots",publishSnapshots],["mail",syncMail],["documents",documents]] as const){
   try{await work(c);const d=libraryDB(c,true);d.query("DELETE FROM states WHERE source=?").run("maintenance-"+name);d.close();}catch(e){const d=libraryDB(c,true);setState(d,"maintenance-"+name,{state:"error",error:errorData(e),checkedAt:now()});d.close();}
  }
+ const cleaned=libraryDB(c,true);try{cleaned.query("DELETE FROM states WHERE source IN ('maintenance-tasks','maintenance-connected')").run();}finally{cleaned.close();}
 }
 if(import.meta.main){process.umask(0o077);await syncLibrary(await loadConfig());console.log(JSON.stringify({ok:true,checkedAt:now()}));}

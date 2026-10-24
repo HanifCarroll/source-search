@@ -7,7 +7,7 @@ import {microsoftTodoProvider,graphOrigin,graphLink} from '../src/sources/tasks/
 import {taskHttp} from '../src/sources/tasks/http';
 import {configSchema,sourceScope} from '../src/platform/config';
 import {taskProvider,taskCache,taskCachePath} from '../src/sources/tasks';
-import {syncTasks} from '../src/maintenance/tasks';
+import {syncTasks} from '../src/maintenance/sources';
 import {createRuntime} from '../src/application/runtime';
 import {microsoftToken,type MicrosoftOAuth} from '../src/platform/microsoft-auth';
 

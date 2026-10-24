@@ -103,7 +103,7 @@ test('book exclusion also covers old extracted records and their library project
 });
 
 test('parser upgrades reformat cached mail locally even while provider scan is deferred',async()=>{
- const {syncMail}=await import('../src/maintenance/library-sync');const {getState,setState,privateJSON}=await import('../src/search/library/store');const {hash}=await import('../src/domain/identity');
+ const {syncMail}=await import('../src/maintenance/library-sync');const {getState,setState}=await import('../src/search/library/store');const {privateJSON}=await import('../src/platform/storage');const {hash}=await import('../src/domain/identity');
  const root=await mkdtemp(join(tmpdir(),'ss-mail-format-')),c={...defaultConfig(),libraryRoot:root,libraryEnabled:true};
  try{
   await mkdir(join(root,'mail-raw'));const source='mail-personal' as const,accountSignature=hash(JSON.stringify(c.mailAccounts[source]));

@@ -1,3 +1,4 @@
+import {publishSnapshots} from '../src/maintenance/library-sync';
 import {test,expect} from 'bun:test';
 import {mkdtemp,writeFile,readFile,rm,mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -7,7 +8,7 @@ import {todoistProvider} from '../src/sources/tasks/todoist';
 import {ticktickProvider} from '../src/sources/tasks/ticktick';
 import {taskHttp} from '../src/sources/tasks/http';
 import {taskCache,taskCachePath} from '../src/sources/tasks';
-import {syncTasks} from '../src/maintenance/tasks';
+import {syncTasks} from '../src/maintenance/sources';
 import {createRuntime} from '../src/application/runtime';
 import {libraryDB,getState} from '../src/search/library/store';
 import {indexSources} from '../src/maintenance/search-index';
@@ -80,8 +81,8 @@ test('different task apps share search, groups, pagination, publication and refe
  const second=(await runtime.search_sources({queries:[{source:'work',query:'task',limit:1,cursor:page.nextCursor}]})).results[0]!;
  expect(second.items[0]!.ref.id).not.toBe(page.items[0]!.ref.id);
  expect((await runtime.read_record({ref:page.items[0]!.ref})).record.body).toContain('Cobalt');
- const db=libraryDB(c),revision=getState(db,'work').projectionRevision;db.close();
- await syncTasks(c);const after=libraryDB(c);expect(getState(after,'work').projectionRevision).toBe(revision);after.close();
+ await publishSnapshots(c);const db=libraryDB(c),revision=getState(db,'work').projectionRevision;db.close();
+ await syncTasks(c);await publishSnapshots(c);const after=libraryDB(c);expect(getState(after,'work').projectionRevision).toBe(revision);after.close();
  await indexSources(c,['--library','--update-only']);
  expect((await runtime.search_sources({queries:[{source:'library',query:'cobalt',mode:'lexical'}]})).results[0]!.items).toHaveLength(1);
  await writeFile(file,JSON.stringify({version:1,tasks:[{id:'a',title:'Changed task'}]}));

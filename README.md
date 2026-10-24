@@ -59,8 +59,7 @@ Set `maintenanceEnabled: true` for the commands below. Replace `SOURCE_ID` with 
 
 | Adapter | Initial load and later refreshes |
 | --- | --- |
-| `tasks` | `bun run start sync-tasks SOURCE_ID` |
-| `calendars`, `address-books`, `notes` (Notion), `files`, `issues`, `chat`, `repositories` | `bun run start sync-sources SOURCE_ID` |
+| `tasks`, `calendars`, `address-books`, `notes` (Notion), `files`, `issues`, `chat`, `repositories` | `bun run start sync-sources SOURCE_ID` |
 | `*-archive` | `bun run start rebuild` |
 | `vault` | `bun run start index --source SOURCE_ID` |
 | Other direct readers | No Source Search indexing step; CASS maintains its own index |

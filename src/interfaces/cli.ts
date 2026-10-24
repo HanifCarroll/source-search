@@ -1,4 +1,4 @@
-import {syncConnected} from '../maintenance/connected';
+import {syncSources,syncTasks} from '../maintenance/sources';
 import {connectedProvider} from '../sources/connected';
 import {sourceAuthorization} from '../platform/source-auth';
 import {googleToken} from '../platform/google-auth';
@@ -9,7 +9,6 @@ import { createRuntime } from "../application/runtime";
 import { rebuildConfiguredArchives } from "../maintenance/archives";
 import {setup,doctor,mcpConfig,downloadModels} from "./setup";
 import {indexSources} from "../maintenance/search-index";
-import {syncTasks} from '../maintenance/tasks';
 import { errorData,fail } from "../domain/identity";
 import {taskProvider} from '../sources/tasks';
 import {microsoftToken} from '../platform/microsoft-auth';
@@ -27,7 +26,7 @@ try {
   else if (command === "search") result = await runtime.search_sources(JSON.parse(argument || await Bun.stdin.text()));
   else if (command === "read") result = await runtime.read_record(JSON.parse(argument || await Bun.stdin.text()));
   else if (command === "rebuild") result = await rebuildConfiguredArchives(config);
-  else if(command === 'sync-sources'){result=await syncConnected(config,argument);if(!(result as {ok:boolean}).ok)process.exitCode=1;}
+  else if(command === 'sync-sources'){result=await syncSources(config,argument);if(!(result as {ok:boolean}).ok)process.exitCode=1;}
   else if(command === 'source-lists'){
     if(!argument)fail('INVALID_REQUEST','source-lists requires a source ID');
     const provider=config.sources[argument]?.adapter==='tasks'?taskProvider(config,argument):connectedProvider(config,argument);

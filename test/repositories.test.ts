@@ -1,3 +1,4 @@
+import {publishSnapshots} from '../src/maintenance/library-sync';
 import {test,expect} from 'bun:test';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -7,7 +8,7 @@ import {repositorySettings} from '../src/platform/connected-settings';
 import {githubRepositoryProvider} from '../src/sources/repositories/github';
 import {identity} from '../src/sources/sync/paging';
 import {snapshotStore} from '../src/sources/sync/cache';
-import {syncConnected} from '../src/maintenance/connected';
+import {syncSources} from '../src/maintenance/sources';
 import {configSchema,sourceScope} from '../src/platform/config';
 import {createRuntime} from '../src/application/runtime';
 import {textPage} from '../src/domain/results';
@@ -134,7 +135,7 @@ test('repository snapshots reuse runtime search, pagination, filters and failed-
   try{
     const fixture=gitFixture();fixture.commit({'src/a.ts':'// Invented optics\n'+('line\n'.repeat(2500))+'export const prism = (x: number) => x * 2;\n','src/b.ts':'// Invented optics\nexport const lens = 1;'});
     const c=configSchema.parse({enabledSources:['code'],maintenanceEnabled:true,libraryRoot:root,sources:{code:definition}}),provider=githubRepositoryProvider('code',settings(),fixture.http),runtime=createRuntime(c),store=snapshotStore(c,'code');
-    expect((await syncConnected(c,'code',()=>provider)).ok).toBe(true);
+    expect((await syncSources(c,'code',()=>provider)).ok).toBe(true);
     const status=(await runtime.list_sources()).sources.find(s=>s.source==='code')!;expect(status.state).toBe('ready');expect(status.capabilities.filters).toEqual(['types','sections']);
     const page=(await runtime.search_sources({queries:[{source:'all-repositories',query:'optics',limit:1}]})).results[0]!;expect(page.items).toHaveLength(1);expect(page.nextCursor).toBeDefined();
     const continuation=(await runtime.search_sources({queries:[{source:'code',query:'optics',limit:1,cursor:page.nextCursor}]})).results[0]!;expect(continuation.items).toHaveLength(1);expect(continuation.items[0]!.ref.id).not.toBe(page.items[0]!.ref.id);
@@ -143,7 +144,7 @@ test('repository snapshots reuse runtime search, pagination, filters and failed-
     expect(focused.page.offset).toBeGreaterThan(0);expect(focused.body).toContain('(x: number) => x * 2;');
     const first=textPage(original);expect(first.truncated).toBe(true);expect(first.body+textPage(original,first.nextCursor).body).toBe(original.body);
     for(const query of [{from:'2026-01-01T00:00:00Z'},{sort:'newest'},{conversation:'example/lab'}])expect((await runtime.search_sources({queries:[{source:'code',query:'optics',...query}]})).results[0]!.error?.code).toBe('UNSUPPORTED_FILTER');
-    const failed=await syncConnected(c,'code',()=>({...provider,async sync(){throw Object.assign(new Error('Invented disconnect'),{code:'PROVIDER_UNAVAILABLE'});}}));expect(failed.ok).toBe(false);
+    const failed=await syncSources(c,'code',()=>({...provider,async sync(){throw Object.assign(new Error('Invented disconnect'),{code:'PROVIDER_UNAVAILABLE'});}}));expect(failed.ok).toBe(false);
     const stale=(await runtime.search_sources({queries:[{source:'code',query:'optics'}]})).results[0]!;expect(stale.items).toHaveLength(2);expect(stale.warnings.join(' ')).toContain('PROVIDER_UNAVAILABLE');
     fixture.commit({'src/a.ts':'changed','src/b.ts':'// Invented optics'});
     await expect(store.original(hit.ref,provider)).rejects.toMatchObject({code:'STALE_RECORD'});
@@ -157,15 +158,15 @@ test('adding a selected repository preserves unchanged file references after ref
     const a=gitFixture(),b=gitFixture('other/project');a.commit({'a.ts':'Invented prism'});b.commit({'b.ts':'Invented lens'});
     const http:HttpResponseRead=path=>path.startsWith('/repos/example/lab')?a.http(path):b.http(path);
     const c=configSchema.parse({enabledSources:['code'],maintenanceEnabled:true,libraryRoot:root,sources:{code:definition}});
-    const provider=githubRepositoryProvider('code',settings(),http);await syncConnected(c,'code',()=>provider);
+    const provider=githubRepositoryProvider('code',settings(),http);await syncSources(c,'code',()=>provider);
     const ref=(await snapshotStore(c,'code').read())!.records[0]!.ref;
     const added=settings({connector:{...definition.connector,repositories:['example/lab','other/project']}}),c2=configSchema.parse({...c,sources:{code:added}});
     expect((await createRuntime(c2).search_sources({queries:[{source:'code',query:'prism'}]})).results[0]!.error?.code).toBe('STALE_INDEX');
-    const provider2=githubRepositoryProvider('code',added,http);await syncConnected(c2,'code',()=>provider2);
+    const provider2=githubRepositoryProvider('code',added,http);await syncSources(c2,'code',()=>provider2);
     expect((await snapshotStore(c2,'code').original(ref,provider2)).ref).toEqual(ref);expect((await snapshotStore(c2,'code').read())!.records).toHaveLength(2);
     const removed=settings({connector:{...definition.connector,repositories:['other/project']}}),c3=configSchema.parse({...c,sources:{code:removed}}),provider3=githubRepositoryProvider('code',removed,http);
     await expect(snapshotStore(c3,'code').original(ref,provider3)).rejects.toMatchObject({code:'STALE_INDEX'});
-    await syncConnected(c3,'code',()=>provider3);await expect(snapshotStore(c3,'code').original(ref,provider3)).rejects.toMatchObject({code:'RECORD_NOT_FOUND'});
+    await syncSources(c3,'code',()=>provider3);await expect(snapshotStore(c3,'code').original(ref,provider3)).rejects.toMatchObject({code:'RECORD_NOT_FOUND'});
     const rotated=configSchema.parse({...c,sources:{code:{...definition,sync:{timeoutMs:1800000,maxRequests:20000},connector:{...definition.connector,token:{env:'OTHER_TOKEN'}}}}});expect(sourceScope(c,'code')).toBe(sourceScope(rotated,'code'));
   }finally{await rm(root,{recursive:true,force:true});}
 });
@@ -175,8 +176,8 @@ test('byte limits fail the whole synchronization and retain its previous complet
   try{
     const fixture=gitFixture();fixture.commit({'a.ts':'old'});
     const options=settings({maxTotalBytes:5}),c=configSchema.parse({enabledSources:['code'],maintenanceEnabled:true,libraryRoot:root,sources:{code:options}}),provider=githubRepositoryProvider('code',options,fixture.http);
-    await syncConnected(c,'code',()=>provider);const before=(await snapshotStore(c,'code').read())!;
-    fixture.commit({'a.ts':'1234','b.ts':'5678'});const result=await syncConnected(c,'code',()=>provider);
+    await syncSources(c,'code',()=>provider);const before=(await snapshotStore(c,'code').read())!;
+    fixture.commit({'a.ts':'1234','b.ts':'5678'});const result=await syncSources(c,'code',()=>provider);
     expect(result.ok).toBe(false);expect(result.sources[0]!.error?.code).toBe('SOURCE_LIMIT');
     const after=(await snapshotStore(c,'code').read())!;expect(after.records).toEqual(before.records);expect(after.checkpoint).toEqual(before.checkpoint);
   }finally{await rm(root,{recursive:true,force:true});}
@@ -187,14 +188,14 @@ test('repository selection and current versions also govern shared library proje
   try{
     const fixture=gitFixture();fixture.commit({'code.ts':'Invented optical calibration'});
     const c=configSchema.parse({enabledSources:['code','library'],maintenanceEnabled:true,libraryEnabled:true,libraryRoot:root,sources:{code:definition}}),provider=githubRepositoryProvider('code',settings(),fixture.http);
-    expect((await syncConnected(c,'code',()=>provider)).ok).toBe(true);
-    const db=libraryDB(c);let chunk:{id:string;hash:string};try{chunk=db.query('SELECT id,hash FROM chunks').get() as typeof chunk;}finally{db.close();}
+    expect((await syncSources(c,'code',()=>provider)).ok).toBe(true);
+    await publishSnapshots(c);const db=libraryDB(c);let chunk:{id:string;hash:string};try{chunk=db.query('SELECT id,hash FROM chunks').get() as typeof chunk;}finally{db.close();}
     const ref={source:'library',id:chunk!.id,version:chunk!.hash},validate=(original:any)=>snapshotStore(c,'code').original(original,provider);
     expect((await readLibrary(c,ref,validate)).body).toContain('Invented optical calibration');
     const removed=configSchema.parse({...c,sources:{code:settings({connector:{...definition.connector,repositories:['other/project']}})}});
     await expect(readLibrary(removed,ref,validate)).rejects.toMatchObject({code:'SOURCE_DISABLED'});
     await expect(readLibrary(configSchema.parse({...c,enabledSources:['library']}),ref,validate)).rejects.toMatchObject({code:'SOURCE_DISABLED'});
     fixture.commit({'code.ts':'Changed calibration'});await expect(readLibrary(c,ref,validate)).rejects.toMatchObject({code:'STALE_RECORD'});
-    fixture.commit({});await syncConnected(c,'code',()=>provider);await expect(readLibrary(c,ref,validate)).rejects.toMatchObject({code:'STALE_RECORD'});
+    fixture.commit({});await syncSources(c,'code',()=>provider);await publishSnapshots(c);await expect(readLibrary(c,ref,validate)).rejects.toMatchObject({code:'STALE_RECORD'});
   }finally{await rm(root,{recursive:true,force:true});}
 });

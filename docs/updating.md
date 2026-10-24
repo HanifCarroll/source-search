@@ -41,6 +41,8 @@ Finally, run `bun run start sources` to check the enabled sources. This performs
 
 ## Existing indexes and rollback
 
+The maintenance separation keeps existing cache paths, checkpoints and references. `sync-sources` now also accepts tasks; `sync-tasks` remains available. Both commands save source snapshots without writing library projections. Run `index --library` when you want to update the combined library; `--update-only` only indexes already-published projections. No cache migration or embedding rebuild is needed for this change.
+
 Keep configured cache and model paths stable. Maintenance updates changed projections incrementally; lexical search may be available while their embeddings catch up.
 
 The incremental-maintenance update needs no configuration changes or embedding rebuild. Its first pass establishes mail checkpoints, native row fingerprints and search revisions; subsequent passes reuse them. Existing mail caches remain available while that first inventory completes. Back up the index and library before the first pass, which also removes obsolete derived embeddings. See [incremental updates](maintenance.md#incremental-updates) for each connector's reconciliation behavior.

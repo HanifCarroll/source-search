@@ -7,7 +7,8 @@ import {sourceScope,mailAccount} from '../platform/config';
 import {errorData,hash,now} from '../domain/identity';
 import {formatMail,readMail,type Run} from '../sources/mail/index';
 import type {MailConnector} from '../sources/mail/types';
-import {getState,setState,privateJSON,publish} from '../search/library/store';
+import {getState,setState,publish} from '../search/library/store';
+import {privateJSON} from '../platform/storage';
 
 export const rawMailPath=(c:Config,source:string,id:string)=>join(c.libraryRoot,'mail-raw',source+'-'+(id.length>180?hash(id):id)+'.json');
 async function publishMail(c:Config,db:Database,source:string,state:any){

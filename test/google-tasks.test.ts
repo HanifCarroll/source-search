@@ -6,7 +6,7 @@ import {googleTasksProvider,googleTasksScope} from '../src/sources/tasks/google-
 import {googleToken} from '../src/platform/google-auth';
 import {providerHttp} from '../src/platform/http';
 import {configSchema,sourceScope} from '../src/platform/config';
-import {syncTasks} from '../src/maintenance/tasks';
+import {syncTasks} from '../src/maintenance/sources';
 import {createRuntime} from '../src/application/runtime';
 
 test('Google Tasks includes completed/hidden/assigned items, follows pagination and applies edits and tombstones',async()=>{

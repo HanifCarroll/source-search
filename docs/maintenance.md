@@ -2,6 +2,8 @@
 
 Maintenance runs separately from the MCP server. Run it on demand or set up a recurring job.
 
+`bun run start sync-sources [SOURCE_ID]` updates task and connected-source snapshots for direct search. It needs `maintenanceEnabled` and the selected sources; no library or models are required. `sync-tasks` remains a task-only shortcut. These commands only save source snapshots. `index --library` refreshes those snapshots, publishes library projections and updates the keyword index; `--embed` adds embeddings. A coordinator that already ran `sync-sources` can use `index --library --skip-source-sync` to publish those snapshots without contacting those providers again. Mail and local/export projections still refresh as part of library maintenance.
+
 1. Configure absolute source and executable paths outside the checkout.
 2. Enable each source. For library work also enable `libraryEnabled`, `maintenanceEnabled`, and the `library` source.
 3. Build the native export index with `bun run start rebuild` if selected exports are enabled.

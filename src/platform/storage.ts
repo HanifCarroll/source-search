@@ -1,4 +1,5 @@
-import { lstat, mkdir, writeFile, readFile, readdir, rm, realpath } from "node:fs/promises";
+import { lstat, mkdir, writeFile, readFile, readdir, rm, realpath, rename } from "node:fs/promises";
+import {randomUUID} from 'node:crypto';
 import { resolve, dirname, join, relative, isAbsolute, sep } from "node:path";
 import { homedir } from "node:os";
 import { fail } from "../domain/identity";
@@ -17,6 +18,11 @@ export async function privateDirectory(path:string) {
   await mkdir(path,{recursive:true,mode:0o700});
   const s=await lstat(path);
   if(s.isSymbolicLink() || !s.isDirectory() || (s.mode & 0o077)!==0)fail("UNSAFE_PATH","Cache directory must be an ordinary private directory (0700)");
+}
+export async function privateJSON(path:string,value:unknown){
+  const temp=path+'.'+randomUUID()+'.tmp';
+  try{await writeFile(temp,JSON.stringify(value,null,2),{mode:0o600,flag:'wx'});await rename(temp,path);}
+  finally{await rm(temp,{force:true});}
 }
 export async function markManagedCache(path:string) {
   const root=managedCacheRoot(),rel=relative(root,path);

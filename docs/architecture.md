@@ -22,6 +22,8 @@ src/
     library/         Projection store, ranked discovery, provenance checks
     qmd/             Vault adapter and isolated public QMD SDK worker
   maintenance/
+    sources.ts       Task and connected-source synchronization
+    snapshots.ts     Atomic source snapshot/checkpoint writes
     library-sync.ts  Explicit projection orchestration
     refresh.py       Existing optional refresh process
     documents/       Inventory, format readers, incremental pipeline, worker CLI
@@ -98,7 +100,7 @@ Identity is separate from transport. JMAP retains provider email IDs. IMAP uses 
 
 ## Task connectors and categories
 
-`tasks/model.ts` defines a task and a small provider interface: synchronize a snapshot/checkpoint, read a current original, and optionally discover lists. Todoist, TickTick, Apple Reminders and Microsoft To Do own their transport interpretation and coverage. Things retains its existing record bodies and versions. The shared snapshot module owns native search, pagination and original version checks. `maintenance/snapshots.ts` owns locks, atomic checkpoint publication, failed-sync retention and changed-record library updates; `maintenance/tasks.ts` selects task sources for that writer. Adding another task app does not add a new search route or group. JSON files use the same record model.
+`tasks/model.ts` defines a task and a small provider interface: synchronize a snapshot/checkpoint, read a current original, and optionally discover lists. Todoist, TickTick, Apple Reminders and Microsoft To Do own their transport interpretation and coverage. Things retains its existing record bodies and versions. The shared snapshot module owns native search, pagination and original version checks. `maintenance/sources.ts` selects task and connected sources for one writer. `maintenance/snapshots.ts` owns locks, atomic checkpoint publication and failed-sync retention. Library maintenance separately publishes the committed records, so projection failure cannot roll back a provider checkpoint. Adding another task app does not add a new search route or group. JSON files use the same record model.
 
 The macOS helper reads Reminders through EventKit and marks a complete snapshot explicitly. Microsoft uses Graph task deltas and paginated list inventories, with collection-bound continuation links. Its OAuth implementation delegates authentication and refresh to MSAL; explicit CLI login is separate from silent retrieval. Authentication caches live outside task checkpoints and disposable search caches.
 
@@ -110,7 +112,7 @@ Google authentication uses the official Google Auth Library with PKCE and a loop
 
 ## Connected providers
 
-Provider modules follow the data they supply: `sources/pim/` for calendars and contacts, `notes/` for Notion, `files/` for Drive and OneDrive, `repositories/` for repository files, `issues/` for GitHub and Linear, and `chat/` for Slack. Tasks and connected sources share `sources/sync/` contracts, pagination and snapshot retrieval; `maintenance/snapshots.ts` owns atomic writes, locking, checkpoint advancement and optional library publication. A provider returns a complete selected snapshot even when its upstream fetch is incremental. Failed scans cannot publish partial state. Runtime search reads snapshots and original reads call the provider; retrieval never invokes maintenance.
+Provider modules follow the data they supply: `sources/pim/` for calendars and contacts, `notes/` for Notion, `files/` for Drive and OneDrive, `repositories/` for repository files, `issues/` for GitHub and Linear, and `chat/` for Slack. Tasks and connected sources share `sources/sync/` contracts, pagination and snapshot retrieval; `maintenance/snapshots.ts` owns atomic writes, locking and checkpoint advancement. It has no search dependency. Library maintenance consumes its committed snapshots; synchronization works with the library and models disabled. A provider returns a complete selected snapshot even when its upstream fetch is incremental. Failed scans cannot publish partial state. Runtime search reads snapshots and original reads call the provider; retrieval never invokes maintenance.
 
 `platform/source-auth.ts` selects provider scopes, while the Google and Microsoft SDKs own authorization and token refresh. Provider modules receive a read transport and contain no configuration or credential persistence. Source identities include account and collection selection while excluding replaceable credential locators. New providers register in one factory and reuse category routing, search, retention and synchronization.
 

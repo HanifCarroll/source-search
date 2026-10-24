@@ -66,4 +66,3 @@ export async function publish(c:Config,source:string,records:RecordData[],guard:
  }finally{db.close();}
  return chunks.length;
 }
-export async function privateJSON(path:string,value:unknown){const temp=path+"."+randomUUID()+".tmp";try{await writeFile(temp,JSON.stringify(value,null,2),{mode:0o600,flag:"wx"});await rename(temp,path);}finally{await rm(temp,{force:true});}}

@@ -16,7 +16,7 @@ export async function indexSources(c:Config,args:string[]) {
   const scoped=sourceConfig(c,id),result:Record<string,unknown>={source:id};
   if(kind==='library'&&!c.libraryEnabled)fail('SOURCE_NOT_CONFIGURED','Set libraryEnabled to true before indexing the library.');
   if(!args.includes('--embed-only')){
-   if(kind==='library'&&!args.includes('--update-only'))await syncLibrary(c);
+   if(kind==='library'&&!args.includes('--update-only'))await syncLibrary(c,{refreshSources:!args.includes('--skip-source-sync')});
    result.update=await runSdk(scoped,{index:kind,action:'update'});
    if((result.update as {skipped:number}).skipped)fail('SOURCE_PARTIAL','Some source files could not be indexed; make them available and rerun index.');
   }
