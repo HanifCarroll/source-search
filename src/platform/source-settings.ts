@@ -77,6 +77,10 @@ export const taskSettings = z.object({
     z.object({type:z.literal('things'),database:path.optional(),root:path.optional()}).strict().refine(s=>!!s.database!==!!s.root,'Select a Things database or export folder'),
     z.object({type:z.literal('todoist'),account:z.string().min(1).max(200),token:secretSchema}).strict(),
     z.object({type:z.literal('ticktick'),account:z.string().min(1).max(200),token:secretSchema,projects:z.array(z.string().min(1).max(200)).min(1).max(100)}).strict(),
+    z.object({type:z.literal('apple-reminders'),helper:path.optional(),launcher:path.optional(),lists:z.array(z.string().min(1).max(500)).min(1).max(100).optional()}).strict(),
+    z.object({type:z.literal('microsoft-todo'),account:z.string().min(1).max(200),lists:z.array(z.string().min(1).max(500)).min(1).max(100).optional(),token:secretSchema.optional(),
+      oauth:z.object({clientId:z.uuid(),tenant:z.union([z.enum(['common','consumers','organizations']),z.uuid()]).default('common'),cache:path}).strict().optional(),
+    }).strict().refine(s=>!!s.token!==!!s.oauth,'Select a Microsoft OAuth login or an external access token'),
     z.object({type:z.literal('json'),paths:files}).strict(),
   ]),
 }).strict();

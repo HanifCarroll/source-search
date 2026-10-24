@@ -34,7 +34,9 @@ export async function purgeCache(c:Config,apply=false) {
     ...('roots' in s?Object.values(s.roots||{}):[]),...('data' in s&&s.data?[s.data]:[]),
     ...(s.adapter==='tasks'&&s.connector.type==='json'?s.connector.paths:[]),
     ...(s.adapter==='tasks'&&s.connector.type==='things'?[s.connector.root,s.connector.database].filter((p):p is string=>!!p):[]),
-    ...(s.adapter==='tasks'&&'token' in s.connector&&'file' in s.connector.token?[s.connector.token.file]:[]),
+    ...(s.adapter==='tasks'&&'token' in s.connector&&s.connector.token&&'file' in s.connector.token?[s.connector.token.file]:[]),
+    ...(s.adapter==='tasks'&&s.connector.type==='microsoft-todo'&&s.connector.oauth?[s.connector.oauth.cache]:[]),
+    ...(s.adapter==='tasks'&&s.connector.type==='apple-reminders'?[s.connector.helper||c.pimHelper,s.connector.launcher||c.pimLauncher]:[]),
   ]);
   const originals=[c.journals,c.things,c.thingsDatabase,c.messages,c.whatsapp,c.muesli,c.voiceNotes,c.callNotes,c.cassData,...c.chromeProfiles,...c.chatgpt,...c.takeout,...c.linkedin,...c.twitter,...c.documentRoots,...Object.values(c.qmdRoots),...c.qmdModels,...Object.values(c.searchModels||{}),...selected];
   if(originals.some(p=>p && overlaps(root,p)))fail("UNSAFE_PATH","A configured original or model is inside the cache directory; move it before purging");

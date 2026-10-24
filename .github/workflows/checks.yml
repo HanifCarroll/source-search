@@ -22,6 +22,12 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check
       - run: bun test
+      - name: Compile the macOS source helper
+        if: runner.os == 'macOS'
+        env:
+          SOURCE_SEARCH_SIGNING_IDENTITY: '-'
+          SOURCE_SEARCH_BUNDLE_ID: org.example.source-search.ci
+        run: sh native/scripts/build-helper.sh "$RUNNER_TEMP/pim-helper"
       - name: Check generic IMAP against a disposable Dovecot server
         if: runner.os == 'Linux'
         run: bun test/imap-server.integration.ts

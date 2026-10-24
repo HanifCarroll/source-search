@@ -5,9 +5,9 @@ import { querySchema, type Query, type Ref, type RecordData } from "../../domain
 import { recordPage } from "../../domain/pages";
 import { readableHtml } from "../../formats/html";
 
-export async function helper(config: Config, args: string[]) {
-  if (!["status", "calendar", "contacts"].includes(args[0])) fail("INVALID_REQUEST", "Only native read commands are available");
-  const r = await runLocalCass({ binaryPath: config.pimLauncher, args: [config.pimHelper, ...args], timeoutMs: 30_000, maxOutputBytes: 4 * 1024 * 1024 });
+export async function helper(config: Config, args: string[], maxOutputBytes=4 * 1024 * 1024) {
+  if (!["status", "calendar", "contacts", "reminders", "reminder-lists"].includes(args[0])) fail("INVALID_REQUEST", "Only native read commands are available");
+  const r = await runLocalCass({ binaryPath: config.pimLauncher, args: [config.pimHelper, ...args], timeoutMs: 30_000, maxOutputBytes });
   if (r.timedOut) fail("TIMEOUT", "Native source helper timed out");
   if (r.outputLimitExceeded) fail("SOURCE_LIMIT", "Native source helper exceeded its output budget; use a smaller calendar window");
   const records = r.stdout.split("\n").filter(Boolean).map(s => JSON.parse(s));

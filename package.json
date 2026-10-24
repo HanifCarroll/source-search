@@ -13,6 +13,7 @@
     "bench": "bun scripts/benchmark-search.ts"
   },
   "dependencies": {
+    "@azure/msal-node": "7.1.1",
     "@js-temporal/polyfill": "0.5.1",
     "@modelcontextprotocol/sdk": "1.32.0",
     "@tobilu/qmd": "2.8.3",

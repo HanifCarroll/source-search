@@ -28,6 +28,7 @@ export type TaskSnapshot={records:RecordData[];checkpoint?:unknown;coverage:stri
 // Providers own transport and mapping. Search, pagination, references and
 // publication operate on the same records regardless of the originating app.
 export interface TaskProvider {
+  lists?():Promise<{id:string;name:string}[]>;
   sync(previous?:unknown):Promise<TaskSnapshot>;
   read(id:string,previous?:unknown):Promise<RecordData>;
 }

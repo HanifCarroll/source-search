@@ -10,6 +10,10 @@ import {taskHttp} from './http';
 import {todoistProvider} from './todoist';
 import {ticktickProvider} from './ticktick';
 import {thingsRecords} from './things';
+import {appleRemindersProvider} from './apple-reminders';
+import {microsoftTodoProvider,graphOrigin} from './microsoft-todo';
+import {microsoftToken} from '../../platform/microsoft-auth';
+import {helper} from '../local/pim';
 
 export function taskProvider(c:Config,source:string):TaskProvider {
   requireSource(c,source);
@@ -18,9 +22,18 @@ export function taskProvider(c:Config,source:string):TaskProvider {
   const connector=s.connector;
   const scope=sourceScope(c,source);
   const bindRecord=(r:RecordData)=>({...r,ref:{...r.ref,version:hash(r.ref.version+scope)}});
-  const bind=(provider:TaskProvider):TaskProvider=>({sync:async previous=>{const snapshot=await provider.sync(previous);return {...snapshot,records:snapshot.records.map(bindRecord)};},read:async(id,previous)=>bindRecord(await provider.read(id,previous))});
+  const bind=(provider:TaskProvider):TaskProvider=>({...provider,sync:async previous=>{const snapshot=await provider.sync(previous);return {...snapshot,records:snapshot.records.map(bindRecord)};},read:async(id,previous)=>bindRecord(await provider.read(id,previous))});
   if(connector.type==='todoist')return bind(todoistProvider(source,taskHttp('https://api.todoist.com/api/v1',connector.token,'form')));
   if(connector.type==='ticktick')return bind(ticktickProvider(source,connector.projects,taskHttp('https://api.ticktick.com/open/v1',connector.token)));
+  if(connector.type==='apple-reminders')return bind(appleRemindersProvider(source,connector.lists,args=>{
+    if(process.platform!=='darwin')return fail('UNSUPPORTED_PLATFORM','Apple Reminders requires macOS');
+    return helper({...c,pimHelper:connector.helper||c.pimHelper,pimLauncher:connector.launcher||c.pimLauncher},args,32*1024*1024);
+  }));
+  if(connector.type==='microsoft-todo'){
+    let accessToken:Promise<string>|undefined;
+    const token=connector.token||(()=>accessToken??=microsoftToken(connector.oauth!));
+    return bind(microsoftTodoProvider(source,connector.lists,taskHttp(graphOrigin,token)));
+  }
   async function sync():Promise<TaskSnapshot>{
     if(connector.type==='things'){
       const snapshot=await thingsRecords({...c,things:connector.root||c.things,thingsDatabase:connector.database});

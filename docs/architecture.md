@@ -11,7 +11,7 @@ src/
   formats/           HTML, MIME, calendar and YAML format adapters
   sources/
     mail/            Shared mail records, JMAP/IMAP connectors, legacy CLI adapters
-    tasks/           Shared task records, Things, Todoist, TickTick and JSON readers
+    tasks/           Shared task records and app-specific task providers
     messages/        Messages queries, attributed-body decoding and timestamps
     local/           Journals, local databases, PIM, browser metadata
     archives/        Export indexing, original reads, per-export interpretation
@@ -83,7 +83,9 @@ Identity is separate from transport. JMAP retains provider email IDs. IMAP uses 
 
 ## Task connectors and categories
 
-`tasks/model.ts` defines a task and a small provider interface: synchronize a snapshot/checkpoint and read a current original. Todoist and TickTick own only transport interpretation and provider coverage. Things retains its existing record bodies and versions. The shared task adapter owns native search, pagination and original version checks; `maintenance/tasks.ts` publishes snapshots and updates the library through its normal changed-record path. Adding another task app does not add a new search route or group. JSON files use the same record model.
+`tasks/model.ts` defines a task and a small provider interface: synchronize a snapshot/checkpoint, read a current original, and optionally discover lists. Todoist, TickTick, Apple Reminders and Microsoft To Do own their transport interpretation and coverage. Things retains its existing record bodies and versions. The shared task adapter owns native search, pagination and original version checks; `maintenance/tasks.ts` publishes snapshots and updates the library through its normal changed-record path. Adding another task app does not add a new search route or group. JSON files use the same record model.
+
+The macOS helper reads Reminders through EventKit and marks a complete snapshot explicitly. Microsoft uses Graph task deltas and paginated list inventories, with collection-bound continuation links. Its OAuth implementation delegates authentication and refresh to MSAL; explicit CLI login is separate from silent retrieval. Authentication caches live outside task checkpoints and disposable search caches.
 
 Records and checkpoints commit together after a complete provider pass. Per-source locks serialize writers and recover after process failure. Credentials are resolved at request time and never stored in checkpoints. New task references bind the provider, selected files/projects and account identity, excluding credential references so token rotation preserves saved references. Existing Things archive references retain their original versions. Failed syncs retain records and report their stale status.
 

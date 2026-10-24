@@ -99,6 +99,8 @@ export function sourceScope(config:Config,source:string):string {
   const kind=sourceKind(source,config),definition=config.sources[source];
   if(definition?.adapter==='tasks'){
     const connector=definition.connector;
+    if(connector.type==='microsoft-todo')return createHash('sha256').update(JSON.stringify({adapter:kind,connection:{type:connector.type,account:connector.account,lists:connector.lists,oauth:connector.oauth}})).digest('hex');
+    if(connector.type==='apple-reminders')return createHash('sha256').update(JSON.stringify({adapter:kind,connection:{...connector,helper:connector.helper||config.pimHelper,launcher:connector.launcher||config.pimLauncher}})).digest('hex');
     const connection='token' in connector?(({token,...identity})=>identity)(connector):connector;
     return createHash('sha256').update(JSON.stringify({adapter:kind,connection})).digest('hex');
   }

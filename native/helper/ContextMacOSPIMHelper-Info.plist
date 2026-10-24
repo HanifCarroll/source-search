@@ -28,5 +28,9 @@
   <string>Source Search does not write to Calendars.</string>
   <key>NSContactsUsageDescription</key>
   <string>Source Search reads local Contacts to index contact metadata.</string>
+  <key>NSRemindersFullAccessUsageDescription</key>
+  <string>Source Search reads selected Reminders lists so you can search your tasks.</string>
+  <key>NSRemindersUsageDescription</key>
+  <string>Source Search reads selected Reminders lists so you can search your tasks.</string>
 </dict>
 </plist>

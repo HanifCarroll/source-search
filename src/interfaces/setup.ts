@@ -35,6 +35,11 @@ export async function doctor(c:Config) {
  for(const id of c.enabledSources){const s=sourceConfig(c,id),kind=sourceKind(id,c);
   if(kind==='agent-history')await check(id+' CASS',s.cassBinary,'Install CASS and build its index.');
   if(kind==='calendar'||kind==='contacts')await check(id+' macOS helper',s.pimHelper,'Build the optional macOS helper, or use ical/vcard files.');
+  const definition=c.sources[id];
+  if(definition?.adapter==='tasks'&&definition.connector.type==='apple-reminders'){
+   await check(id+' Reminders helper',definition.connector.helper||c.pimHelper,'Build the macOS helper and run its explicit authorize reminders command.');
+   await check(id+' Reminders launcher',definition.connector.launcher||c.pimLauncher,'Build the macOS helper and its launcher.');
+  }
  }
  if(kinds.has('documents')){
   await check('Document Python environment',c.extractorPython,'Create the optional extraction environment from scripts/extraction-requirements.txt.');
@@ -100,12 +105,21 @@ export async function setup(args:string[]) {
     }else if(adapter==='ical'||adapter==='vcard'||['chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive'].includes(adapter))definition.paths=[await path('Export file')];
     else if(['messages','whatsapp','muesli','things-archive'].includes(adapter))definition.database=await path('SQLite database or exported main.sqlite');
     else if(adapter==='tasks'){
-     const type=await ask('Task app (things, todoist, ticktick, json)');
+     const type=await ask('Task app (things, todoist, ticktick, apple-reminders, microsoft-todo, json)');
      if(type==='things')definition.connector={type,database:await path('Things main.sqlite')};
      else if(type==='json')definition.connector={type,paths:[await path('Task JSON file')]};
      else if(type==='todoist'||type==='ticktick'){
       definition.connector={type,account:await ask('Stable account name',id),token:{file:await path('File containing the API token')}};
       if(type==='ticktick')definition.connector.projects=(await ask('Project IDs, separated by commas')).split(',').map(s=>s.trim()).filter(Boolean);
+     }else if(type==='apple-reminders'){
+      definition.connector={type};
+      const lists=await ask('Reminders list IDs, separated by commas (blank for all)');
+      if(lists)definition.connector.lists=lists.split(',').map(s=>s.trim()).filter(Boolean);
+     }else if(type==='microsoft-todo'){
+      definition.connector={type,account:await ask('Stable account name',id),oauth:{clientId:await ask('Microsoft app registration client ID'),tenant:await ask('Tenant (common, consumers, organizations, or tenant ID)','common'),cache:await path('Private Microsoft login cache file (created at sign-in)')}};
+      const lists=await ask('To Do list IDs, separated by commas (blank for all)');
+      if(lists)definition.connector.lists=lists.split(',').map(s=>s.trim()).filter(Boolean);
+      console.error('After setup, run login-microsoft '+id+' and sync-tasks '+id+'.');
      }else fail('INVALID_CONFIG','Unknown task connector');
     }
     else if(adapter.startsWith('chrome-')||adapter.startsWith('browser-'))definition.profiles=[{id:await ask('Stable profile ID','default'),path:await path('Chromium profile folder')}];

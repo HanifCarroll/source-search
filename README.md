@@ -44,7 +44,7 @@ Search/read also accept JSON on stdin. Run `bun run start mcp-config` to print a
 | Sources | Configuration |
 | --- | --- |
 | Markdown folders (`markdown`) | Named folders, file patterns, date fields, timezone and note/journal/transcript labels |
-| Task apps (`tasks`) | `connector`: Things database/export, Todoist, TickTick, or an app-neutral JSON file; run `sync-tasks` |
+| Task apps (`tasks`) | `connector`: Things, Todoist, TickTick, Apple Reminders, Microsoft To Do, or an app-neutral JSON file; run `sync-tasks` |
 | `chatgpt-archive`, `takeout-archive`, `linkedin-archive`, `twitter-archive` | `paths`: selected export files; enable maintenance and run `rebuild` |
 | Messages (`messages`), WhatsApp (`whatsapp`) and Muesli (`muesli`) | `database`: a local application database and existing OS permissions |
 | Browser metadata (`browser-history`, `browser-bookmarks`, `browser-downloads`) | `profiles`: stable IDs and Chrome, Edge, Brave or other compatible Chromium profile directories; downloads are metadata only |
@@ -142,6 +142,54 @@ Run `bun run start sync-tasks` (or `sync-tasks work-tasks`), then search `all-ta
 Todoist loads active tasks, descriptions, subtasks, project/section names, dates, labels and comments, then follows its incremental change feed. Completed and deleted tasks leave that active index. TickTick reads the selected project snapshots, including checklists, and compares records before updating projections. Its complete historical archive and comments are not imported. Task date filters use creation dates when the provider supplies them; due dates remain searchable text and metadata. `sources` reports coverage and the last successful sync; failed passes retain the previous snapshot. Original reads check the provider again and reject changed references.
 
 For another app, use `{"adapter":"tasks","connector":{"type":"json","paths":["/absolute/path/tasks.json"]}}`. The file format is `{"version":1,"tasks":[{"id":"stable-id","title":"Plan the observatory","status":"open"}]}`. Optional fields are `description`, `project: {"id":"p","name":"Observatory"}`, `parentId`, `section`, `labels`, `priority`, `createdAt`, `completedAt`, `due`, `deadline`, `recurrence`, `comments`, and `checklist: [{"title":"Compare lenses","completed":false}]`. Timestamps include an offset; status is `open`, `completed` or `canceled`. IDs must be unique within the source and remain stable across exports. Each source is bounded to 20,000 records and 32 MiB; oversized or incomplete responses fail without pruning the previous snapshot.
+
+### Apple Reminders
+
+On macOS, build the existing native helper with your signing identity and a stable bundle ID:
+
+```sh
+SOURCE_SEARCH_SIGNING_IDENTITY="Your signing identity" \
+SOURCE_SEARCH_BUNDLE_ID="org.example.your-source-search" \
+sh native/scripts/build-helper.sh "$HOME/.local/share/source-search/native"
+"$HOME/.local/share/source-search/native/context-macos-pim-disclaim" \
+  "$HOME/.local/share/source-search/native/Context macOS PIM Helper.app/Contents/MacOS/context-macos-pim-helper" authorize reminders
+```
+
+The second command opens macOS's Reminders permission prompt. Keep an existing helper's signing identity and bundle ID when upgrading. Add a source to your private configuration and its ID to `enabledSources`:
+
+```json
+"reminders": {"adapter": "tasks", "connector": {"type": "apple-reminders"}}
+```
+
+Run `bun run start task-lists reminders` to discover list IDs. To select particular lists, add `"lists": ["list-id"]` to the connector; omit it for all accessible lists. `helper` and `launcher` can override the default native paths. Enable `maintenanceEnabled`, then run `bun run start sync-tasks reminders` and search `all-tasks` or `reminders`.
+
+[EventKit](https://developer.apple.com/documentation/eventkit/ekreminder) supplies open and completed reminders, list names, notes, dates, priority and recurrence. Tags, subtasks, smart-list membership and attachments are outside this connector's coverage. A full snapshot is compared on each refresh; unchanged records reuse their projections. Date-only due dates stay date-only. Apple can replace local IDs during an account resync; search again if an old reference no longer resolves.
+
+### Microsoft To Do
+
+[Microsoft To Do](https://learn.microsoft.com/en-us/graph/todo-concept-overview) is Microsoft's task app for Windows, web and mobile. This connector uses Microsoft Graph's public service for personal Microsoft accounts and work or school accounts with To Do enabled.
+
+1. Create your own app registration in the [Microsoft Entra admin center](https://entra.microsoft.com/). Choose personal accounts, organization accounts, or both to match your use. Copy the application (client) ID.
+2. Under **API permissions**, add Microsoft Graph's delegated **Tasks.Read** permission. Under **Authentication**, enable **Allow public client flows** for device-code sign-in. No client secret is needed.
+3. Add this source to your private configuration, with your client ID and an absolute cache path. Add `microsoft-tasks` to `enabledSources` and enable `maintenanceEnabled`.
+
+```json
+"microsoft-tasks": {"adapter": "tasks", "connector": {
+  "type": "microsoft-todo",
+  "account": "my-microsoft-account",
+  "oauth": {
+    "clientId": "11111111-1111-4111-8111-111111111111",
+    "tenant": "common",
+    "cache": "/absolute/private/credentials/microsoft.json"
+  }
+}}
+```
+
+Run `bun run start login-microsoft microsoft-tasks` and follow the displayed sign-in instructions. [MSAL](https://learn.microsoft.com/en-us/entra/msal/javascript/node/caching) manages token refresh and saves its login cache in a private file (`0600` in a `0700` directory). Keep that directory outside the checkout and disposable cache. Use a separate `account` name and cache file for each Microsoft account. `tenant` can be `common`, `consumers`, `organizations`, or your tenant's UUID. An organization's sign-in policy may require administrator approval.
+
+Run `bun run start task-lists microsoft-tasks` to discover lists. Add optional `"lists": ["list-id"]` alongside `oauth` to restrict indexing; omitted means all accessible lists. Then run `bun run start sync-tasks microsoft-tasks`. An existing credential manager can replace `oauth` with `"token": {"command": ["/absolute/token-helper", "read"]}`, or the usual environment/file credential. It must supply a current delegated Microsoft Graph access token with `Tasks.Read`; this is an OAuth access token, not a password or API key.
+
+Open and completed tasks, notes, checklist steps, categories, dates, recurrence and linked resources are searchable. File attachment contents, Planner tasks and My Day membership are excluded. [Task deltas](https://learn.microsoft.com/en-us/graph/api/todotask-delta?view=graph-rest-1.0) handle additions, edits and deletions; list inventories detect list renames/removals. Expired delta history triggers a complete refresh. If the account rejects delta access with read permission, the connector uses complete snapshots and reports that strategy. Changed tasks refresh their steps and links; a full reconciliation on the first sync after 24 hours also catches changes absent from the delta feed. Original reads fetch the current task again. Graph can change an ID when a task moves between lists, so a moved task can require a new reference.
 
 ## Managed search indexes
 

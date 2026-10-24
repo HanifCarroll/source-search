@@ -97,6 +97,8 @@ private enum Command {
     case authorize(target: String)
     case calendar(CalendarCommandOptions)
     case contacts(OutputLimits)
+    case reminders(lists: [String]?, limits: OutputLimits)
+    case reminderLists(OutputLimits)
 }
 
 @main
@@ -115,6 +117,8 @@ private struct ContextMacOSPIMHelper {
                 limits = options.limits
             case .contacts(let commandLimits):
                 limits = commandLimits
+            case .reminders(_, let commandLimits), .reminderLists(let commandLimits):
+                limits = commandLimits
             }
             let writer = JSONLWriter(limits: limits)
 
@@ -129,6 +133,10 @@ private struct ContextMacOSPIMHelper {
                     Darwin.exit(try runCalendar(options: options, writer: writer))
                 case .contacts:
                     Darwin.exit(try runContacts(writer: writer))
+                case .reminders(let lists, _):
+                    Darwin.exit(try runReminders(selected: lists, listsOnly: false, writer: writer))
+                case .reminderLists:
+                    Darwin.exit(try runReminders(selected: nil, listsOnly: true, writer: writer))
                 }
             } catch {
                 writer.tryWriteError(error)
@@ -177,7 +185,7 @@ private struct ContextMacOSPIMHelper {
 
     private static func parseCommand(_ arguments: [String]) throws -> Command {
         guard let name = arguments.first else {
-            throw HelperError.invalidArguments("Usage: status | authorize <calendar|contacts|all> | calendar --from ISO --to ISO | contacts")
+            throw HelperError.invalidArguments("Usage: status | authorize <calendar|contacts|reminders|all> | calendar --from ISO --to ISO | contacts | reminder-lists | reminders [--lists JSON]")
         }
         switch name {
         case "status":
@@ -186,8 +194,8 @@ private struct ContextMacOSPIMHelper {
             }
             return .status
         case "authorize":
-            guard arguments.count == 2, ["calendar", "contacts", "all"].contains(arguments[1]) else {
-                throw HelperError.invalidArguments("authorize requires one target: calendar, contacts, or all.")
+            guard arguments.count == 2, ["calendar", "contacts", "reminders", "all"].contains(arguments[1]) else {
+                throw HelperError.invalidArguments("authorize requires one target: calendar, contacts, reminders, or all.")
             }
             return .authorize(target: arguments[1])
         case "calendar":
@@ -207,6 +215,21 @@ private struct ContextMacOSPIMHelper {
             ))
         case "contacts":
             return .contacts(try parseLimits(try parseOptions(Array(arguments.dropFirst()))))
+        case "reminder-lists":
+            return .reminderLists(try parseLimits(try parseOptions(Array(arguments.dropFirst()))))
+        case "reminders":
+            var values = try parseOptions(Array(arguments.dropFirst()))
+            let selected = values.removeValue(forKey: "lists")
+            var lists: [String]?
+            if let selected {
+                guard let data = selected.data(using: .utf8),
+                      let ids = try? JSONDecoder().decode([String].self, from: data),
+                      !ids.isEmpty, ids.count <= 100, ids.allSatisfy({ !$0.isEmpty && $0.count <= 500 }) else {
+                    throw HelperError.invalidArguments("--lists must be a nonempty JSON array of list IDs.")
+                }
+                lists = ids
+            }
+            return .reminders(lists: lists, limits: try parseLimits(values))
         default:
             throw HelperError.invalidArguments("Unknown command: \(name)")
         }
@@ -262,6 +285,7 @@ private struct ContextMacOSPIMHelper {
             "type": "status",
             "calendarAuthorization": calendarAuthorizationState().rawValue,
             "contactsAuthorization": contactsAuthorizationState().rawValue,
+            "remindersAuthorization": eventAuthorizationState(for: .reminder).rawValue,
             "schemaVersion": helperSchemaVersion,
         ])
     }
@@ -269,6 +293,21 @@ private struct ContextMacOSPIMHelper {
     @MainActor
     private static func authorize(target: String, writer: JSONLWriter) async -> Int32 {
         var exitCode: Int32 = 0
+        if target == "reminders" || target == "all" {
+            let store = EKEventStore()
+            let before = eventAuthorizationState(for: .reminder)
+            var granted = before == .authorized
+            var prompted = false
+            if before == .notDetermined {
+                prompted = true
+                granted = await withCheckedContinuation { continuation in
+                    store.requestFullAccessToReminders { allowed, _ in continuation.resume(returning: allowed) }
+                }
+            }
+            var output: [String: Any] = ["type": "authorization", "source": "reminders", "state": eventAuthorizationState(for: .reminder).rawValue, "prompted": prompted, "granted": granted]
+            if !granted { addManualAction(source: "reminders", to: &output); exitCode = 3 }
+            try? writer.write(output)
+        }
         if target == "calendar" || target == "all" {
             let store = EKEventStore()
             let before = calendarAuthorizationState()
@@ -499,6 +538,80 @@ private struct ContextMacOSPIMHelper {
         return complete ? 0 : 4
     }
 
+    private static func runReminders(selected: [String]?, listsOnly: Bool, writer: JSONLWriter) throws -> Int32 {
+        let authorization = eventAuthorizationState(for: .reminder)
+        guard authorization == .authorized else {
+            try writeAuthorizationError(source: "reminders", state: authorization, writer: writer)
+            return 3
+        }
+        let store = EKEventStore()
+        let available = store.calendars(for: .reminder)
+        if let selected, selected.contains(where: { id in !available.contains(where: { $0.calendarIdentifier == id }) }) {
+            throw HelperError.invalidArguments("A selected Reminders list is missing or inaccessible.")
+        }
+        let calendars = available.filter { selected == nil || selected!.contains($0.calendarIdentifier) }.sorted { $0.calendarIdentifier < $1.calendarIdentifier }
+        if listsOnly {
+            for calendar in calendars {
+                try writer.write(["type": "reminder_list", "id": calendar.calendarIdentifier, "name": calendar.title])
+            }
+            try writer.write(["type": "scan_finished", "source": "reminder-lists", "complete": true, "scanned": calendars.count])
+            return 0
+        }
+        var reminders: [EKReminder] = []
+        // An empty calendar argument can mean all calendars to EventKit. An
+        // empty inventory is handled here, without broadening the selection.
+        if !calendars.isEmpty {
+            var finished = false
+            var fetched: [EKReminder]?
+            let request = store.fetchReminders(matching: store.predicateForReminders(in: calendars)) { items in
+                DispatchQueue.main.async { fetched = items; finished = true }
+            }
+            let deadline = Date().addingTimeInterval(25)
+            while !finished && Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            }
+            guard finished, let fetched else {
+                store.cancelFetchRequest(request)
+                throw HelperError.invalidArguments("Reminders read did not finish successfully; retry the sync.")
+            }
+            reminders = fetched
+        }
+        for reminder in reminders.sorted(by: { $0.calendarItemIdentifier < $1.calendarItemIdentifier }) {
+            var payload: [String: Any] = [
+                "type": "reminder", "id": reminder.calendarItemIdentifier, "title": reminder.title ?? "",
+                "notes": reminder.notes ?? "", "completed": reminder.isCompleted, "priority": reminder.priority,
+                "list": ["id": reminder.calendar.calendarIdentifier, "name": reminder.calendar.title],
+                "recurrence": try (reminder.recurrenceRules ?? []).map { rule in
+                    var data: [String: Any] = ["frequency": rule.frequency.rawValue, "interval": rule.interval,
+                        "daysOfWeek": (rule.daysOfTheWeek ?? []).map { ["day": $0.dayOfTheWeek.rawValue, "week": $0.weekNumber] },
+                        "daysOfMonth": rule.daysOfTheMonth ?? [], "daysOfYear": rule.daysOfTheYear ?? [],
+                        "weeksOfYear": rule.weeksOfTheYear ?? [], "monthsOfYear": rule.monthsOfTheYear ?? [], "setPositions": rule.setPositions ?? [], "firstDayOfWeek": rule.firstDayOfTheWeek]
+                    if let end = rule.recurrenceEnd {
+                        data["occurrences"] = end.occurrenceCount
+                        if let date = end.endDate { data["until"] = iso8601(date) }
+                    }
+                    return String(data: try JSONSerialization.data(withJSONObject: data, options: [.sortedKeys]), encoding: .utf8)!
+                },
+            ]
+            if let date = reminder.creationDate { payload["createdAt"] = iso8601(date) }
+            if let date = reminder.completionDate { payload["completedAt"] = iso8601(date) }
+            payload["due"] = reminderDate(reminder.dueDateComponents)
+            payload["start"] = reminderDate(reminder.startDateComponents)
+            payload["url"] = reminder.url?.absoluteString
+            payload["location"] = reminder.location
+            try writer.write(payload)
+        }
+        try writer.write(["type": "scan_finished", "source": "reminders", "complete": true, "scanned": reminders.count])
+        return 0
+    }
+
+    private static func reminderDate(_ components: DateComponents?) -> String? {
+        guard let c = components, let year = c.year, let month = c.month, let day = c.day else { return nil }
+        let date = String(format: "%04d-%02d-%02d", year, month, day)
+        guard let hour = c.hour else { return date }
+        return date + String(format: "T%02d:%02d:%02d", hour, c.minute ?? 0, c.second ?? 0) + (c.timeZone.map { " [\($0.identifier)]" } ?? "")
+    }
+
     private static func writeAuthorizationError(source: String, state: AuthorizationState, writer: JSONLWriter) throws {
         let code = state == .denied || state == .restricted || state == .writeOnly
             ? "authorization-denied"
@@ -514,13 +627,16 @@ private struct ContextMacOSPIMHelper {
 
     private static func addManualAction(source: String, to output: inout [String: Any]) {
         output["manualActionRequired"] = true
-        output["manualAction"] = source == "contacts"
-            ? "System Settings → Privacy & Security → Contacts → Context macOS PIM Helper"
-            : "System Settings → Privacy & Security → Calendars → Context macOS PIM Helper"
+        let category = source == "contacts" ? "Contacts" : source == "reminders" ? "Reminders" : "Calendars"
+        output["manualAction"] = "System Settings → Privacy & Security → \(category) → Context macOS PIM Helper"
     }
 
     private static func calendarAuthorizationState() -> AuthorizationState {
-        let status = EKEventStore.authorizationStatus(for: .event)
+        eventAuthorizationState(for: .event)
+    }
+
+    private static func eventAuthorizationState(for entity: EKEntityType) -> AuthorizationState {
+        let status = EKEventStore.authorizationStatus(for: entity)
         if #available(macOS 14.0, *) {
             switch status {
             case .fullAccess:

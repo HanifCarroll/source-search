@@ -25,6 +25,8 @@ The pinned QMD dependency has a Bun patch for [slow collection-scoped vector loo
 | Legacy mailbridge | Paginated reconciliation; unchanged message summaries reuse cached bodies. Native JMAP offers a complete change feed. |
 | Todoist tasks | Initial active snapshot followed by a delta, then sync-token changes for tasks, projects, sections and task comments. Completion/deletion removes tasks from the active index. |
 | TickTick tasks | Complete snapshots of selected projects, followed by record/projection diffs. No change token is exposed by these endpoints. |
+| Apple Reminders | Complete EventKit snapshots of selected lists, including completed reminders, followed by record/projection diffs. Incomplete or unauthorized scans retain the previous snapshot. |
+| Microsoft To Do | Paginated list inventory plus per-list task deltas, with daily full reconciliation for changes omitted by the feed. Expired delta history restarts a full pass. Tenants rejecting read-only delta access use complete snapshots. Changed tasks refresh steps/linked resources; original reads always fetch current data. |
 | Generic task files and Things task connector | Read the selected snapshots and publish changed records only. Existing `things-archive` sources retain their export index behavior. |
 | Messages, WhatsApp, Muesli calls | Skip unchanged database/WAL snapshots. On change, compare row fingerprints, including joined text and metadata; decode only changed rows. A complete inventory detects edits and deletions, without assuming rows are append-only. |
 | Things and selected ChatGPT, Takeout, LinkedIn, X exports | Skip unchanged selected files. Parse changed exports, then update only changed records and search projections. ZIP/JSON exports do not supply a change feed, so a changed file must be parsed. |
@@ -46,7 +48,7 @@ Coverage reports separate `state`, `activity`, initial backfill completion and f
 
 Run `bun run bench --lexical-only` for the portable MCP/cache check used by Linux and macOS CI. Before a search release, also run `bun run bench --models-from /absolute/private/config.json` with installed local models. It creates an isolated corpus of invented documents, checks exact terms and semantic paraphrases, source exclusion, ranking, repeated searches, pagination, restart reuse and invalidation after edits. It prints cold/repeat/page timings and removes its temporary index. The full benchmark performs real inference; it neither searches configured accounts nor downloads models. The large-index vector fixture separately checks collection recall and bounded SQL work.
 
-Build the optional macOS helper with `SOURCE_SEARCH_SIGNING_IDENTITY` and `SOURCE_SEARCH_BUNDLE_ID` set to your certificate and reverse-domain identifier. Configure Calendar and Contacts access in macOS privacy settings. The helper uses a private macOS responsibility API; check compatibility when upgrading macOS.
+Build the optional macOS helper with `SOURCE_SEARCH_SIGNING_IDENTITY` and `SOURCE_SEARCH_BUNDLE_ID` set to your certificate and reverse-domain identifier. Keep both stable when rebuilding. Use its explicit `authorize calendar`, `authorize contacts` or `authorize reminders` command to configure the corresponding macOS permission. Read and sync commands never request access. The helper uses a private macOS responsibility API; check compatibility when upgrading macOS.
 
 ## Document extraction
 
