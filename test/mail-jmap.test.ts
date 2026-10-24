@@ -65,7 +65,7 @@ test('mail maintenance commits checkpoints only after successful bodies and retr
   const {syncMail}=await import('../src/maintenance/library-sync'),{libraryDB,getState,setState}=await import('../src/search/library/store');
   const {mkdir}=await import('node:fs/promises'),root=await mkdtemp(join(tmpdir(),'ss-jmap-deltas-'));
   try{
-    await mkdir(join(root,'mail-raw'));c=configSchema.parse({...c,libraryRoot:root,maintenanceEnabled:true,libraryEnabled:true});
+    await mkdir(join(root,'mail-raw'),{mode:0o700});c=configSchema.parse({...c,libraryRoot:root,maintenanceEnabled:true,libraryEnabled:true});
     await syncMail(c,undefined,['team-mail']);
     const retry=()=>{const db=libraryDB(c,true);setState(db,'team-mail',{...getState(db,'team-mail'),nextScanAt:0});db.close();};
     const state=()=>{const db=libraryDB(c);try{return getState(db,'team-mail');}finally{db.close();}};
@@ -167,7 +167,7 @@ test('native JMAP library sync captures raw records, preserves references and re
   const {mkdir,readFile}=await import('node:fs/promises');
   const root=await mkdtemp(join(tmpdir(),'source-search-native-cache-'));
   try{
-    await mkdir(join(root,'mail-raw'));
+    await mkdir(join(root,'mail-raw'),{mode:0o700});
     c=configSchema.parse({...c,libraryRoot:root,maintenanceEnabled:true,libraryEnabled:true});
     await syncMail(c,undefined,['team-mail']);
     const db=libraryDB(c);expect(getState(db,'team-mail').state).toBe('ready');
@@ -208,7 +208,7 @@ test('document pipeline uses its selected native-mail config and reuses verified
   c=configSchema.parse({...c,maintenanceEnabled:true,libraryRoot:root,enabledSources:['team-mail','documents']});
   f.state.emails[0]!.attachments=[{name:'agenda.txt',type:'text/plain',blobId:'blob',size:13}];
   let raw:any;const record=await readMail('team-mail','m0',undefined,c,data=>raw=data);
-  await mkdir(join(root,'mail-raw'));await writeFile(join(root,'mail-raw/one.json'),JSON.stringify({source:'team-mail',id:'m0',ref:record.ref,raw,accountSignature:sourceScope(c,'team-mail')}));
+  await mkdir(join(root,'mail-raw'),{mode:0o700});await writeFile(join(root,'mail-raw/one.json'),JSON.stringify({source:'team-mail',id:'m0',ref:record.ref,raw,accountSignature:sourceScope(c,'team-mail')}));
   const path=join(root,'config.json');await writeFile(path,JSON.stringify(c));
   for(let i=0;i<2;i++){
    const child=Bun.spawn([Bun.which('python3')||'python3',join(import.meta.dir,'../scripts/extract-documents.py'),'--config',path],{env:{...process.env,SOURCE_SEARCH_CONFIG_FILE:'/deliberately/not/this/config'},stdout:'pipe',stderr:'pipe'});

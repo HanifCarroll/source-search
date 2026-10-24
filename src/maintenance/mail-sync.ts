@@ -7,17 +7,10 @@ import {sourceScope,mailAccount} from '../platform/config';
 import {errorData,hash,now} from '../domain/identity';
 import {formatMail,readMail,type Run} from '../sources/mail/index';
 import type {MailConnector} from '../sources/mail/types';
-import {getState,setState,publish} from '../search/library/store';
+import {getState,setState} from '../platform/cache-db';
 import {privateJSON} from '../platform/storage';
 
 export const rawMailPath=(c:Config,source:string,id:string)=>join(c.libraryRoot,'mail-raw',source+'-'+(id.length>180?hash(id):id)+'.json');
-async function publishMail(c:Config,db:Database,source:string,state:any){
-  if(state.dirty || !state.publishedAt){
-    const records=(db.query('SELECT data FROM mail WHERE source=? ORDER BY id').all(source) as {data:string}[]).map(r=>JSON.parse(r.data));
-    await publish(c,source,records,{mail:source,accountSignature:sourceScope(c,source)},state);
-    setState(db,source,{...getState(db,source),dirty:false});
-  }
-}
 export async function syncNativeMail(c:Config,db:Database,source:string,backend:MailConnector){
   let state=getState(db,source);
   try{
@@ -48,7 +41,6 @@ export async function syncNativeMail(c:Config,db:Database,source:string,backend:
       for(const id of removed)await rm(rawMailPath(c,source,id),{force:true});
       if(!result.hasMore)break;
     }
-    await publishMail(c,db,source,state);
   }catch(e){
     setState(db,source,{...state,...(['STALE_CURSOR','STALE_RECORD','NOT_FOUND'].includes(errorData(e).code)?{syncCheckpoint:undefined}:{}),state:'error',error:errorData(e),checkedAt:now(),nextScanAt:0});
   }
@@ -78,7 +70,7 @@ export async function syncGmailChanges(c:Config,db:Database,source:string,execut
       state={...state,gmailPage:page,...(!page?{gmailHistory:raw.historyId,lastSuccessfulSync:now()}:{}),syncStrategy:'gmail-additions-with-daily-reconciliation',state:page?'refreshing':'ready',error:null,checkedAt:now(),nextScanAt:page?0:Date.now()+60000};
       setState(db,source,state);if(!page)break;
     }
-    await publishMail(c,db,source,state);return true;
+    return true;
   }catch{
     // Expired history, removed messages and older gog versions recover through
     // the normal complete inventory; no error response can prune records.

@@ -55,7 +55,7 @@ For interactive setup, run `bun run start setup`. Install only the dependencies 
 
 ### 3. Load sources that need an index
 
-Set `maintenanceEnabled: true` for the commands below. Replace `SOURCE_ID` with the configured source ID.
+Set `maintenanceEnabled: true` for the commands below. Replace `SOURCE_ID` with the configured source ID. For incremental change feeds from direct sources such as mail, messages or notes, run `bun run start sync-sources SOURCE_ID` too. [Change tracking](docs/maintenance.md#resuming-changes) explains cursors and coverage.
 
 | Adapter | Initial load and later refreshes |
 | --- | --- |

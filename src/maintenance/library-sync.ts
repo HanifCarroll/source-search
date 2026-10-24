@@ -2,7 +2,8 @@ import {syncSources,snapshotSources} from './sources';
 import {snapshotStore} from '../sources/sync/cache';
 import {nativeCache} from './native-cache';
 import {sourceFiles} from '../sources/local/notes';
-import {syncNativeMail,syncGmailChanges,gmailAnchor} from './mail-sync';
+import {syncMail as syncMailbox} from './mail';
+import {withSourceLock} from './source-lock';
 import {archiveInstances,archiveConfig} from './archives';
 import {sourceKind,isMail} from '../domain/source-catalog';
 import { isProjected } from "../domain/source-policy";
@@ -16,9 +17,8 @@ import { allDatabaseRecords, databaseProjectionVersion } from "../sources/local/
 import { allMessageRecords } from "../sources/messages/index";
 import { exportPaths, archiveSignature, exportProjectionVersion, type ArchiveSource } from "../sources/archives/originals";
 import { rebuildArchive, indexStatus } from "../sources/archives/index";
-import { readMail, searchMail, formatMail, connector, run, type Run, type MailSource } from "../sources/mail/index";
+import { run, type Run, type MailSource } from "../sources/mail/index";
 import { hash, now, errorData, fail } from "../domain/identity";
-import { type Query } from "../domain/contracts";
 import { libraryDB, getState, setState, publish } from "../search/library/store";
 
 // Only consume committed snapshots. Publication failure cannot roll back a
@@ -78,88 +78,25 @@ async function archives(c:Config){
   }catch(e){setState(db,source,{...getState(db,source),state:"error",error:errorData(e),checkedAt:now()});}
  }}finally{db.close();}
 }
-export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSource[]=configuredSourceIds(c).filter(id=>isMail(id,c))){
+// The source worker owns mail checkpoints. Library publication consumes the
+// committed cache under the same source lock, including deferred dirty records.
+async function publishCachedMail(c:Config,db:Database,source:string){
+ const state=getState(db,source);
+ if(!state.accountSignature)return;
+ if(state.accountSignature!==sourceScope(c,source))return;
+ if(state.dirty||!state.publishedAt){
+  const records=(db.query('SELECT data FROM mail WHERE source=? ORDER BY id').all(source) as {data:string}[]).map(r=>JSON.parse(r.data));
+  await publish(c,source,records,{mail:source,accountSignature:sourceScope(c,source)},state);
+  setState(db,source,{...getState(db,source),dirty:false});
+ }
+}
+export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSource[]=configuredSourceIds(c).filter(id=>isMail(id,c))){return syncMailbox(c,execute,sources,publishCachedMail);}
+export async function publishMail(c:Config){
  requireMaintenance(c);
- const db=libraryDB(c,true);
- try{for(const source of sources){
-  if(!sourceEnabled(c,source))continue;
-  let state=getState(db,source),changed=false;
-  const accountSignature=sourceScope(c,source);
-  try{
-   if(state.accountSignature && state.accountSignature!==accountSignature)throw Error("Mail account or provider changed; use a new source ID or purge this source cache");
-   if(state.projectionVersion!==2){
-    // Re-project existing provider responses locally; unchanged summaries must
-    // not leave HTML bodies in an older format or trigger a full account fetch.
-    const cached=db.query("SELECT id FROM mail WHERE source=? ORDER BY id").all(source) as {id:string}[];
-    for(const {id} of cached){
-     const saved=JSON.parse(await readFile(join(c.libraryRoot,"mail-raw",source+"-"+(id.length>180?hash(id):id)+".json"),"utf8"));
-     if(saved.source!==source || saved.id!==id || saved.accountSignature!==accountSignature)throw Error("Cached mail identity does not match the configured account");
-     const kind=sourceKind(source,c);
-     const record=kind==='imap' || kind==='jmap' ? formatMail(source,saved.raw,c) : await readMail(source,id,async()=>saved.raw,c);
-     db.query("UPDATE mail SET data=? WHERE source=? AND id=?").run(JSON.stringify(record),source,id);
-    }
-    const records=(db.query("SELECT data FROM mail WHERE source=? ORDER BY id").all(source) as {data:string}[]).map(row=>JSON.parse(row.data));
-    await publish(c,source,records,{mail:source,accountSignature},{...state,projectionVersion:2});
-    state=getState(db,source);
-   }
-   if(state.nextScanAt && Date.now()<state.nextScanAt)continue;
-   const backend=connector(c,source);
-   if(backend){await syncNativeMail(c,db,source,backend);continue;}
-   if(sourceKind(source,c)==='gmail' && await syncGmailChanges(c,db,source,execute))continue;
-   state=getState(db,source);
-   state={...state,accountSignature,cycle:state.cycle||now(),state:state.lastCompleteScan?'refreshing':'backfilling',error:null,syncStrategy:'snapshot-reconciliation'};
-   const cacheItems=async(items:any[])=>{
-    for(let offset=0;offset<items.length;offset+=4){
-     const batch=await Promise.allSettled(items.slice(offset,offset+4).map(async item=>{
-      const old=db.query("SELECT summary FROM mail WHERE source=? AND id=?").get(source,item.id) as any;
-      if(old?.summary!==item.summary){
-       let raw:any;const record=await readMail(source,item.id,execute,c,value=>{raw=value;});
-       // Write attachment evidence before committing its cached-record checkpoint.
-       await privateJSON(join(c.libraryRoot,"mail-raw",source+"-"+(item.id.length>180?hash(item.id):item.id)+".json"),{source,id:item.id,ref:record.ref,accountSignature,raw});
-       db.query("INSERT OR REPLACE INTO mail VALUES(?,?,?,?,?)").run(source,item.id,JSON.stringify(record),item.summary,state.cycle);changed=true;
-       state.dirty=true;
-       if(sourceKind(source,c)==='gmail' && !state.gmailAnchor)state.gmailAnchor=await gmailAnchor(c,source,item.id);
-      }else db.query("UPDATE mail SET seen=? WHERE source=? AND id=?").run(state.cycle,source,item.id);
-     }));
-     const failed=batch.find(r=>r.status==="rejected");if(failed?.status==="rejected")throw failed.reason;
-    }
-   };
-   const summaries=(items:any[])=>items.map(item=>({id:item.ref.id,summary:hash(JSON.stringify([item.title,item.author,item.occurredAt,item.metadata]))}));
-   // Keep new arrivals visible while historical pages are still backfilling.
-   const recent=summaries((await searchMail({source,query:"",limit:25,excludeSpamTrash:true},execute,{remaining:0,records:new Map()},c)).items);
-   await cacheItems(recent);
-   if(sourceKind(source,c)==='gmail' && !state.gmailAnchor && recent[0])state.gmailAnchor=await gmailAnchor(c,source,recent[0].id);
-   let pending:any[]=state.pending||[],next=state.cursor;
-   // A complete paginated listing is the deletion reconciliation boundary. Interrupted/failed passes never prune.
-   for(let page=0;page<8;page++){
-    if(!pending.length){
-     const q={source,query:"",limit:sourceKind(source,c)==='gmail'?100:25,excludeSpamTrash:true,...(next?{cursor:next}:{})} as Query;
-     const result=await searchMail(q,execute,{remaining:0,records:new Map()},c);
-     if(result.status!=="ok" || result.scan?.exhausted===false && !result.nextCursor)throw Error("Incomplete mail scan; retaining cached records");
-     pending=summaries(result.items);next=result.nextCursor;state.pageEnd=!next;
-    }
-    state={...state,pending,cursor:next};setState(db,source,state);
-    while(pending.length){
-     const batch=pending.slice(0,4);await cacheItems(batch);pending.splice(0,batch.length);
-     state={...state,pending,cursor:next};setState(db,source,state);
-    }
-    if(state.pageEnd){
-     const removed=db.query("SELECT id FROM mail WHERE source=? AND seen!=?").all(source,state.cycle) as any[];
-     db.query("DELETE FROM mail WHERE source=? AND seen!=?").run(source,state.cycle);
-     for(const row of removed)await rm(join(c.libraryRoot,"mail-raw",source+"-"+(row.id.length>180?hash(row.id):row.id)+".json"),{force:true});
-     changed ||= removed.length>0;state.dirty ||= removed.length>0;
-     state={...state,cycle:null,cursor:undefined,pending:[],pageEnd:false,lastCompleteScan:now(),lastSuccessfulSync:now(),gmailHistory:state.gmailAnchor,gmailPage:undefined,gmailAnchor:undefined,nextScanAt:Date.now()+(state.gmailAnchor?60000:15*60*1000),state:"ready"};break;
-    }
-   }
-   const records=(db.query("SELECT data FROM mail WHERE source=? ORDER BY id").all(source) as any[]).map(r=>JSON.parse(r.data));
-   setState(db,source,{...state,checkedAt:now(),records:records.length,coverage:"Cached mailbox text excluding spam/trash; deletion reconciliation only after complete provider scan"});
-   if(changed || state.dirty || !state.publishedAt){await publish(c,source,records,{mail:source,accountSignature},{...getState(db,source)});setState(db,source,{...getState(db,source),dirty:false});}
-  }catch(e){
-   // Fastmail invalidates offsets if mailbox changes. Re-enumerate; keep cached records until a complete pass succeeds.
-   const code=errorData(e).code;
-   setState(db,source,{...state,...(["STALE_CURSOR","MAIL_COMMAND_FAILED"].includes(code)?{cursor:undefined,pending:[],cycle:null}:{}),state:"error",error:errorData(e),checkedAt:now()});
-  }
- }}finally{db.close();}
+ if(!c.libraryEnabled||!sourceEnabled(c,'library'))return;
+ for(const source of configuredSourceIds(c).filter(id=>sourceEnabled(c,id)&&isMail(id,c))){
+  await withSourceLock(c,'mail-'+source,async()=>{const db=libraryDB(c,true);try{await publishCachedMail(c,db,source);}finally{db.close();}});
+ }
 }
 async function documents(c:Config){
  if(!sourceEnabled(c,"documents"))return;
@@ -179,7 +116,7 @@ export async function syncLibrary(c:Config,{refreshSources=true}={}){
  await markManagedCache(c.libraryRoot);await privateDirectory(c.libraryRoot);await privateDirectory(join(c.libraryRoot,"mail-raw"));
  const db=libraryDB(c,true);for(const source of configuredSourceIds(c).filter(s=>sourceEnabled(c,s) && isProjected(s,c)))if(!getState(db,source).state)setState(db,source,{state:"queued",records:0,chunks:0});db.close();
  // Independent source failures are recorded without starving healthy sources.
- for(const [name,work] of [["native",native],["archives",archives],["snapshots",publishSnapshots],["mail",syncMail],["documents",documents]] as const){
+ for(const [name,work] of [["native",native],["archives",archives],["snapshots",publishSnapshots],["mail",publishMail],["documents",documents]] as const){
   try{await work(c);const d=libraryDB(c,true);d.query("DELETE FROM states WHERE source=?").run("maintenance-"+name);d.close();}catch(e){const d=libraryDB(c,true);setState(d,"maintenance-"+name,{state:"error",error:errorData(e),checkedAt:now()});d.close();}
  }
  const cleaned=libraryDB(c,true);try{cleaned.query("DELETE FROM states WHERE source IN ('maintenance-tasks','maintenance-connected')").run();}finally{cleaned.close();}

@@ -95,3 +95,18 @@ export async function readChrome(config: Config, ref: Ref) {
   if (!r) fail("RECORD_NOT_FOUND", "Chrome record is absent from the current selected profile");
   assertVersion(ref, r.ref.version!); return r;
 }
+
+// Complete source inventory for maintenance; search deduplication/ranking does
+// not decide which original records count as added or removed.
+export async function allChromeRecords(config:Config,source:string){
+ if(!config.chromeProfiles.length)fail('SOURCE_NOT_CONFIGURED','Select browser profiles');
+ if(source==='chrome-bookmarks'){const r=await bookmarks(config);if(r.warnings.length)fail('INCOMPLETE_SCAN',r.warnings.join('; '));return r.records;}
+ const records:RecordData[]=[];
+ for(const [index,profile] of config.chromeProfiles.entries()){
+  const snap=await createSnapshot(await contained(profile,'History'));
+  try{schema(snap.database,source);const select=sql(source).replace(/ WHERE (?:v|d)\.id<\?.*$/,'');
+   for(const row of snap.database.query(select).iterate()){records.push(record(source,profile,config.chromeProfileIds?.[index]||index,row));if(records.length>500000)fail('SOURCE_LIMIT','Browser inventory exceeds 500,000 records');}
+  }finally{await snap.close();}
+ }
+ return records;
+}

@@ -27,7 +27,7 @@ export async function sourceFiles(root: string, accept: (name: string) => boolea
   }
   await walk(root, 0); return { paths: paths.sort(), warnings: [...new Set(warnings)] };
 }
-function matchesNote(config:Config,source:string,name:string){const s=markdownSettings(config,source);return new Bun.Glob(s.pattern).match(name) && !s.exclude.some(p=>new Bun.Glob(p).match(name));}
+export function matchesNote(config:Config,source:string,name:string){const s=markdownSettings(config,source);return new Bun.Glob(s.pattern).match(name) && !s.exclude.some(p=>new Bun.Glob(p).match(name));}
 export async function notesStatus(config:Config,source:string){const s=markdownSettings(config,source),d=await sourceFiles(s.root,name=>matchesNote(config,source,name),s.exclude);return {records:d.paths.length,warnings:d.warnings,coverage:'Configured Markdown files; dates and content labels follow this source configuration'};}
 export async function readNote(config:Config,ref:Ref):Promise<RecordData>{
  const s=markdownSettings(config,ref.source);

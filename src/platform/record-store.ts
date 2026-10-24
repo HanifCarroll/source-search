@@ -176,7 +176,10 @@ export function recordStore(path:string){
         const row=db.query('SELECT scope,data FROM snapshots WHERE source=?').get(source) as StateRow|null;
         if(row&&row.scope===scope)return {source,state:'tracked',coverage:snapshotCoverage(JSON.parse(row.data))};
         const observation=(db.query('PRAGMA user_version').get() as {user_version:number}).user_version>=3?db.query('SELECT scope,data FROM observation_states WHERE source=?').get(source) as StateRow|null:null;
-        if(observation&&observation.scope===scope){const data=JSON.parse(observation.data) as ObservationState;return {source,state:data.initialized?'tracked':'needs-sync',...data};}
+        if(observation&&observation.scope===scope){
+          const {initialized,signature,generation,records,...coverage}=JSON.parse(observation.data) as ObservationState;
+          return {source,state:initialized?'tracked':'needs-sync',...coverage,...(coverage.granularity==='index'?{}:{records})};
+        }
         return {source,state:'needs-sync'};
       });
       return {streamId:identity,items,cursor:changeCursor(key,identity,hasMore?items.at(-1)!.sequence:high),hasMore,coverage};

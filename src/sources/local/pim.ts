@@ -28,7 +28,7 @@ function window(input: Query) {
   if (Date.parse(q.to) - Date.parse(q.from) > 366 * 86400_000) fail("SOURCE_LIMIT", "Calendar windows must be at most 366 days; query additional windows separately");
   return { from: q.from, to: q.to };
 }
-async function records(config: Config, source: "calendar" | "contacts", range?: { from: string; to: string }) {
+export async function nativePimRecords(config: Config, source: "calendar" | "contacts", range?: { from: string; to: string }) {
   const data = await helper(config, source === "contacts" ? ["contacts", "--max-records", "10000", "--max-output-bytes", "4000000"] : ["calendar", "--from", range!.from, "--to", range!.to, "--max-records", "10000", "--max-output-bytes", "4000000"]);
   const native = data.filter(r => r.type === (source === "calendar" ? "calendar_event" : "contact"));
   const footer = data.find(r => r.type === "scan_finished" && r.source === source);
@@ -53,7 +53,7 @@ export async function searchPim(config: Config, q: Query) {
   if(q.conversation)fail("UNSUPPORTED_FILTER","Calendar and Contacts do not support conversation filters");
   if(q.source === "contacts"){
     if(q.from || q.to)fail("UNSUPPORTED_FILTER","Contacts have no reliable occurrence-date filter");
-    const result=await records(config,"contacts");return recordPage(result.records,q,result.warnings,false);
+    const result=await nativePimRecords(config,"contacts");return recordPage(result.records,q,result.warnings,false);
   }
   if(!q.from || !q.to)fail("REQUIRED_FILTER","Calendar search requires from and to timestamps; multi-year ranges continue in bounded windows");
   const from=Date.parse(q.from),to=Date.parse(q.to),width=366*86400_000,count=Math.ceil((to-from)/width),key=queryKey(q);
@@ -63,7 +63,7 @@ export async function searchPim(config: Config, q: Query) {
   const newest=q.sort === "newest" || !q.sort;
   const start=newest ? Math.max(from,to-(state.window+1)*width) : from+state.window*width;
   const end=newest ? to-state.window*width : Math.min(to,start+width);
-  const range={from:new Date(start).toISOString(),to:new Date(end).toISOString()},result=await records(config,"calendar",range);
+  const range={from:new Date(start).toISOString(),to:new Date(end).toISOString()},result=await nativePimRecords(config,"calendar",range);
   // EventKit includes overlapping events; only their first traversed window emits each occurrence.
   const occurrences=result.records.filter(r=>{const time=Date.parse(r.occurredAt || "");return state.window===0 || (newest ? Date.parse(String(r.metadata?.endedAt || r.occurredAt))<=end : time>=start);});
   const page=recordPage(occurrences,{...q,...range,cursor:state.cursor},result.warnings,false);
@@ -83,7 +83,7 @@ export async function readPim(config: Config, ref: Ref) {
     if (!Array.isArray(identity) || identity.length !== 4 || identity.slice(0, 3).some(x => typeof x !== "string")) fail("INVALID_REFERENCE", "Invalid calendar occurrence identity");
     const q = { source: "calendar" as const, query: "", limit: 1, from: identity[3]?.from, to: identity[3]?.to }; range = window(q);
   } else if (typeof identity !== "string") fail("INVALID_REFERENCE", "Invalid contact identity");
-  const r = (await records(config, ref.source as "calendar" | "contacts", range)).records.find(r => r.ref.id === ref.id);
+  const r = (await nativePimRecords(config, ref.source as "calendar" | "contacts", range)).records.find(r => r.ref.id === ref.id);
   if (!r) fail("RECORD_NOT_FOUND", "Native record is absent from the current source window");
   assertVersion(ref, r.ref.version!); return r;
 }

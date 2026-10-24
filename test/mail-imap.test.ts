@@ -84,3 +84,18 @@ test('IMAP OAuth passes tokens to the library and STARTTLS is mandatory when sel
   const options=f.seen[0].options;
   expect(options.auth).toEqual({user:'a@example.test',accessToken:'invented'});expect(options.doSTARTTLS).toBe(true);expect(options.tls.rejectUnauthorized).toBe(true);expect(options.logger).toBe(false);
 });
+
+test('IMAP checkpoints feed direct changes without search models and preserve cache on failure',async()=>{
+ const {mkdtemp,mkdir,rm}=await import('node:fs/promises'),{tmpdir}=await import('node:os'),{join}=await import('node:path');
+ const {configSchema}=await import('../src/platform/config'),{cacheDB}=await import('../src/platform/cache-db'),{syncNativeMail}=await import('../src/maintenance/mail-sync'),{syncSources}=await import('../src/maintenance/sources'),{createRuntime}=await import('../src/application/runtime');
+ const f=fixture(),root=await mkdtemp(join(tmpdir(),'ss-imap-feed-'));
+ try{
+  await mkdir(join(root,'cache'),{mode:0o700});await mkdir(join(root,'cache/mail-raw'),{mode:0o700});
+  const c=configSchema.parse({memoryRoot:join(root,'memory'),libraryRoot:join(root,'cache'),maintenanceEnabled:true,enabledSources:['inbox'],sources:{inbox:f.settings}}),runtime=createRuntime(c);
+  const update=async()=>{const db=cacheDB(c,true);try{await syncNativeMail(c,db,'inbox',f.connector);}finally{db.close();}};
+  await update();expect((await syncSources(c,'inbox')).ok).toBe(true);const first=await runtime.list_changes({feed:'sources',sources:['inbox']}) as any;
+  f.rows.INBOX=[];await update();expect((await syncSources(c,'inbox')).ok).toBe(true);const removed=await runtime.list_changes({feed:'sources',sources:['inbox'],cursor:first.cursor}) as any;expect(removed.items.map((e:any)=>e.kind)).toEqual(['removed']);
+  f.setConnectFailure();await update();const db=cacheDB(c);expect(db.query('SELECT count(*) n FROM mail').get()).toEqual({n:0});db.close();
+  expect((await runtime.list_changes({feed:'sources',sources:['inbox'],cursor:removed.cursor}) as any).items).toEqual([]);
+ }finally{await rm(root,{recursive:true,force:true});delete process.env.SOURCE_SEARCH_UNIT_IMAP;}
+});

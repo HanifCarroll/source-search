@@ -85,7 +85,7 @@ test('named mail cache rejects a provider change even when account strings are i
  const root=await mkdtemp(join(tmpdir(),'ss-mail-instance-'));
  try{
   const c=configSchema.parse({enabledSources:['work'],maintenanceEnabled:true,libraryRoot:root,sources:{work:{adapter:'gmail',account:'same',email:'same@example.test'}}});
-  await mkdir(join(root,'mail-raw'));
+  await mkdir(join(root,'mail-raw'),{mode:0o700});
   await syncMail(c,async argv=>argv.includes('search')?{messages:[{id:'one',subject:'Invented message'}]}:{headers:{subject:'Invented message'},message:{id:'one'},body:'Invented body'});
   const next=configSchema.parse({...c,sources:{work:{...c.sources.work,adapter:'fastmail'}}});
   let fetched=false;await syncMail(next,async()=>{fetched=true;throw Error('Must not call the new provider against the old cache');});

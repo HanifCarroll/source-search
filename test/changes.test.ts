@@ -64,7 +64,7 @@ test('runtime reports direct-reader coverage honestly, enforces source access an
   const c=configSchema.parse({memoryRoot:join(root,'memory'),libraryRoot:join(root,'cache'),maintenanceEnabled:true,enabledSources:['tasks','notes'],sources:{tasks:{adapter:'tasks',connector:{type:'json',paths:[file]}},notes:{adapter:'markdown',root}}});
   const rt=createRuntime(c);expect((await syncSources(c,'tasks')).ok).toBe(true);
   const page=await rt.list_changes({feed:'sources',sources:['tasks','notes']}) as any;
-  expect(page.coverage.find((s:any)=>s.source==='notes').state).toBe('unsupported');
+  expect(page.coverage.find((s:any)=>s.source==='notes').state).toBe('needs-sync');
   await writeFile(file,JSON.stringify({version:1,tasks:[{id:'a',title:'Invented revised task'},{id:'b',title:'Invented second task'}]}));
   expect((await syncSources(c,'tasks')).ok).toBe(true);
   const changes=await rt.list_changes({feed:'sources',sources:['notes','tasks'],cursor:page.cursor}) as any;

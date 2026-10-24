@@ -66,9 +66,9 @@ export async function readMessage(config: Config, ref: Ref, context: boolean) {
   } finally { await snap.close(); }
 }
 
-export async function allMessageRecords(config:Config,reuse?:(id:string,raw:unknown,project:()=>RecordData)=>RecordData){
+export async function allMessageRecords<T=RecordData>(config:Config,reuse?:(id:string,raw:unknown,project:()=>RecordData)=>T){
  const snap=await createSnapshot(config.messages);
  try{const chats=new Map<string,{guid:string}[]>();
  for(const r of snap.database.query('SELECT j.message_id,c.guid FROM chat_message_join j JOIN chat c ON c.ROWID=j.chat_id ORDER BY c.ROWID').all() as {message_id:bigint;guid:string}[]){const key=String(r.message_id);chats.set(key,[...(chats.get(key)||[]),{guid:r.guid}]);}
- return queryRows(snap.database,"ORDER BY m.ROWID",[]).map(r=>{r.chats=chats.get(String(r.rowid))||[];return reuse?reuse(String(r.rowid),r,()=>record(snap.database,r)):record(snap.database,r);});}finally{await snap.close();}
+ return queryRows(snap.database,"ORDER BY m.ROWID",[]).map(r=>{r.chats=chats.get(String(r.rowid))||[];return (reuse?reuse(String(r.rowid),r,()=>record(snap.database,r)):record(snap.database,r)) as T;});}finally{await snap.close();}
 }

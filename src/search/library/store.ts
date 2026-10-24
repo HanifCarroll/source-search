@@ -1,7 +1,5 @@
 import {privateDirectory} from "../../platform/storage";
 import {randomUUID} from "node:crypto";
-import { lstatSync,chmodSync } from "node:fs";
-import { Database } from "bun:sqlite";
 import { writeFile, rename, rm, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {sourceScope, type Config} from "../../platform/config";
@@ -9,16 +7,8 @@ import { hash, now, stableJson } from "../../domain/identity";
 import { type RecordData, type Ref } from "../../domain/contracts";
 import { contentSections } from "../../domain/content";
 
-export function libraryDB(c:Config, write=false) {
- const path=join(c.libraryRoot,"library.sqlite");if(!write){const st=lstatSync(path);if(!st.isFile() || st.isSymbolicLink())throw Error("Library cache must be an existing regular file");}
- if(write){const st=lstatSync(c.libraryRoot);if(!st.isDirectory() || st.isSymbolicLink() || st.mode & 0o077)throw Error("Library root must be private (0700)");try{const f=lstatSync(path);if(!f.isFile() || f.isSymbolicLink())throw Error("Unsafe library file");}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}}
- const db=new Database(path,{create:write,strict:true});if(write)chmodSync(path,0o600);
- if(write){db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=10000; CREATE TABLE IF NOT EXISTS chunks(id TEXT PRIMARY KEY,source TEXT,title TEXT,body TEXT,hash TEXT,refs TEXT,guard TEXT); CREATE TABLE IF NOT EXISTS states(source TEXT PRIMARY KEY,data TEXT); CREATE TABLE IF NOT EXISTS mail(source TEXT,id TEXT,data TEXT,summary TEXT,seen TEXT,PRIMARY KEY(source,id));");}
- else db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=10000");
- return db;
-}
-export function getState(db:Database,source:string):any {const r=db.query("SELECT data FROM states WHERE source=?").get(source) as any;return r?JSON.parse(r.data):{};}
-export function setState(db:Database,source:string,data:unknown){db.query("INSERT OR REPLACE INTO states VALUES(?,?)").run(source,JSON.stringify(data));}
+import {cacheDB as libraryDB,getState,setState} from '../../platform/cache-db';
+export {cacheDB as libraryDB,getState,setState} from '../../platform/cache-db';
 export type Chunk={id:string;source:string;title:string;body:string;hash:string;refs:Ref[];guard:unknown};
 export function makeChunks(source:string,records:RecordData[],guard:unknown):Chunk[]{
  const groups=new Map<string,RecordData[]>();

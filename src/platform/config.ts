@@ -17,6 +17,7 @@ const executable=(name:string)=>Bun.which(name) || join(home,".config/source-sea
 export const configSchema = z.object({
   sources: sourcesSchema,
   contextEntities: contextEntitiesSchema,
+  changeTracking:z.object({calendarPastDays:z.number().int().min(0).max(365).default(180),calendarFutureDays:z.number().int().min(1).max(366).default(180)}).strict().refine(v=>v.calendarPastDays+v.calendarFutureDays<=366,'Calendar tracking must cover at most 366 days').default({calendarPastDays:180,calendarFutureDays:180}),
   memoryRoot: path.default(join(home,'.local/share/source-search/memory')),
   timeZone: timeZoneSchema.default("UTC"),
   enabledSources: z.array(sourceId).default([]),

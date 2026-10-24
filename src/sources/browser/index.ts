@@ -72,3 +72,14 @@ export async function readBrowser(c:Config,ref:Ref){
   }
   if(!found)fail('RECORD_NOT_FOUND','Browser record is no longer in the selected profile');assertVersion(ref,found.ref.version!);return found;
 }
+
+export async function allBrowserRecords(c:Config,source:string){
+ const s=settings(c,source);if(s.bookmarks)return bookmarks(c,source);
+ const records:RecordData[]=[];
+ for(const profile of s.profiles){const store=stores[s.browser],snap=await createSnapshot(await contained(profile.path,store.file));
+  try{store.check(snap.database);for(const row of snap.database.query(store.select).iterate()){
+   records.push(record(c,source,s.browser,false,profile,row as BrowserRow));if(records.length>500000)fail('SOURCE_LIMIT','Browser inventory exceeds 500,000 records');
+  }}finally{await snap.close();}
+ }
+ return records;
+}

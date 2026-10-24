@@ -93,7 +93,7 @@ test('archive refresh reuses unchanged sources and commits changed records witho
   const db=new Database(c.index,{readonly:true});expect(JSON.stringify(db.query('SELECT body FROM records').all())).toContain('Amber');db.close();
 }));
 test('Gmail uses additions history between full reconciliations, then catches deletions and label changes',()=>temporary(async root=>{
-  await mkdir(join(root,'mail-raw'));
+  await mkdir(join(root,'mail-raw'),{mode:0o700});
   const c=configSchema.parse({libraryRoot:root,maintenanceEnabled:true,libraryEnabled:true,enabledSources:['inbox'],sources:{inbox:{adapter:'gmail',account:'invented',email:'fixture@example.test'}}});
   let ids=['alpha','bravo'],history='100',changed:string[]=[],searches=0,reads:string[]=[];
   const execute=async(args:string[])=>{
