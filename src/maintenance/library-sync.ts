@@ -30,7 +30,7 @@ export async function publishSnapshots(c:Config){
  const db=libraryDB(c,true);
  try{for(const source of snapshotSources(c)){
   try{
-   const saved=await snapshotStore(c,source,sourceKind(source,c)==='tasks'?'task-snapshots':'source-snapshots').read();
+   const saved=await snapshotStore(c,source).read();
    if(!saved)fail('NEEDS_SYNC','Run sync-sources to load this source before indexing it');
    await publish(c,source,saved.records,{snapshot:source},{state:saved.lastError?'error':'ready',error:saved.lastError||null,checkedAt:saved.lastAttemptAt||saved.checkedAt,lastSuccessfulSync:saved.checkedAt,syncStrategy:saved.strategy,coverage:saved.coverage});
   }catch(e){setState(db,source,{...getState(db,source),state:'error',error:errorData(e),checkedAt:now()});}

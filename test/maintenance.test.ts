@@ -36,7 +36,7 @@ test('library failure cannot roll back a committed source checkpoint or prevent 
  const db=join(c.libraryRoot,'library.sqlite');await rm(db);await writeFile(db,'broken fixture');
  await writeFile(file,JSON.stringify({version:1,tasks:[{id:'two',title:'Invented new task'}]}));
  expect((await syncSources(enabled)).ok).toBe(true);
- const store=snapshotStore(c,'todo','task-snapshots'),before=await store.read();
+ const store=snapshotStore(c,'todo'),before=await store.read();
  await expect(publishSnapshots(enabled)).rejects.toThrow();
  expect(await store.read()).toEqual(before);
  expect((await store.read())!.records[0]!.ref.id).toBe('two');

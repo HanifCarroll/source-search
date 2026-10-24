@@ -3,18 +3,19 @@ import {rm} from 'node:fs/promises';
 import {sourceScope,requireSource,type Config} from '../../platform/config';
 import {textFile} from '../../platform/source-files';
 import {recordStore} from '../../platform/record-store';
-import {privateJSON} from '../../platform/storage';
+import {sourceKind} from '../../domain/source-catalog';
 import {recordPage} from '../../domain/pages';
-import {assertVersion,fail,hash} from '../../domain/identity';
+import {assertVersion,fail,hash,stableJson} from '../../domain/identity';
 import type {Query,Ref} from '../../domain/contracts';
 import type {SourceSnapshot,SourceProvider} from './model';
 import type {SourceCache} from '../../domain/snapshots';
 export type {SourceCache} from '../../domain/snapshots';
 
-export function snapshotStore(c:Config,source:string,namespace:'task-snapshots'|'source-snapshots'='source-snapshots'){
+export function snapshotStore(c:Config,source:string){
+  const namespace=sourceKind(source,c)==='tasks'?'task-snapshots':'source-snapshots';
   const command=namespace==='task-snapshots'?'sync-tasks':'sync-sources';
   const legacyPath=join(c.libraryRoot,namespace,hash(source)+'.json');
-  const database=namespace==='task-snapshots'?recordStore(join(c.libraryRoot,'records.sqlite')):undefined;
+  const database=recordStore(join(c.libraryRoot,'records.sqlite'));
   async function legacy():Promise<SourceCache|undefined>{
     requireSource(c,source);let raw:string;
     try{raw=await textFile(legacyPath,128*1024*1024);}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return;throw e;}
@@ -23,25 +24,23 @@ export function snapshotStore(c:Config,source:string,namespace:'task-snapshots'|
     if(!Array.isArray(saved.records))fail('INVALID_CACHE',`Snapshot is invalid; run ${command} to refresh it`);
     return saved;
   }
-  async function read(){requireSource(c,source);return await database?.read(source,sourceScope(c,source))??await legacy();}
+  async function read(){requireSource(c,source);return await database.read(source,sourceScope(c,source))??await legacy();}
   async function write(saved:SourceCache){
-    if(database){await database.write(source,saved);await rm(legacyPath,{force:true});}
-    else await privateJSON(legacyPath,saved);
+    await database.write(source,saved);await rm(legacyPath,{force:true});
   }
   // Called only by explicit maintenance, never as a side effect of retrieval.
   async function migrate(){
-    if(!database)return read();
+    requireSource(c,source);
     const current=await database.read(source,sourceScope(c,source));if(current)return current;
     const saved=await legacy();if(!saved)return;
     await database.write(source,saved);
     const verified=await database.read(source,saved.scope);
-    if(!verified||JSON.stringify(verified.records)!==JSON.stringify(saved.records))fail('INVALID_CACHE','Task migration did not preserve its records');
+    if(!verified||stableJson(verified)!==stableJson(saved))fail('INVALID_CACHE','Snapshot migration did not preserve its records and checkpoint');
     await rm(legacyPath,{force:true});return verified;
   }
-  return {path:database?.path||legacyPath,lockPath:legacyPath,legacyPath,read,write,migrate,
+  return {path:database.path,lockPath:legacyPath,legacyPath,read,write,migrate,
     async failure(previous:SourceCache,error:{code:string;message:string},attemptedAt:string){
-      if(database)await database.failure(source,previous.scope,error,attemptedAt);
-      else await privateJSON(legacyPath,{...previous,lastError:error,lastAttemptAt:attemptedAt});
+      await database.failure(source,previous.scope,error,attemptedAt);
     },
     async status(){const saved=await read();return {available:!!saved,state:saved?.lastError?'error':undefined,records:saved?.records.length,coverage:saved?.coverage,checkedAt:saved?.checkedAt,snapshotAt:saved?.sourceSnapshotAt,historical:!!saved?.sourceSnapshotAt,syncStrategy:saved?.strategy,
       filters:['from','to','types'],warnings:saved?.warnings||[],...(saved?.lastError?{error:saved.lastError}:!saved?{error:{code:'NEEDS_SYNC',message:`Run source-search ${command} to load the selected source`}}:{})};},

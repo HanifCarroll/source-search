@@ -60,7 +60,7 @@ test('unchanged records are not rewritten on each successful observation',()=>te
 test('legacy task snapshots migrate only during maintenance and survive an offline first sync with saved references',()=>temporary(async root=>{
  const file=join(root,'tasks.json');await writeFile(file,JSON.stringify({version:1,tasks:[{id:'a',title:'Invented telescope'}]}));
  const c=configSchema.parse({maintenanceEnabled:true,enabledSources:['work'],libraryRoot:join(root,'cache'),sources:{work:{adapter:'tasks',connector:{type:'json',paths:[file]}}}});
- const store=snapshotStore(c,'work','task-snapshots'),snapshot=await taskProvider(c,'work').sync();
+ const store=snapshotStore(c,'work'),snapshot=await taskProvider(c,'work').sync();
  const legacy:SourceCache={...snapshot,version:1,scope:sourceScope(c,'work'),checkedAt:'2026-10-01T00:00:00Z',checkpoint:{next:'previous'}};
  await privateDirectory(dirname(store.legacyPath));await privateJSON(store.legacyPath,legacy);
  const runtime=createRuntime(c),before=(await runtime.search_sources({queries:[{source:'work',query:'telescope'}]})).results[0]!;
@@ -73,5 +73,5 @@ test('legacy task snapshots migrate only during maintenance and survive an offli
  expect((await runtime.read_record({ref:before.items[0]!.ref})).record.ref).toEqual(before.items[0]!.ref);
  expect((await runtime.search_sources({queries:[{source:'work',query:'telescope'}]})).results[0]!.status).toBe('partial');
  expect((await syncTasks(c,'work')).ok).toBe(true);expect((await store.read())!.lastError).toBeUndefined();
- await expect(snapshotStore({...c,enabledSources:[]},'work','task-snapshots').read()).rejects.toMatchObject({code:'SOURCE_DISABLED'});
+ await expect(snapshotStore({...c,enabledSources:[]},'work').read()).rejects.toMatchObject({code:'SOURCE_DISABLED'});
 }));

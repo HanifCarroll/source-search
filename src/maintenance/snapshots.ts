@@ -15,7 +15,7 @@ export async function syncSnapshots(c:Config,sources:string[],factory:(c:Config,
     requireSource(c,source);
     let release:(()=>Promise<void>)|undefined,compromised:Error|undefined,previous:SourceCache|undefined;
     const namespace=sourceKind(source,c)==='tasks'?'task-snapshots':'source-snapshots';
-    const store=snapshotStore(c,source,namespace);
+    const store=snapshotStore(c,source);
     try{
       await markManagedCache(c.libraryRoot);await privateDirectory(dirname(store.lockPath));
       release=await lock(store.lockPath,{realpath:false,stale:300000,update:10000,retries:0,onCompromised:e=>{compromised=e;}});

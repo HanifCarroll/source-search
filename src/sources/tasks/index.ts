@@ -61,13 +61,13 @@ export function taskProvider(c:Config,source:string):TaskProvider {
   return bind({sync,async read(id){const r=(await sync()).records.find(r=>r.ref.id===id);if(!r)fail('RECORD_NOT_FOUND','Task is absent from the selected files');return r;}});
 }
 
-export const taskCache=(c:Config,source:string)=>snapshotStore(c,source,'task-snapshots').read();
-export const taskStatus=(c:Config,source:string)=>snapshotStore(c,source,'task-snapshots').status();
+export const taskCache=(c:Config,source:string)=>snapshotStore(c,source).read();
+export const taskStatus=(c:Config,source:string)=>snapshotStore(c,source).status();
 export async function searchTasks(c:Config,q:Query){
-  const store=snapshotStore(c,q.source,'task-snapshots');
+  const store=snapshotStore(c,q.source);
   if(!q.task&&q.sort!=='due')return store.search(q);
   const saved=await store.read();if(!saved)fail('NEEDS_SYNC','Run source-search sync-sources before searching this source');
   return taskPage(saved.records,q,{kind:saved.sourceSnapshotAt?'historical-archive':'synchronized-snapshot',asOf:saved.sourceSnapshotAt||saved.checkedAt,syncedAt:saved.checkedAt,description:saved.coverage,lastAttemptAt:saved.lastAttemptAt,lastError:saved.lastError},
     [...saved.warnings,...(saved.lastError?['Using the last successful snapshot; latest sync failed: '+saved.lastError.code]:[])]);
 }
-export const readTask=(c:Config,ref:Ref)=>snapshotStore(c,ref.source,'task-snapshots').original(ref,taskProvider(c,ref.source));
+export const readTask=(c:Config,ref:Ref)=>snapshotStore(c,ref.source).original(ref,taskProvider(c,ref.source));
