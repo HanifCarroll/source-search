@@ -175,7 +175,7 @@ test("real MCP transport exposes only reads and returns the same substantive sea
   const transport = new StdioClientTransport({ command: process.execPath, args: [join(import.meta.dir, "../src/mcp.ts")], env: { ...process.env as Record<string, string>, SOURCE_SEARCH_CONFIG_FILE: configPath }, stderr: "pipe" });
   const client = new Client({ name: "source-search-test", version: "1" });
   try {
-    await client.connect(transport); const tools = await client.listTools(); expect(tools.tools.map(t => t.name).sort()).toEqual(["list_sources", "read_record", "search_sources"]);
+    await client.connect(transport); const tools = await client.listTools(); expect(tools.tools.map(t => t.name).sort()).toEqual(["build_context", "list_context_entities", "list_sources", "read_record", "search_sources"]);
     expect(tools.tools.every(t => t.annotations?.readOnlyHint)).toBe(true);
     const response = await client.callTool({ name: "search_sources", arguments: { queries: [{ source: "journals", query: "networking" }] } });
     const data = JSON.parse((response.content as any[])[0].text); expect(data.results[0].items[0].ref.id).toBe("2024/01-January/2024-01-01.md");

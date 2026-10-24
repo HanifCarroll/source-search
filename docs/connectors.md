@@ -10,6 +10,56 @@ Use absolute paths in JSON, with `~` expanded. Keep configuration and credential
 
 Executables are discovered on `PATH`; set explicit paths such as `gmailBinary`, `bunBinary` or a source's `binary` when a background process has a different `PATH`. Full settings are defined in [source-settings.ts](../src/platform/source-settings.ts), [connected-settings.ts](../src/platform/connected-settings.ts) and [config.ts](../src/platform/config.ts).
 
+## People and project context
+
+Optional `contextEntities` mappings belong at the top level of private configuration. Start with one project and existing sources. For example, merge this into a configuration with a `notes` source:
+
+```json
+{
+  "contextEntities": {
+    "cobalt": {
+      "kind": "project",
+      "label": "Cobalt telescope",
+      "queries": [{"source": "notes", "query": "Cobalt"}]
+    }
+  }
+}
+```
+
+Run `bun run start entities`, then `bun run start context '{"mode":"project-resume","entity":"cobalt","sources":["notes"]}'`. MCP exposes the same operations as `list_context_entities` and `build_context`. No model, index or background job is required beyond what the selected sources already use.
+
+Each mapping supports these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `kind`, `label` | `person` or `project`, and a display name |
+| `identifiers` | Confirmed `{kind,value,source?}` identifiers. People use `email`, `phone` or `person-id`; projects use `project-id` or `repository`. Provider IDs require a source ID. Email/phone identifiers may also be restricted to one source. |
+| `records` | Exact saved references from search/read results. Include `version` to pin a record; omit it to follow that record's current contents. |
+| `queries` | Source-specific search inputs, without `cursor` or `limit`. Use the source's existing syntax and filters. Queries find candidates; they do not establish membership. |
+| `people` | For a project, IDs of configured people whose saved records/searches supply background context |
+
+For meeting preparation, add confirmed people mappings. For example, a person entry can contain `"identifiers":[{"kind":"email","value":"alex@example.org"}]` and a saved query for that address in a configured contacts or mail source. Read the relevant contact/event with `details:true` to inspect its structured `identifiers`; never use a display name as proof that two people are the same. For tasks, use the exact `task.project.id` from a read as a source-scoped `project-id`, and a query with `task:{projectId:"that ID"}`.
+
+Search a calendar with `from` and `to`, then call:
+
+```json
+{
+  "mode": "meeting-prep",
+  "meeting": {"source": "agenda", "id": "returned ID", "version": "returned version"},
+  "entity": "cobalt",
+  "sources": ["agenda", "notes", "people"],
+  "limit": 12
+}
+```
+
+Use your configured source IDs. The optional `entity` selects a project; confirmed attendee identifiers can select people automatically. The source list narrows which configured records and searches may run. An identifier provides a link; add saved records or queries to retrieve related history. No searches are invented from record contents.
+
+Email matching preserves local-part case, dots and plus tags; domains are case-insensitive. Phone matching requires an international `+` number. Add known aliases explicitly. Shared identifiers are reported as ambiguous. Edit or remove a mapping to reverse it; no source records change. When reassigning a source ID to another account, review its provider IDs and record mappings too.
+
+The result includes cited excerpts, the reason each was retrieved, confirmed links, task fields where present, source coverage, gaps and unread references. `coverage.planComplete` means the configured plan finished, not that all history was searched. Follow each search's `nextCursor` with `search_sources`, open `pending` references with `read_record`, and use each evidence item's `read` input for its full text. Historical task states remain historical. A changed pinned record is reported as stale; search again and review its new version before updating the mapping.
+
+Each call runs at most eight saved searches, selects at most sixteen entities, and opens up to `limit` unique candidates (default 12, maximum 20). Excerpts and the whole response are bounded; omitted work is reported. For a larger project, narrow the sources or split its saved searches. Use original sources for context; `library` and `documents` can discover original references separately.
+
 ## Markdown folders
 
 ```json

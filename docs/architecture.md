@@ -1,6 +1,6 @@
 # Project architecture
 
-Source Search has one read interface: `createRuntime(config)` supplies source status, search, and record reads. CLI and MCP call that interface. Explicit maintenance builds disposable projections; retrieval does not start maintenance.
+Source Search has one read interface: `createRuntime(config)` supplies source status, search, record reads, and evidence-based context. CLI and MCP call that interface. Explicit maintenance builds disposable projections; retrieval does not start maintenance.
 
 ```
 src/
@@ -50,6 +50,16 @@ Library provenance validation uses original reads directly. It never recursively
 Presentation is a pure record-to-response transformation. Source adapters gather current availability information, such as whether a Chrome download still exists. That availability does not become part of the original record's version. Adapter identity is separate from a record version, so moving settings into an explicit source definition does not change unchanged originals. Cache guards bind mail to its provider/account and databases to their selected locations. Shared SQLite snapshots and column checks live in `platform/sqlite.ts`; Chrome and WhatsApp do not depend on Messages internals.
 
 Maintenance may use source readers and projection storage. The read interface cannot import maintenance. The source-sync import graph cannot load search modules. The optional refresh process runs snapshot sync independently of indexing and model work, using the same CLI commands as manual maintenance. `test/architecture.test.ts` checks these import directions, runtime cycles, the retrieval graph, and the absence of direct file, network, or process access in domain modules. Put new behavior in its owning module rather than adding a generic shared helper file.
+
+## People, projects and context
+
+`domain/context.ts` owns mapping validation and exact relationship matching. `contextEntities` in private configuration is the source of truth for confirmed people/project mappings, saved references, and explicit source queries. Editing or removing a mapping changes the next request; there is no second registry or inferred relationship store. Email domains are case-normalized; local parts, aliases and provider IDs are kept exact. International phone formatting is normalized without guessing a country. Shared identifiers remain ambiguous.
+
+Providers attach `RecordData.identifiers` from structured headers, participants and native IDs. They never extract identities from arbitrary record text. These derived fields, like normalized task fields, sit outside the original content version. Existing references remain stable. Ordinary search/read packets omit participant arrays; `read_record` with `details:true` exposes them for configuration.
+
+`application/context.ts` coordinates existing original reads and searches through two injected operations. It owns bounded meeting/project retrieval, per-request read deduplication, evidence attribution, and partial results. It has no provider registry, model dependency, persistence or maintenance side effects. `runtime.ts` binds it to the same source access and search behavior used by the ordinary tools. The calling agent interprets the evidence; Source Search does not turn text into asserted decisions or commitments.
+
+Context packets distinguish configured record/identifier links from saved-query candidates. They retain source coverage, original-read failures, ambiguous links, and search continuation tokens. A meeting anchor must still exist at the saved version. `coverage.planComplete` describes completion of the configured retrieval plan only. `library` and `documents` remain discovery projections; context uses original source references to avoid treating a projection as independent evidence.
 
 ## Search engines
 

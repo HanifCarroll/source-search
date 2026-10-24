@@ -1,6 +1,6 @@
 # Source Search
 
-Search your notes, mail, messages, tasks, calendars, files and code from an AI agent. Source Search runs locally and provides three MCP tools: `list_sources`, `search_sources` and `read_record`. It reads originals without changing them. Retrieved text goes to the requesting agent and its model provider.
+Search your notes, mail, messages, tasks, calendars, files and code from an AI agent. Source Search runs locally. Agents can discover sources, search, read originals, and assemble meeting or project context from saved people/project mappings. It reads originals without changing them. Retrieved text goes to the requesting agent and its model provider.
 
 ## Setup
 
@@ -78,6 +78,8 @@ bun run start read '{"ref":{"source":"notes","id":"returned ID","version":"retur
 ```
 
 For **each selected source**, confirm that `sources` reports `ready`, search for text known to exist, then read the exact `ref` returned in a hit. Use that source's supported filters; calendar searches need a date window. Inspect the JSON results and coverage warnings as well as the command's exit status.
+
+For meeting preparation or project resumption, optionally add [people and project mappings](docs/connectors.md#people-and-project-context). The `list_context_entities` and `build_context` tools reuse the same selected sources and return cited evidence.
 
 Tasks also support [exact lists and counts](docs/connectors.md#task-queries), such as open tasks due this week or tasks in a particular project. Results identify the snapshot date and its coverage.
 

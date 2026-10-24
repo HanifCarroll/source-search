@@ -10,6 +10,9 @@ import {canTrimItems} from "../domain/source-policy";
 import {textPage, assertPacket, packetBytes} from "../domain/results";
 import {compactRecord, annotateDuplicates, progress} from "../domain/presentation";
 import {errorData, now} from "../domain/identity";
+import {boundedMap} from './concurrency';
+import {contextTools} from './context';
+export {boundedMap} from './concurrency';
 
 export function createRuntime(config: Config, execute?: Run) {
   const groups=sourceGroups(config);
@@ -83,11 +86,6 @@ export function createRuntime(config: Config, execute?: Run) {
     const preview=request.preview ? await writePreview(result.record,config.previews) : undefined;
     const output={...result,...(preview ? {preview} : {})};assertPacket(output);return output;
   }
-  return { list_sources, search_sources, read_record };
-}
-
-export async function boundedMap<T,R>(items:readonly T[],work:(item:T)=>Promise<R>,concurrency=4):Promise<R[]> {
-  const result:R[]=new Array(items.length);let next=0;
-  await Promise.all(Array.from({length:Math.min(concurrency,items.length)},async()=>{while(next<items.length){const index=next++;result[index]=await work(items[index]!);}}));
-  return result;
+  const context=contextTools(config,{read:ref=>access.read(ref),search:async query=>(await search_sources({queries:[query]})).results[0]!});
+  return { list_sources, search_sources, read_record, ...context };
 }
