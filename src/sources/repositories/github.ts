@@ -106,7 +106,7 @@ export function githubRepositoryProvider(source:string,options:Options,http:Http
     if(bytes.length!==blob.size||bytes.length>options.maxFileBytes||createHash('sha1').update('blob '+bytes.length+'\0').update(bytes).digest('hex')!==entry.sha)fail('INVALID_PROVIDER_RESPONSE','GitHub file content does not match its revision');
     if(bytes.includes(0))return {kind:'binary'};
     let text:string;try{text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{return {kind:'binary'};}
-    if(text.startsWith('version https://git-lfs.github.com/spec/v1\n'))return {kind:'lfs'};
+    if(/^version https:\/\/git-lfs.github.com\/spec\/v1\r?\n/.test(text))return {kind:'lfs'};
     return {kind:'text',text};
   }
   function record(meta:Repository,selection:Selection,branch:string,commit:string,entry:Entry,text:string){

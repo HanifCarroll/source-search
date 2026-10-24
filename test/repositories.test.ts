@@ -12,6 +12,8 @@ import {configSchema,sourceScope} from '../src/platform/config';
 import {createRuntime} from '../src/application/runtime';
 import {textPage} from '../src/domain/results';
 import {providerHttp,type HttpResponseRead} from '../src/platform/http';
+import {libraryDB} from '../src/search/library/store';
+import {readLibrary} from '../src/search/library/index';
 
 const definition={adapter:'repositories',connector:{type:'github',account:'invented',token:{env:'INVENTED_TOKEN'},repositories:['example/lab']}};
 const settings=(overrides:Record<string,unknown>={})=>repositorySettings.parse({...definition,...overrides});
@@ -42,6 +44,7 @@ test('repository files include exact UTF-8 source and hidden paths, with explici
     'invalid.txt':{text:new Uint8Array([0xff,0xfe,0xfa])},
     'large.txt':'x'.repeat(201),'link':{text:'src/optics.ts',mode:'120000'},'submodule':{text:'invented',mode:'160000'},
     'asset.lfs':'version https://git-lfs.github.com/spec/v1\noid sha256:invented\nsize 3000\n',
+    'asset-crlf.lfs':'version https://git-lfs.github.com/spec/v1\r\noid sha256:invented\r\nsize 3000\r\n',
   });
   const options=settings({maxFileBytes:200}),provider=githubRepositoryProvider('code',options,fixture.http),snapshot=await provider.sync();
   expect(snapshot.records.map(r=>r.title).sort()).toEqual(['.github/workflows/check.yml','README.md','bin/tool','src/optics.ts'].map(p=>'example/lab/'+p).sort());
@@ -50,8 +53,8 @@ test('repository files include exact UTF-8 source and hidden paths, with explici
   expect(file.locator).toBe('https://github.com/example/lab/blob/'+head.sha+'/src/optics.ts');
   const markdown=snapshot.records.find(r=>r.title.endsWith('/README.md'))!;
   expect(markdown.sections).toEqual([{kind:'primary',start:0,end:markdown.body.length}]);
-  expect(snapshot.coverage).toContain('2 binary');expect(snapshot.coverage).toContain('1 oversized');expect(snapshot.coverage).toContain('2 symlinks/submodules');expect(snapshot.coverage).toContain('1 lfs');
-  expect(fixture.requests.filter(p=>p.includes('/git/blobs/'))).toHaveLength(7);
+  expect(snapshot.coverage).toContain('2 binary');expect(snapshot.coverage).toContain('1 oversized');expect(snapshot.coverage).toContain('2 symlinks/submodules');expect(snapshot.coverage).toContain('2 lfs');
+  expect(fixture.requests.filter(p=>p.includes('/git/blobs/'))).toHaveLength(8);
   const narrowed=await githubRepositoryProvider('code',settings({include:['src/**'],exclude:[]}),fixture.http).sync();
   expect(narrowed.records).toHaveLength(1);expect(narrowed.records[0]!.ref).toEqual(file.ref);
 });
@@ -176,5 +179,22 @@ test('byte limits fail the whole synchronization and retain its previous complet
     fixture.commit({'a.ts':'1234','b.ts':'5678'});const result=await syncConnected(c,'code',()=>provider);
     expect(result.ok).toBe(false);expect(result.sources[0]!.error?.code).toBe('SOURCE_LIMIT');
     const after=(await snapshotStore(c,'code').read())!;expect(after.records).toEqual(before.records);expect(after.checkpoint).toEqual(before.checkpoint);
+  }finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('repository selection and current versions also govern shared library projections',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'ss-repository-library-'));
+  try{
+    const fixture=gitFixture();fixture.commit({'code.ts':'Invented optical calibration'});
+    const c=configSchema.parse({enabledSources:['code','library'],maintenanceEnabled:true,libraryEnabled:true,libraryRoot:root,sources:{code:definition}}),provider=githubRepositoryProvider('code',settings(),fixture.http);
+    expect((await syncConnected(c,'code',()=>provider)).ok).toBe(true);
+    const db=libraryDB(c);let chunk:{id:string;hash:string};try{chunk=db.query('SELECT id,hash FROM chunks').get() as typeof chunk;}finally{db.close();}
+    const ref={source:'library',id:chunk!.id,version:chunk!.hash},validate=(original:any)=>snapshotStore(c,'code').original(original,provider);
+    expect((await readLibrary(c,ref,validate)).body).toContain('Invented optical calibration');
+    const removed=configSchema.parse({...c,sources:{code:settings({connector:{...definition.connector,repositories:['other/project']}})}});
+    await expect(readLibrary(removed,ref,validate)).rejects.toMatchObject({code:'SOURCE_DISABLED'});
+    await expect(readLibrary(configSchema.parse({...c,enabledSources:['library']}),ref,validate)).rejects.toMatchObject({code:'SOURCE_DISABLED'});
+    fixture.commit({'code.ts':'Changed calibration'});await expect(readLibrary(c,ref,validate)).rejects.toMatchObject({code:'STALE_RECORD'});
+    fixture.commit({});await syncConnected(c,'code',()=>provider);await expect(readLibrary(c,ref,validate)).rejects.toMatchObject({code:'STALE_RECORD'});
   }finally{await rm(root,{recursive:true,force:true});}
 });
