@@ -1,5 +1,5 @@
 import { test, expect, afterEach } from "bun:test";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
@@ -198,4 +198,21 @@ test('loader applies dependency-only upgrades when the lockfile changes',async()
  expect(await (await load()).invoke('list_sources',{})).toMatchObject({revision:1});
  await writeFile(join(dep,'index.js'),'export const version=2;');await writeFile(join(root,'bun.lock'),'fixture version 2');
  expect(await (await load()).invoke('list_sources',{})).toMatchObject({revision:2});
+});
+test('bundled runtime resolves SDK workers from the installed checkout',async()=>{
+ const root=await folder(),entry=join(root,'api.ts');
+ await writeFile(entry,`import {packageRoot} from ${JSON.stringify(join(import.meta.dir,'../src/platform/package-root.ts'))};export async function invoke(){return {root:packageRoot};}`);
+ const load=runtimeLoader(entry);
+ expect(await (await load()).invoke('list_sources',{})).toMatchObject({root});
+});
+test('an already-running gateway without the newer build define still uses its own installation',async()=>{
+ const root=await folder(),bundleRoot=await folder(),entry=join(root,'api.ts'),launcher=join(root,'src/mcp.ts');
+ await mkdir(join(root,'src'));await writeFile(join(root,'package.json'),JSON.stringify({name:'source-search',type:'module'}));
+ await writeFile(entry,`import {packageRoot} from ${JSON.stringify(join(import.meta.dir,'../src/platform/package-root.ts'))};export const root=packageRoot;`);
+ const build=await Bun.build({entrypoints:[entry],target:'bun'});expect(build.success).toBe(true);
+ const bundle=join(bundleRoot,'runtime.mjs');await writeFile(bundle,await build.outputs[0]!.text());
+ await writeFile(launcher,`import {root} from ${JSON.stringify(bundle)};console.log(JSON.stringify({root}));`);
+ const child=Bun.spawn([process.execPath,launcher],{stdout:'pipe',stderr:'pipe',cwd:bundleRoot});
+ const [out,err,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);
+ expect(code,err).toBe(0);expect(await realpath(JSON.parse(out).root)).toBe(await realpath(root));
 });
