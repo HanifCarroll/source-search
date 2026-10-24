@@ -1,5 +1,7 @@
 # Updating an installation
 
+Task snapshots now use a shared private SQLite store. Stop the refresh process before updating, then run `bun run start sync-sources` (or restart the existing refresher). The first sync imports each selected task source's old JSON snapshot and checkpoint before contacting its provider. It verifies the imported records and removes the replaced JSON cache; a failed provider request retains the imported snapshot. Source IDs, original versions and saved references stay unchanged. Search can still read an unmigrated JSON snapshot without writing anything. Other source caches and original files are unchanged.
+
 Keep the application checkout on the public repository's `main` branch. Store personal settings outside Git, normally at `~/.config/source-search/config.json`. Source files, credentials, models, databases, and caches also belong outside the checkout.
 
 ## Before updating

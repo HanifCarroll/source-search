@@ -1,8 +1,6 @@
 import type {RecordData} from '../../domain/contracts';
-
-// A checkpoint is provider-owned, serializable state. A successful sync returns
-// a complete selected snapshot, even when it fetched only incremental changes.
-export type SourceSnapshot={records:RecordData[];checkpoint?:unknown;coverage:string;strategy:string;warnings:string[];coverageWindow?:{from:string;to:string}};
+import type {SourceSnapshot} from '../../domain/snapshots';
+export type {SourceSnapshot} from '../../domain/snapshots';
 export interface SourceProvider {
   lists?():Promise<{id:string;name:string}[]>;
   sync(previous?:unknown):Promise<SourceSnapshot>;

@@ -6,7 +6,7 @@ import {appleRemindersProvider} from '../src/sources/tasks/apple-reminders';
 import {microsoftTodoProvider,graphOrigin,graphLink} from '../src/sources/tasks/microsoft-todo';
 import {taskHttp} from '../src/sources/tasks/http';
 import {configSchema,sourceScope} from '../src/platform/config';
-import {taskProvider,taskCache,taskCachePath} from '../src/sources/tasks';
+import {taskProvider,taskCache} from '../src/sources/tasks';
 import {syncTasks} from '../src/maintenance/sources';
 import {createRuntime} from '../src/application/runtime';
 import {microsoftToken,type MicrosoftOAuth} from '../src/platform/microsoft-auth';
@@ -151,5 +151,5 @@ test('Microsoft scopes preserve token rotation but isolate list and account chan
  let broken=false;const factory=()=>microsoftTodoProvider('microsoft',['home'],async path=>{if(path==='/me/todo/lists')return lists();if(broken)throw Object.assign(Error('Fixture offline'),{code:'TIMEOUT'});return page([task()]);});
  expect((await syncTasks(c,undefined,factory)).ok).toBe(true);const prior=await taskCache(c,'microsoft');broken=true;expect((await syncTasks(c,undefined,factory)).ok).toBe(false);
  expect((await taskCache(c,'microsoft'))!.checkpoint).toEqual(prior!.checkpoint);expect((await taskCache(c,'microsoft'))!.records).toEqual(prior!.records);
- expect(await readFile(taskCachePath(c,'microsoft'),'utf8')).not.toContain('UNUSED_FIXTURE');
+ expect(JSON.stringify(await taskCache(c,'microsoft'))).not.toContain('UNUSED_FIXTURE');
 }));
