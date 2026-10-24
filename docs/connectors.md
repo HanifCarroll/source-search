@@ -84,8 +84,29 @@ Both connectors poll provider change feeds. A relevant change triggers a fresh m
 
 ## GitHub and Linear
 
-Use `adapter: "issues"`. GitHub's connector is `{"type": "github", "account": "work", "token": {"env": "GITHUB_TOKEN"}, "repositories": ["owner/repository"]}`. Use a fine-grained token with read access to Issues and Pull requests for those repositories. GitHub Enterprise can set `apiUrl` to its HTTPS REST base, such as `https://github.example.com/api/v3`. Source Search reads open/closed issues, pull request descriptions, issue comments and inline review comments; it does not copy repositories, diffs or workflow logs.
+Use `adapter: "issues"`. GitHub's connector is `{"type": "github", "account": "work", "token": {"env": "GITHUB_TOKEN"}, "repositories": ["owner/repository"]}`. Use a fine-grained token with read access to Issues and Pull requests for those repositories. GitHub Enterprise can set `apiUrl` to its HTTPS REST base, such as `https://github.example.com/api/v3`. Source Search reads open/closed issues, pull request descriptions, issue comments and inline review comments; inline review comments include their quoted code context.
 
 Linear's connector is `{"type": "linear", "account": "work", "token": {"env": "LINEAR_API_KEY"}, "teams": ["TEAM_UUID"]}`. Optional `projects` restricts those teams to selected project UUIDs. Personal API keys use the default `authMode: "api-key"`; an externally refreshed OAuth access token uses `authMode: "oauth"` with read scope. `source-lists SOURCE_ID` lists accessible team IDs. Issues include archived items and comments, with team/project attribution.
 
 Run `sync-sources SOURCE_ID`, then search the source or `all-issues`. `conversation` filters one issue (`owner/repository#123` or `TEAM-123`). Issue and comment updates are polled independently with a timestamp overlap, because editing a comment need not update its parent issue. Complete daily reconciliation removes deleted records and catches moved issues. Saved references open the current issue or comment and enforce the selected repository/team/project.
+
+## Slack
+
+Use `adapter: "chat"` with a connector such as:
+
+```json
+{
+  "type": "slack",
+  "account": "work",
+  "workspace": "T_WORKSPACE_ID",
+  "channels": ["C_CHANNEL_ID"],
+  "token": {"file": "/absolute/private/slack-token"},
+  "historyDays": 90
+}
+```
+
+Replace the placeholder workspace/channel IDs with Slack's actual IDs (for example, from the client URL). Create or use a Slack app with read scopes for the selected channel types: `channels:read`/`channels:history`, `groups:read`/`groups:history`, `im:read`/`im:history`, or `mpim:read`/`mpim:history`. `users:read` supplies display names; without it, IDs remain searchable. Bot tokens can read conversations the bot belongs to; user tokens follow the user's access. The connector verifies the token's workspace before reading channels. It does not join channels or request additional permissions during synchronization.
+
+Run `sync-sources SOURCE_ID`, then search the source or `all-chats`. `conversation` filters a channel ID. History includes thread roots within `historyDays` and their replies, message text, rich-text fallbacks and file names/types. File contents are not downloaded. Slack's plan and retention limits still apply.
+
+Sync revisits recent seven-day history and known threads, catching edits and reply deletions. A full daily reconciliation catches older edits/deletions and first replies to old roots. Threads rooted outside the configured window require a larger `historyDays`. Requests are paced; rate-limit or permission failures retain the previous complete snapshot and report the error. Original reads fetch the exact current message, including thread replies.

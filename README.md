@@ -50,6 +50,7 @@ Search/read also accept JSON on stdin. Run `bun run start mcp-config` to print a
 | Chromium metadata (`browser-history`, `browser-bookmarks`, `browser-downloads`) | `profiles`: stable IDs and Chrome, Edge, Brave or other compatible Chromium profile directories; downloads are metadata only |
 | Named Gmail accounts (`gmail`) | A compatible `gog` executable and configured account routing |
 | Named JMAP accounts (`jmap`) | Session URL and bearer token or username/password; Fastmail and other JMAP Mail servers |
+| Connected accounts (`calendars`, `address-books`, `notes`, `files`, `issues`, `chat`) | Selected Google, Microsoft, DAV, Notion, GitHub, Linear and Slack content; [setup and coverage](docs/connectors.md) |
 | Named IMAP accounts (`imap`) | Server, username, password/app password or OAuth token; TLS or required STARTTLS |
 | Calendar/contact files (`ical`, `vcard`) | `paths`: `.ics` or `.vcf` files; calendars support recurrence and require a date window |
 | macOS `calendar`, `contacts` | Optional helper built with your signing identity and bundle ID; `helper` and `launcher` paths |
@@ -221,7 +222,7 @@ For a derived library of mail, messages and selected archives, enable `libraryEn
 
 ## Connected accounts
 
-Google and Outlook calendars and contacts use named `calendars` and `address-books` sources. Enable each source explicitly, authenticate, then run `sync-sources`. Search uses the last complete local snapshot; opening a result checks the current original. See [connector setup](docs/connectors.md) for configuration, selection and coverage.
+Google, Outlook and DAV calendars/contacts, Notion notes, Google Drive/OneDrive files, GitHub/Linear issues and Slack channels use named source instances. Enable each source explicitly, authenticate, then run `sync-sources`. Search uses the last complete local snapshot; opening a result checks the current original. See [connector setup](docs/connectors.md) for configuration, selection and coverage.
 
 ## Connecting mail
 

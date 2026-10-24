@@ -126,6 +126,7 @@ export function sourceGroups(config:{sources:Record<string,SourceSettings>; enab
     'all-browser-history':names.filter(id=>sourceCategory(id,config)==='browser-history'),
     'all-bookmarks':names.filter(id=>sourceCategory(id,config)==='browser-bookmarks'),
     'all-calendars':names.filter(id=>sourceCategory(id,config)==='calendars'),
+    'all-chats':names.filter(id=>['chat','messages','whatsapp'].includes(sourceCategory(id,config))),
     'all-issues':names.filter(id=>sourceCategory(id,config)==='issues'),
     'all-files':names.filter(id=>sourceCategory(id,config)==='files'),
     'all-contacts':names.filter(id=>sourceCategory(id,config)==='contacts'),
