@@ -24,11 +24,4 @@ export function taskRecord(source:string,provider:string,task:Task,locator:strin
     occurredAt:task.createdAt,metadata:{provider,task,dateKind:'created'}});
 }
 export function checkedTask(value:unknown){const parsed=taskSchema.safeParse(value);if(!parsed.success)fail('INVALID_PROVIDER_RESPONSE','Task data does not match the supported format');return parsed.data;}
-export type TaskSnapshot={records:RecordData[];checkpoint?:unknown;coverage:string;strategy:string;warnings:string[]};
-// Providers own transport and mapping. Search, pagination, references and
-// publication operate on the same records regardless of the originating app.
-export interface TaskProvider {
-  lists?():Promise<{id:string;name:string}[]>;
-  sync(previous?:unknown):Promise<TaskSnapshot>;
-  read(id:string,previous?:unknown):Promise<RecordData>;
-}
+export type {SourceSnapshot as TaskSnapshot,SourceProvider as TaskProvider} from '../sync/model';

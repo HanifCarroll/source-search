@@ -18,6 +18,7 @@
     "@modelcontextprotocol/sdk": "1.32.0",
     "@tobilu/qmd": "2.8.3",
     "@zip.js/zip.js": "2.24.0",
+    "google-auth-library": "11.3.1",
     "html-to-text": "10.0.1",
     "ical.js": "2.2.1",
     "imapflow": "2.9.1",

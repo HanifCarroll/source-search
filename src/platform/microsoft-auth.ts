@@ -3,20 +3,20 @@ import {writeFile,rename,rm} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import lockfile from 'proper-lockfile';
 import {z} from 'zod';
-import type {TaskSettings} from './source-settings';
+import type {MicrosoftOAuth} from './auth-settings';
+export type {MicrosoftOAuth} from './auth-settings';
 import {privateDirectory} from './storage';
 import {textFile} from './source-files';
 import {fail} from '../domain/identity';
 
-export type MicrosoftOAuth=NonNullable<Extract<TaskSettings['connector'],{type:'microsoft-todo'}>['oauth']>;
 const savedSchema=z.object({version:z.literal(1),clientId:z.string(),tenant:z.string(),homeAccountId:z.string().min(1),cache:z.string()});
-const scopes=['https://graph.microsoft.com/Tasks.Read'];
+const defaultScopes=['https://graph.microsoft.com/Tasks.Read'];
 type Client=Pick<PublicClientApplication,'getTokenCache'|'acquireTokenSilent'|'acquireTokenByDeviceCode'>;
 type ClientFactory=(options:ConstructorParameters<typeof PublicClientApplication>[0])=>Client;
 
 // MSAL owns OAuth and refresh-token handling. Only the explicit CLI login can
 // prompt. Each configured account has a private cache, serialized under a lock.
-export async function microsoftToken(options:MicrosoftOAuth,prompt?: (message:string)=>void,createClient:ClientFactory=c=>new PublicClientApplication(c)):Promise<string>{
+export async function microsoftToken(options:MicrosoftOAuth,prompt?: (message:string)=>void,createClient:ClientFactory=c=>new PublicClientApplication(c),scopes:string[]=defaultScopes):Promise<string>{
   await privateDirectory(dirname(options.cache));
   let compromised:Error|undefined;
   const release=await lockfile.lock(options.cache,{realpath:false,stale:1200000,update:10000,retries:{retries:10,minTimeout:200,maxTimeout:1000},onCompromised:e=>{compromised=e;}});

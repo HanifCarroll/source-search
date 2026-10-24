@@ -295,3 +295,9 @@ See [project architecture](docs/architecture.md) for module responsibilities and
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+### Google Tasks
+
+Use a task connector with `type: "google-tasks"`, a stable `account` name, and optional `lists` containing selected task-list IDs. Authenticate with either `token: {"env": "GOOGLE_ACCESS_TOKEN"}` or `oauth: {"clientId": "YOUR_DESKTOP_CLIENT_ID", "clientSecret": {"file": "/absolute/private/client-secret"}, "cache": "/absolute/private/google-login.json"}`. Create a Desktop OAuth client in Google Cloud and enable the Tasks API. The client secret field is optional when your client supports token exchange without it.
+
+Run `bun src/cli.ts login-google SOURCE_ID`, open the displayed sign-in URL, then use `task-lists SOURCE_ID` and `sync-tasks SOURCE_ID`. Login requests read-only Tasks access and uses a local callback; later syncs refresh silently. Completed, hidden and assigned tasks are included. Due dates are dates, as supplied by Google. Modified-since updates include deletions, with a complete daily reconciliation.

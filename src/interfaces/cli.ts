@@ -1,3 +1,5 @@
+import {googleToken} from '../platform/google-auth';
+import {googleTasksScope} from '../sources/tasks/google-tasks';
 import {purgeCache} from "../platform/storage";
 process.umask(0o077);
 import { loadConfig,requireSource } from "../platform/config";
@@ -29,6 +31,12 @@ try {
     const provider=taskProvider(config,argument);if(!provider.lists)fail('UNSUPPORTED_OPERATION','This connector does not provide list discovery');
     result=await provider.lists();
   }
+  else if(command === 'login-google'){
+    if(!argument)fail('INVALID_REQUEST','login-google requires a source ID');requireSource(config,argument);
+    const source=config.sources[argument];
+    if(source?.adapter!=='tasks'||source.connector.type!=='google-tasks'||!source.connector.oauth)fail('INVALID_CONFIG','Configure a Google source with oauth settings first');
+    await googleToken(source.connector.oauth,[googleTasksScope],url=>console.error('Open this URL to sign in: '+url));result={source:argument,signedIn:true};
+  }
   else if(command === 'login-microsoft'){
     if(!argument)fail('INVALID_REQUEST','login-microsoft requires a source ID');requireSource(config,argument);
     const source=config.sources[argument];
@@ -38,7 +46,7 @@ try {
   else if (command === "purge-cache") result = await purgeCache(config,argument === "--apply");
   else if (command === "mcp") { await import("./mcp"); }
   else {
-    console.log("source-search setup [--notes /folder] | doctor | mcp-config | models download | index [--source ID | --library] [--embed] | sources | search '<JSON>' | read '<JSON>' | rebuild | sync-tasks [SOURCE_ID] | task-lists SOURCE_ID | login-microsoft SOURCE_ID | purge-cache [--apply] | mcp\nSearch input: {\"queries\":[{\"source\":\"notes\",\"query\":\"meeting\"}]}\nRead input: {\"ref\":{\"source\":\"notes\",\"id\":\"<returned ID>\"}}\nSearch and read accept JSON on stdin. Rebuild changes only the disposable archive index.");
+    console.log("source-search setup [--notes /folder] | doctor | mcp-config | models download | index [--source ID | --library] [--embed] | sources | search '<JSON>' | read '<JSON>' | rebuild | sync-tasks [SOURCE_ID] | task-lists SOURCE_ID | login-microsoft SOURCE_ID | login-google SOURCE_ID | purge-cache [--apply] | mcp\nSearch input: {\"queries\":[{\"source\":\"notes\",\"query\":\"meeting\"}]}\nRead input: {\"ref\":{\"source\":\"notes\",\"id\":\"<returned ID>\"}}\nSearch and read accept JSON on stdin. Rebuild changes only the disposable archive index.");
   }
   if (result !== undefined) console.log(JSON.stringify({ ok: true, data: result }));
 } catch (error) { console.error(JSON.stringify({ ok: false, error: errorData(error) })); process.exitCode = 1; }

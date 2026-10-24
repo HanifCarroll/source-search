@@ -64,7 +64,7 @@ test('HTTP adapter bounds failures and sends bearer secrets only in the header',
   expect(await http('/sync',{sync_token:'*',resource_types:['items']})).toEqual({ok:true});
   expect(requests[0]).toMatchObject({method:'POST',authorization:'Bearer invented-token',contentType:'application/x-www-form-urlencoded',body:{sync_token:'*',resource_types:'["items"]'}});
   expect(requests[0].url).not.toContain('invented-token');
-  await expect(http('/limited')).rejects.toMatchObject({code:'RATE_LIMITED',message:'Task provider returned HTTP 429'});
+  await expect(http('/limited')).rejects.toMatchObject({code:'RATE_LIMITED',message:'Provider returned HTTP 429.'});
  }finally{server.stop(true);delete process.env.SOURCE_SEARCH_TEST_TASK_TOKEN;}
 });
 

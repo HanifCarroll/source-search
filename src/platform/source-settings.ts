@@ -1,3 +1,5 @@
+import {secretSchema,microsoftOAuthSchema,googleAuth,oneCredential} from './auth-settings';
+export {secretSchema} from './auth-settings';
 import {z} from 'zod';
 import {isAbsolute} from 'node:path';
 import {adapterKinds, groupIds, sourceKind, sourceCategory} from '../domain/source-catalog';
@@ -14,12 +16,6 @@ export const accountSchema = z.object({
   aliases:z.array(z.email()).default([]),
 });
 const common = {label:z.string().min(1).max(120).optional()};
-// Credentials are resolved at request time, including commands that refresh OAuth tokens.
-export const secretSchema = z.union([
-  z.object({env:z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/)}).strict(),
-  z.object({file:path}).strict(),
-  z.object({command:z.array(z.string().min(1).max(2000)).min(1).max(20)}).strict(),
-]);
 const nativeMail = {
   ...common, ...accountSchema.shape,
   folders:z.array(z.string().min(1).max(200)).min(1).max(100).optional(),
@@ -75,11 +71,12 @@ export const taskSettings = z.object({
   ...common, adapter:z.literal('tasks'),
   connector:z.discriminatedUnion('type',[
     z.object({type:z.literal('things'),database:path.optional(),root:path.optional()}).strict().refine(s=>!!s.database!==!!s.root,'Select a Things database or export folder'),
+    z.object({type:z.literal('google-tasks'),account:z.string().min(1).max(200),lists:z.array(z.string().min(1).max(500)).min(1).max(100).optional(),...googleAuth}).strict().refine(oneCredential,'Select Google OAuth or an external token'),
     z.object({type:z.literal('todoist'),account:z.string().min(1).max(200),token:secretSchema}).strict(),
     z.object({type:z.literal('ticktick'),account:z.string().min(1).max(200),token:secretSchema,projects:z.array(z.string().min(1).max(200)).min(1).max(100)}).strict(),
     z.object({type:z.literal('apple-reminders'),helper:path.optional(),launcher:path.optional(),lists:z.array(z.string().min(1).max(500)).min(1).max(100).optional()}).strict(),
     z.object({type:z.literal('microsoft-todo'),account:z.string().min(1).max(200),lists:z.array(z.string().min(1).max(500)).min(1).max(100).optional(),token:secretSchema.optional(),
-      oauth:z.object({clientId:z.uuid(),tenant:z.union([z.enum(['common','consumers','organizations']),z.uuid()]).default('common'),cache:path}).strict().optional(),
+      oauth:microsoftOAuthSchema.optional(),
     }).strict().refine(s=>!!s.token!==!!s.oauth,'Select a Microsoft OAuth login or an external access token'),
     z.object({type:z.literal('json'),paths:files}).strict(),
   ]),

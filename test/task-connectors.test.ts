@@ -128,7 +128,7 @@ test('Microsoft HTTP errors reset only recognized state failures and never expos
  try{const http=taskHttp(server.url.toString().replace(/\/$/,''),async()=>'invented-token');
   for(const s of [410,400,404]){status=s;await expect(http('/test')).rejects.toMatchObject({code:'SYNC_STATE_EXPIRED'});}
   status=429;code='TooManyRequests';await expect(http('/test')).rejects.toMatchObject({code:'RATE_LIMITED'});
-  status=403;await expect(http('/test')).rejects.toThrow('Task provider returned HTTP 403');
+  status=403;await expect(http('/test')).rejects.toThrow('Provider returned HTTP 403');
  }finally{server.stop(true);}
 });
 
