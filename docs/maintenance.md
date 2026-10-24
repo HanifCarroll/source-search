@@ -33,7 +33,8 @@ The pinned QMD dependency has a Bun patch for [slow collection-scoped vector loo
 | CalDAV and CardDAV | Server sync tokens where available, otherwise collection tags and full changed-collection reads through tsdav. |
 | Notion | Selected page/data-source inventories, content revision reuse and daily full content reconciliation. |
 | Drive and OneDrive | Change feeds trigger selected-folder inventory refreshes; unchanged text reuses its revision. Daily reconciliation checks moves and permission changes. |
-| GitHub and Linear | Independent issue/comment update feeds with overlap, plus daily full reconciliation for removals and moves. |
+| GitHub and Linear issues | Independent issue/comment update feeds with overlap, plus daily full reconciliation for removals and moves. |
+| GitHub repository files | Check selected branch heads, inventory changed trees and download only new blob revisions. Complete trees detect deletions, renames and force pushes. Unchanged heads skip tree/blob downloads. |
 | Slack | Recent history and known threads refresh each pass; daily full reconciliation covers older edits, removals and first replies to old roots within the configured window. |
 | Generic task files and Things task connector | Read the selected snapshots and publish changed records only. Existing `things-archive` sources retain their export index behavior. |
 | Messages, WhatsApp, Muesli calls | Skip unchanged database/WAL snapshots. On change, compare row fingerprints, including joined text and metadata; decode only changed rows. A complete inventory detects edits and deletions, without assuming rows are append-only. |

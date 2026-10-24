@@ -6,7 +6,7 @@ import {createInterface} from 'node:readline/promises';
 import {configPath,configSchema,sourceConfig,type Config} from '../platform/config';
 import {packageRoot} from '../platform/package-root';
 import {createRuntime} from '../application/runtime';
-import {sourceKind} from '../domain/source-catalog';
+import {sourceKind,connectedKinds} from '../domain/source-catalog';
 import {searchModels,modelsPresent} from '../search/qmd/runner';
 import {fail} from '../domain/identity';
 
@@ -88,7 +88,7 @@ export async function setup(args:string[]) {
    settings.timeZone=await ask('Timezone',settings.timeZone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC');
    settings.sources={...settings.sources};settings.enabledSources=[...(settings.enabledSources||[])];
    while(true){
-    const adapter=await ask('Integration (markdown, imap, jmap, tasks, ical, vcard, browser-history, vault, agent-history, chatgpt-archive; blank to finish)');if(!adapter)break;
+    const adapter=await ask('Integration (markdown, imap, jmap, tasks, repositories, ical, vcard, browser-history, vault, agent-history, chatgpt-archive; blank to finish)');if(!adapter)break;
     const id=await ask('Source ID (keep it stable for saved references)',adapter==='markdown'?'notes':adapter);
     if(settings.sources[id])fail('SOURCE_EXISTS','That source ID already exists; edit its settings directly or choose another ID.');
     const definition:any={adapter};
@@ -122,13 +122,18 @@ export async function setup(args:string[]) {
       console.error('After setup, run login-microsoft '+id+' and sync-tasks '+id+'.');
      }else fail('INVALID_CONFIG','Unknown task connector');
     }
+    else if(adapter==='repositories'){
+     definition.connector={type:'github',account:await ask('Stable GitHub account name',id),token:{file:await path('File containing a GitHub token with Contents read access')}};
+     definition.connector.repositories=(await ask('Repositories (owner/name), separated by commas; blank to discover them after setup')).split(',').map(s=>s.trim()).filter(Boolean);
+     console.error(definition.connector.repositories.length?'After setup, run sync-sources '+id+'.':'After setup, run source-lists '+id+', add selected names to connector.repositories in your config, then run sync-sources '+id+'.');
+    }
     else if(adapter.startsWith('chrome-')||adapter.startsWith('browser-'))definition.profiles=[{id:await ask('Stable profile ID','default'),path:await path('Chromium profile folder')}];
     else if(adapter==='agent-history'){definition.data=await path('CASS data folder');definition.binary=await path('CASS executable');}
     else if(!['calendar','contacts','library','documents'].includes(adapter))fail('INVALID_CONFIG','Unknown integration');
     configSchema.parse({...settings,sources:{...settings.sources,[id]:definition},enabledSources:[...settings.enabledSources,id]});
     settings.sources[id]=definition;settings.enabledSources.push(id);
    }
-   if(Object.values(settings.sources).some((s:any)=>['vault','tasks'].includes(s.adapter))||settings.enabledSources.includes('library')){
+   if(Object.values(settings.sources).some((s:any)=>['vault','tasks',...connectedKinds].includes(s.adapter))||settings.enabledSources.includes('library')){
     settings.maintenanceEnabled=(await ask('Enable explicit index maintenance? (yes/no)',settings.maintenanceEnabled?'yes':'no'))==='yes';
     settings.libraryEnabled=settings.enabledSources.includes('library');
    }

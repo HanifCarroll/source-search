@@ -51,6 +51,7 @@ Search/read also accept JSON on stdin. Run `bun run start mcp-config` to print a
 | Named Gmail accounts (`gmail`) | A compatible `gog` executable and configured account routing |
 | Named JMAP accounts (`jmap`) | Session URL and bearer token or username/password; Fastmail and other JMAP Mail servers |
 | Connected accounts (`calendars`, `address-books`, `notes`, `files`, `issues`, `chat`) | Selected Google, Microsoft, DAV, Notion, GitHub, Linear and Slack content; [setup and coverage](docs/connectors.md) |
+| Repository files (`repositories`) | Selected GitHub repositories and branches; tracked code, configuration and documentation; [choose repositories](docs/connectors.md#github-repository-files) |
 | Named IMAP accounts (`imap`) | Server, username, password/app password or OAuth token; TLS or required STARTTLS |
 | Calendar/contact files (`ical`, `vcard`) | `paths`: `.ics` or `.vcf` files; calendars support recurrence and require a date window |
 | macOS `calendar`, `contacts` | Optional helper built with your signing identity and bundle ID; `helper` and `launcher` paths |
@@ -86,7 +87,7 @@ A source ID is your name for an instance; `adapter` selects its integration. Eve
 }
 ```
 
-Use lowercase source IDs with letters, digits and hyphens. Keep IDs stable: saved references and library collections use them. Defining a source does not enable it; add its ID to `enabledSources`. `list_sources` reports each instance's category and generates `all-mail`, `all-notes`, `all-journals`, `all-tasks`, `all-calendars`, `all-contacts`, `all-browser-history`, `all-bookmarks` and `historical-exports` groups. Categories let callers choose what to search independently of the app providing it.
+Use lowercase source IDs with letters, digits and hyphens. Keep IDs stable: saved references and library collections use them. Defining a source does not enable it; add its ID to `enabledSources`. `list_sources` reports each instance's category and generates groups including `all-mail`, `all-notes`, `all-journals`, `all-tasks`, `all-calendars`, `all-contacts`, `all-browser-history`, `all-bookmarks`, `all-files`, `all-repositories`, `all-issues`, `all-chats` and `historical-exports`. Categories let callers choose what to search independently of the app providing it.
 
 Markdown sources default to ordinary notes, `**/*.md`, the `date` frontmatter field, and exclusions for `.git` and `node_modules`. Set `exclude` to your own glob list, `dateFromFilename` to read a leading `YYYY-MM-DD`, and `content` to `journal` or `transcript` when appropriate. Transcripts can set `reviewed: true`; `journal: true` includes a transcribed journal in `all-journals`. Attribution is unspecified unless you set `author`. For daily date-named journals, use `pattern: "**/????-??-??.md"`, `dateFromFilename: true`, `dateFields: []`, and `content: "journal"`.
 
@@ -222,7 +223,7 @@ For a derived library of mail, messages and selected archives, enable `libraryEn
 
 ## Connected accounts
 
-Google, Outlook and DAV calendars/contacts, Notion notes, Google Drive/OneDrive files, GitHub/Linear issues and Slack channels use named source instances. Enable each source explicitly, authenticate, then run `sync-sources`. Search uses the last complete local snapshot; opening a result checks the current original. See [connector setup](docs/connectors.md) for configuration, selection and coverage.
+Google, Outlook and DAV calendars/contacts, Notion notes, Google Drive/OneDrive files, GitHub repository files, GitHub/Linear issues and Slack channels use named source instances. Enable each source explicitly, authenticate, then run `sync-sources`. Search uses the last complete local snapshot; opening a result checks the current original. See [connector setup](docs/connectors.md) for configuration, selection and coverage. For repository search, choose `repositories` in `setup` or follow the [repository selection example](docs/connectors.md#github-repository-files).
 
 ## Connecting mail
 

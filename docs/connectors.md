@@ -2,7 +2,7 @@
 
 These connectors share explicit synchronization and local keyword search. They need no search models. Add source definitions under `sources`, include only the IDs you want in `enabledSources`, and set `maintenanceEnabled: true`. New sources start disabled. Credentials and authentication caches belong outside the repository.
 
-Run `bun run start source-lists SOURCE_ID` to discover calendars, address books or task lists where supported. Select IDs in `collections` for calendars/address books or `lists` for tasks; omitted means all accessible collections. Run `bun run start sync-sources SOURCE_ID` for connected sources or `sync-tasks SOURCE_ID` for tasks. A library refresh also synchronizes enabled sources. Original reads check the current provider record and detect edits since the saved reference.
+Run `bun run start source-lists SOURCE_ID` to discover calendars, address books, task lists or repositories where supported. Select IDs in `collections` for calendars/address books or `lists` for tasks; omitted means all accessible collections. Repository sources always require an explicit `repositories` selection. Run `bun run start sync-sources SOURCE_ID` for connected sources or `sync-tasks SOURCE_ID` for tasks. A library refresh also synchronizes enabled sources. Original reads check the current provider record and detect edits since the saved reference.
 
 If synchronization fails, search retains the previous complete snapshot and reports the failure. Provider rate limits are reported with retry guidance; rerun synchronization later. Checkpoints and record changes are saved together.
 
@@ -91,6 +91,53 @@ Use `adapter: "issues"`. GitHub's connector is `{"type": "github", "account": "w
 Linear's connector is `{"type": "linear", "account": "work", "token": {"env": "LINEAR_API_KEY"}, "teams": ["TEAM_UUID"]}`. Optional `projects` restricts those teams to selected project UUIDs. Personal API keys use the default `authMode: "api-key"`; an externally refreshed OAuth access token uses `authMode: "oauth"` with read scope. `source-lists SOURCE_ID` lists accessible team IDs. Issues include archived items and comments, with team/project attribution.
 
 Run `sync-sources SOURCE_ID`, then search the source or `all-issues`. `conversation` filters one issue (`owner/repository#123` or `TEAM-123`). Issue and comment updates are polled independently with a timestamp overlap, because editing a comment need not update its parent issue. Complete daily reconciliation removes deleted records and catches moved issues. Saved references open the current issue or comment and enforce the selected repository/team/project.
+
+## GitHub repository files
+
+Choose `repositories` in `bun run start setup`, or add a named source to your private configuration:
+
+```json
+{
+  "enabledSources": ["project-code"],
+  "maintenanceEnabled": true,
+  "sources": {
+    "project-code": {
+      "adapter": "repositories",
+      "connector": {
+        "type": "github",
+        "account": "work",
+        "token": {"file": "/absolute/private/github-token"},
+        "repositories": [
+          "your-org/application",
+          {"name": "your-org/shared-library", "branch": "release/v2"}
+        ]
+      }
+    }
+  }
+}
+```
+
+Use a fine-grained GitHub token with **Contents: read** for the selected repositories. `token` also accepts an environment variable or an existing credential command. Set `connector.apiUrl` to an HTTPS REST base for GitHub Enterprise, such as `https://github.example.com/api/v3`. Keep `account` stable for one account; changing credentials alone preserves references.
+
+To discover repository names first, set `repositories: []`, enable this source, and run `bun run start source-lists project-code`. Discovery lists repositories visible to the authenticated user; it does not select or index them. Copy only the desired `owner/name` values into `repositories`. Empty selection cannot synchronize. You can also enter a known public repository directly, even if it does not appear in your account's list.
+
+A string follows that repository's default branch. An object selects an exact branch, including names containing slashes. Select each repository once per source; use another source ID for another branch or for separate per-repository queries. Repositories need an initial commit on the selected branch. Issues and pull requests remain separate `issues` sources.
+
+```sh
+bun run start sync-sources project-code
+bun run start search '{"queries":[{"source":"project-code","query":"createClient"}]}'
+bun run start search '{"queries":[{"source":"all-repositories","query":"export function","match":"phrase"}]}'
+```
+
+Search matches file paths and content using the same word-prefix and literal-phrase rules as other local sources. It works without a clone, GitHub code-search indexing or search models. `all-repositories` combines repository sources; `all-files` also includes cloud file sources. Optional library indexing adds semantic/hybrid search. Dates are not inferred from the latest repository commit, so repository sources support relevance ordering and no date filter.
+
+Tracked UTF-8 text includes code, configuration, documentation and hidden paths such as `.github/`. Defaults exclude dependency/build folders (`node_modules`, `vendor`, `dist`, `build`, `coverage`, `.git`), minified JavaScript, source maps and package-manager lockfiles. Set `include` and `exclude` alongside `adapter` to replace these glob lists; for example, `"include": ["src/**/*.ts", "README.md", "docs/**"]`. Patterns are relative to the repository root. Books, binary files, symlink targets, submodules and Git LFS contents are excluded. Git LFS pointers are skipped too.
+
+Each file defaults to at most 1 MiB (`maxFileBytes`, configurable up to 8 MiB). Total text defaults to 32 MiB per source (`maxTotalBytes`, up to 48 MiB). Coverage reports skipped files. If a complete snapshot exceeds its total size or request budget, synchronization fails and retains the previous snapshot; narrow the selected paths/repositories or adjust the limits.
+
+Synchronization checks each selected branch head. Unchanged heads reuse the saved snapshot; changed heads read a complete tree and download only new blob revisions. Deletions, renames and force pushes reconcile against that tree. A truncated recursive GitHub tree is expanded through its pinned subtrees before publishing. Commit history is not indexed.
+
+Results link to the file at the observed commit. `read_record` checks the file currently on the selected branch and reports a stale reference if it changed. Unrelated commits and adding another selected repository preserve unchanged file references. After changing repository/path selection, synchronize before searching again. Removed repositories are then excluded from both search and original reads.
 
 ## Slack
 
