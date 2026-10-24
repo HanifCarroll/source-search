@@ -27,6 +27,9 @@
   "trustedDependencies": [
     "node-llama-cpp",
   ],
+  "patchedDependencies": {
+    "@tobilu/qmd@2.8.3": "patches/@tobilu%2Fqmd@2.8.3.patch",
+  },
   "overrides": {
     "@modelcontextprotocol/server": "2.4.0",
     "@simple-git/argv-parser": "2.0.1",

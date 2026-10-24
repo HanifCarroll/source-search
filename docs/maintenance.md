@@ -13,6 +13,8 @@ The optional `scripts/qmd-auto-refresh.py --config /absolute/config.json --state
 
 The existing `scripts/embed-library.mjs` launcher remains an alias for the managed embedding command. Both indexing and embedding use the bundled public QMD SDK. Embedding batches are bounded and already completed documents are reused on the next run.
 
+The pinned QMD dependency has a Bun patch for [slow collection-scoped vector lookups](https://github.com/tobi/qmd/issues/952). It uses one filtered nearest-neighbor query in place of repeated full-index scans, preserving cosine scoring and collection restrictions without rebuilding embeddings. `bun install --frozen-lockfile` applies the patch automatically. When upgrading QMD, remove it once the upstream fix passes `test/qmd-vector.test.ts` and a cold hybrid search on a representative index.
+
 Build the optional macOS helper with `SOURCE_SEARCH_SIGNING_IDENTITY` and `SOURCE_SEARCH_BUNDLE_ID` set to your certificate and reverse-domain identifier. Configure Calendar and Contacts access in macOS privacy settings. The helper uses a private macOS responsibility API; check compatibility when upgrading macOS.
 
 ## Document extraction
