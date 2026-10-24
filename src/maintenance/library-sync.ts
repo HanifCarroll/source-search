@@ -115,7 +115,7 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
    // A complete paginated listing is the deletion reconciliation boundary. Interrupted/failed passes never prune.
    for(let page=0;page<8;page++){
     if(!pending.length){
-     const q={source,query:"",limit:25,excludeSpamTrash:true,...(next?{cursor:next}:{})} as Query;
+     const q={source,query:"",limit:sourceKind(source,c)==='gmail'?100:25,excludeSpamTrash:true,...(next?{cursor:next}:{})} as Query;
      const result=await searchMail(q,execute,{remaining:0,records:new Map()},c);
      if(result.status!=="ok" || result.scan?.exhausted===false && !result.nextCursor)throw Error("Incomplete mail scan; retaining cached records");
      pending=summaries(result.items);next=result.nextCursor;state.pageEnd=!next;
