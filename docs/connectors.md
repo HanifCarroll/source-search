@@ -34,7 +34,7 @@ Each mapping supports these fields:
 | --- | --- |
 | `kind`, `label` | `person` or `project`, and a display name |
 | `identifiers` | Confirmed `{kind,value,source?}` identifiers. People use `email`, `phone` or `person-id`; projects use `project-id` or `repository`. Provider IDs require a source ID. Email/phone identifiers may also be restricted to one source. |
-| `records` | Exact saved references from search/read results. Include `version` to pin a record; omit it to follow that record's current contents. |
+| `records` | Exact saved references from search/read results. Include `version` to pin a record; omit it to follow current contents where the provider supplies a stable identity. |
 | `queries` | Source-specific search inputs, without `cursor` or `limit`. Use the source's existing syntax and filters. Queries find candidates; they do not establish membership. |
 | `people` | For a project, IDs of configured people whose saved records/searches supply background context |
 
@@ -57,6 +57,8 @@ Use your configured source IDs. The optional `entity` selects a project; confirm
 Email matching preserves local-part case, dots and plus tags; domains are case-insensitive. Phone matching requires an international `+` number. Add known aliases explicitly. Shared identifiers are reported as ambiguous. Edit or remove a mapping to reverse it; no source records change. When reassigning a source ID to another account, review its provider IDs and record mappings too.
 
 The result includes cited excerpts, the reason each was retrieved, confirmed links, task fields where present, source coverage, gaps and unread references. `coverage.planComplete` means the configured plan finished, not that all history was searched. Follow each search's `nextCursor` with `search_sources`, open `pending` references with `read_record`, and use each evidence item's `read` input for its full text. Historical task states remain historical. A changed pinned record is reported as stale; search again and review its new version before updating the mapping.
+
+Use saved queries for CASS agent history. Its references are bound to a particular search result; an index refresh can invalidate them even when the conversation still exists. Removing `version` does not remove that query binding. A stale result needs a new search reference.
 
 Each call runs at most eight saved searches, selects at most sixteen entities, and opens up to `limit` unique candidates (default 12, maximum 20). Excerpts and the whole response are bounded; omitted work is reported. For a larger project, narrow the sources or split its saved searches. Use original sources for context; `library` and `documents` can discover original references separately.
 
