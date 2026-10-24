@@ -1,3 +1,4 @@
+import {browserStatus,searchBrowser,readBrowser} from '../sources/browser';
 import {thingsRecords} from '../sources/tasks/things';
 import {taskStatus,searchTasks,readTask} from '../sources/tasks';
 import {bindFocus} from '../domain/content';
@@ -119,6 +120,7 @@ export function createSourceAccess(config: Config, execute: Run = run, bound = f
   for(const id of configuredSourceIds(config)){
     const kind=sourceKind(id,config);
     if(isMail(id,config))adapters[id]=mail(id);
+    else if(/^(firefox|safari)-/.test(kind))adapters[id]={status:()=>browserStatus(config,id),search:q=>searchBrowser(config,q),read:recordOnly(ref=>readBrowser(config,ref))};
     else if(kind==='tasks')adapters[id]={status:()=>taskStatus(config,id),search:q=>searchTasks(config,q),read:recordOnly(ref=>readTask(config,ref))};
     else if(kind==='markdown')adapters[id]=isDailyJournal(config,id)?{status:async()=>({available:true,dailyNotes:(await journalPaths(markdownSettings(config,id).root,markdownSettings(config,id).exclude)).paths.length,filters:['from','to'],coverage:'Daily Markdown journals'}),search:q=>searchJournals(config,q),read:recordOnly(ref=>journalRecord(config,ref))}:notes(id);
     else if(kind==='muesli' || kind==='whatsapp')adapters[id]=database(id);

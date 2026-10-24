@@ -47,7 +47,7 @@ Search/read also accept JSON on stdin. Run `bun run start mcp-config` to print a
 | Task apps (`tasks`) | `connector`: Things, Todoist, TickTick, Apple Reminders, Microsoft To Do, or an app-neutral JSON file; run `sync-tasks` |
 | `chatgpt-archive`, `takeout-archive`, `linkedin-archive`, `twitter-archive` | `paths`: selected export files; enable maintenance and run `rebuild` |
 | Messages (`messages`), WhatsApp (`whatsapp`) and Muesli (`muesli`) | `database`: a local application database and existing OS permissions |
-| Browser metadata (`browser-history`, `browser-bookmarks`, `browser-downloads`) | `profiles`: stable IDs and Chrome, Edge, Brave or other compatible Chromium profile directories; downloads are metadata only |
+| Chromium metadata (`browser-history`, `browser-bookmarks`, `browser-downloads`) | `profiles`: stable IDs and Chrome, Edge, Brave or other compatible Chromium profile directories; downloads are metadata only |
 | Named Gmail accounts (`gmail`) | A compatible `gog` executable and configured account routing |
 | Named JMAP accounts (`jmap`) | Session URL and bearer token or username/password; Fastmail and other JMAP Mail servers |
 | Named IMAP accounts (`imap`) | Server, username, password/app password or OAuth token; TLS or required STARTTLS |
@@ -112,7 +112,7 @@ These source definitions can be added under `sources`, with their IDs also added
 
 Things can [export its SQLite database](https://culturedcode.com/things/support/articles/2982272/). Select `main.sqlite` from that export. Tasks, projects, areas, headings, tags and checklists become searchable after `sync-tasks`; the older JSONL/project export uses `connector.root`. The reader does not require Things to be installed. Existing `things-archive` configurations continue using `rebuild` and keep their references. Calendar and contact exports can come from any application that produces iCalendar or vCard. Floating calendar times use the source timezone, then the global timezone. Contact cards without UIDs use content-based identity; edits to those cards require a new reference.
 
-Keep browser profile IDs stable when reordering or adding profiles. Existing `chrome-*` adapter names remain supported. To retain old numeric browser references when migrating a flat `chromeProfiles` list, set `legacyProfileIds` to its original order, for example `["work", "personal"]`, and keep that list unchanged. These readers support Chromium formats; Firefox and Safari need their own readers.
+Keep browser profile IDs stable when reordering or adding profiles. Existing `chrome-*` adapter names remain supported. To retain old numeric browser references when migrating a flat `chromeProfiles` list, set `legacyProfileIds` to its original order, for example `["work", "personal"]`, and keep that list unchanged. For Firefox, use `firefox-history` or `firefox-bookmarks` with profile folders containing `places.sqlite`. For Safari, use `safari-history` with folders containing `History.db`, or `safari-bookmarks` with the folder containing `Bookmarks.plist` (normally `~/Library/Safari`, expanded to an absolute path). These use the same `profiles` configuration. Safari bookmark decoding requires macOS; history access uses the existing filesystem permissions. Safari bookmarks have no creation date. History readers use live SQLite snapshots and keyset continuation, so they need no separate index. They search retained titles and URLs; they do not fetch page contents.
 
 ### Task apps
 

@@ -97,6 +97,7 @@ export function sourceScope(config:Config,source:string):string {
     messages:["messages"],whatsapp:["whatsapp"],calls:["muesli"],documents:["documentRoots","takeout","mailAccounts","enabledSources"]
   };
   const kind=sourceKind(source,config),definition=config.sources[source];
+  if(definition && /^(firefox|safari)-/.test(kind) && 'profiles' in definition)return createHash('sha256').update(JSON.stringify({adapter:kind,profiles:definition.profiles})).digest('hex');
   if(definition?.adapter==='tasks'){
     const connector=definition.connector;
     if(connector.type==='microsoft-todo')return createHash('sha256').update(JSON.stringify({adapter:kind,connection:{type:connector.type,account:connector.account,lists:connector.lists,oauth:connector.oauth}})).digest('hex');
@@ -132,7 +133,7 @@ export function sourceConfig(c:Config,id:string):Config {
  if(s.adapter==='messages' && s.database)v.messages=s.database;
  if(s.adapter==='things-archive'){if(s.root)v.things=s.root;if(s.database)v.thingsDatabase=s.database;}
  if('paths' in s && s.adapter.endsWith('-archive'))(v as any)[s.adapter.replace('-archive','')]=s.paths || (v as any)[s.adapter.replace('-archive','')];
- if('profiles' in s && s.profiles){v.chromeProfiles=s.profiles.map(p=>p.path);v.chromeProfileIds=s.profiles.map(p=>p.id);v.chromeLegacyProfileIds=s.legacyProfileIds;}
+ if('profiles' in s && s.profiles){v.chromeProfiles=s.profiles.map(p=>p.path);v.chromeProfileIds=s.profiles.map(p=>p.id);v.chromeLegacyProfileIds='legacyProfileIds' in s?s.legacyProfileIds:undefined;}
  if(s.adapter==='calendar'||s.adapter==='contacts'){v.pimHelper=s.helper||v.pimHelper;v.pimLauncher=s.launcher||v.pimLauncher;}
  if(s.adapter==='agent-history'){v.cassData=s.data||v.cassData;v.cassBinary=s.binary||v.cassBinary;}
  if(s.adapter==='vault'){v.qmdRoots=s.roots||v.qmdRoots;v.qmdDatabase=s.database||(id==='vault'?v.qmdDatabase:join(state,'indexes',id+'.sqlite'));}

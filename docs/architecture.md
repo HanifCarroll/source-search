@@ -12,6 +12,7 @@ src/
   sources/
     mail/            Shared mail records, JMAP/IMAP connectors, legacy CLI adapters
     tasks/           Shared task records and app-specific task providers
+    browser/         Firefox/Safari store schemas and shared profile retrieval
     messages/        Messages queries, attributed-body decoding and timestamps
     local/           Journals, local databases, PIM, browser metadata
     archives/        Export indexing, original reads, per-export interpretation
@@ -89,4 +90,4 @@ The macOS helper reads Reminders through EventKit and marks a complete snapshot 
 
 Records and checkpoints commit together after a complete provider pass. Per-source locks serialize writers and recover after process failure. Credentials are resolved at request time and never stored in checkpoints. New task references bind the provider, selected files/projects and account identity, excluding credential references so token rotation preserves saved references. Existing Things archive references retain their original versions. Failed syncs retain records and report their stale status.
 
-Categories describe user-facing data; adapters describe formats and transports. `all-calendars` can combine native macOS events with iCalendar files, `all-contacts` can combine native contacts with vCards, and browser categories span Chromium-compatible profiles. An adapter alias does not claim support for a different storage format. Source IDs remain the stable identity and access boundary.
+Categories describe user-facing data; adapters describe formats and transports. `all-calendars` can combine native macOS events with iCalendar files, `all-contacts` can combine native contacts with vCards, and browser categories span Chromium, Firefox and Safari profiles. Firefox and Safari share profile selection, pagination, current reads and reference validation; their store module owns table schemas, timestamps and bookmark formats. Safari plist decoding uses macOS on bounded bytes without modifying the source. An adapter alias does not claim support for a different storage format. Source IDs remain the stable identity and access boundary.

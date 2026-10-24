@@ -88,6 +88,7 @@ export type TaskSettings=z.infer<typeof taskSettings>;
 export const sourceSettings = z.discriminatedUnion('adapter', [
   z.object({...common, adapter:z.literal('gmail'), ...accountSchema.shape}).strict(),
   z.object({...common, adapter:z.literal('fastmail'), ...accountSchema.shape}).strict(),
+  ...(['firefox-history','firefox-bookmarks','safari-history','safari-bookmarks'] as const).map(adapter=>z.object({...common,adapter:z.literal(adapter),profiles:z.array(profile).min(1).max(20).refine(p=>new Set(p.map(v=>v.id)).size===p.length,'Profile IDs must be unique')}).strict()),
   taskSettings,
   jmapSettings,
   imapSettings,
