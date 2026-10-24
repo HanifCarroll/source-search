@@ -1,4 +1,4 @@
-export const connectedKinds=['calendars','address-books'] as const;
+export const connectedKinds=['calendars','address-books','notes'] as const;
 // Source IDs name configured instances; adapters describe their behavior.
 export const adapterKinds = [...connectedKinds,'firefox-history','firefox-bookmarks','safari-history','safari-bookmarks','tasks','browser-history','browser-bookmarks','browser-downloads','gmail','fastmail','jmap','imap','markdown','muesli','whatsapp','messages','things-archive','chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive','calendar','contacts','ical','vcard','chrome-history','chrome-bookmarks','chrome-downloads','agent-history','vault','library','documents'] as const;
 export type AdapterKind = typeof adapterKinds[number];

@@ -3,7 +3,7 @@ import {secretSchema,microsoftOAuthSchema,googleAuth,oneCredential} from './auth
 export {secretSchema} from './auth-settings';
 import {z} from 'zod';
 import {isAbsolute} from 'node:path';
-import {adapterKinds, groupIds, sourceKind, sourceCategory} from '../domain/source-catalog';
+import {adapterKinds, connectedKinds, groupIds, sourceKind, sourceCategory} from '../domain/source-catalog';
 import {sourceId} from '../domain/contracts';
 
 const path = z.string().refine(isAbsolute, 'Source paths must be absolute');
@@ -114,13 +114,13 @@ export const sourcesSchema = z.record(sourceId, sourceSettings).default({}).supe
       ctx.addIssue({code:'custom', path:[id], message:'Source ID conflicts with a source group'});
     if(single.includes(setting.adapter as typeof single[number]) && id !== setting.adapter)
       ctx.addIssue({code:'custom', path:[id], message:'This integration uses its standard source ID; label can customize its display name'});
-    if(adapterKinds.includes(id as typeof adapterKinds[number]) && !['tasks','browser-history','browser-bookmarks','browser-downloads'].includes(id) && id !== setting.adapter)
+    if(adapterKinds.includes(id as typeof adapterKinds[number]) && !connectedKinds.includes(id as typeof connectedKinds[number]) && !['tasks','browser-history','browser-bookmarks','browser-downloads'].includes(id) && id !== setting.adapter)
       ctx.addIssue({code:'custom', path:[id], message:'Source ID is reserved for another integration'});
   }
 });
 export function sourceGroups(config:{sources:Record<string,SourceSettings>; enabledSources:string[]}) {
   const names = [...new Set([...Object.keys(config.sources), ...config.enabledSources])];
-  const notes = names.filter(id => sourceKind(id, config) === 'markdown');
+  const notes = names.filter(id => ['markdown','notes'].includes(sourceKind(id, config)));
   return {
     'all-tasks':names.filter(id=>sourceCategory(id,config)==='tasks'),
     'all-browser-history':names.filter(id=>sourceCategory(id,config)==='browser-history'),

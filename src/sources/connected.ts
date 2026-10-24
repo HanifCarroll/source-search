@@ -4,6 +4,7 @@ import {providerHttp} from '../platform/http';
 import {scopedProvider,snapshotStore} from './sync/cache';
 import {googleCalendarProvider,googleContactsProvider} from './pim/google';
 import {microsoftCalendarProvider,microsoftContactsProvider} from './pim/microsoft';
+import {notionProvider} from './notes/notion';
 import {davProvider} from './pim/dav';
 import {graphOrigin,graphHeaders} from './sync/graph';
 import {fail} from '../domain/identity';
@@ -14,8 +15,10 @@ import type {Query,Ref} from '../domain/contracts';
 // shared snapshot interface, regardless of the app behind a source category.
 export function connectedProvider(c:Config,source:string):SourceProvider{
   requireSource(c,source);const s=c.sources[source];
+  const bind=(p:SourceProvider)=>scopedProvider(p,sourceScope(c,source));
+  if(s?.adapter==='notes')return bind(notionProvider(source,s.connector,providerHttp('https://api.notion.com/v1',{token:s.connector.token,minIntervalMs:350,headers:{'Notion-Version':'2026-03-11'}}).json));
   if(s?.adapter!=='calendars'&&s?.adapter!=='address-books')fail('SOURCE_NOT_CONFIGURED','Configure a connected source');
-  const connector=s.connector,bind=(p:SourceProvider)=>scopedProvider(p,sourceScope(c,source));
+  const connector=s.connector;
   if(connector.type==='caldav'||connector.type==='carddav')return bind(davProvider(source,connector,s.adapter==='calendars'?s.window:{pastDays:730,futureDays:365}));
   if(connector.type==='google'){
     const http=providerHttp(s.adapter==='calendars'?'https://www.googleapis.com/calendar/v3':'https://people.googleapis.com/v1',{token:sourceToken(c,source)}).json;

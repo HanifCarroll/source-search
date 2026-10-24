@@ -12,4 +12,6 @@ export const calendarSettings=z.object({adapter:z.literal('calendars'),label:z.s
 export const contactSettings=z.object({adapter:z.literal('address-books'),label:z.string().max(120).optional(),connector:z.discriminatedUnion('type',[z.object({type:z.literal('google'),account,...googleAuth}).strict().refine(oneCredential,'Select Google OAuth or an external token'),microsoft,carddav])}).strict();
 export type CalendarSettings=z.infer<typeof calendarSettings>;
 export type ContactSettings=z.infer<typeof contactSettings>;
-export const connectedSettings=[calendarSettings,contactSettings] as const;
+const notionSelection=z.array(z.uuid()).max(100).default([]);
+export const noteSettings=z.object({adapter:z.literal('notes'),label:z.string().max(120).optional(),connector:z.object({type:z.literal('notion'),account,token:secretSchema,pages:notionSelection,dataSources:notionSelection}).strict().refine(v=>v.pages.length+v.dataSources.length>0,'Select Notion pages or data sources')}).strict();
+export const connectedSettings=[calendarSettings,contactSettings,noteSettings] as const;

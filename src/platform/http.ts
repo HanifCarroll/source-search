@@ -3,11 +3,11 @@ import {readSecret} from './credentials';
 import {fail} from '../domain/identity';
 
 export type HttpRead=(path:string,body?:Record<string,unknown>)=>Promise<unknown>;
-type Options={token?:Secret|(()=>Promise<string>);headers?:Record<string,string>;encoding?:'json'|'form';fetch?:(url:string|URL,init?:RequestInit)=>Promise<Response>;maxRequests?:number;timeoutMs?:number};
+type Options={token?:Secret|(()=>Promise<string>);headers?:Record<string,string>;encoding?:'json'|'form';fetch?:(url:string|URL,init?:RequestInit)=>Promise<Response>;maxRequests?:number;timeoutMs?:number;minIntervalMs?:number};
 // Providers choose fixed read endpoints. A returned next link is checked at its
 // collection as well as here at the origin; redirects cannot forward tokens.
 export function providerHttp(origin:string,options:Options={}){
-  const base=new URL(origin),deadline=Date.now()+(options.timeoutMs||600000);let requests=0;
+  const base=new URL(origin),deadline=Date.now()+(options.timeoutMs||600000);let requests=0,lastRequest=0;
   async function request(path:string,body?:Record<string,unknown>,asText=false){
     if(!path.startsWith('/')||path.startsWith('//'))fail('INVALID_PROVIDER_RESPONSE','Expected a provider-relative path');
     const url=new URL(origin.replace(/\/$/,'')+path);
@@ -16,6 +16,7 @@ export function providerHttp(origin:string,options:Options={}){
     const token=options.token&&(typeof options.token==='function'?await options.token():await readSecret(options.token));
     const encoding=options.encoding||'json';
     const encoded=body?(encoding==='form'?new URLSearchParams(Object.entries(body).map(([k,v])=>[k,typeof v==='string'?v:JSON.stringify(v)])):JSON.stringify(body)):undefined;
+    const pause=(options.minIntervalMs||0)-(Date.now()-lastRequest);if(pause>0)await new Promise(resolve=>setTimeout(resolve,pause));lastRequest=Date.now();
     let response:Response;
     try{response=await (options.fetch||fetch)(url,{method:body?'POST':'GET',redirect:'error',signal:AbortSignal.timeout(Math.max(1,Math.min(30000,deadline-Date.now()))),
       headers:{Accept:asText?'text/plain':'application/json',...(token?{Authorization:'Bearer '+token}:{}),...options.headers,...(body?{'Content-Type':encoding==='form'?'application/x-www-form-urlencoded':'application/json'}:{})},body:encoded});}
