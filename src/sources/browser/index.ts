@@ -46,7 +46,7 @@ export async function browserStatus(c:Config,source:string){
 export async function searchBrowser(c:Config,q:Query):Promise<Page>{
   const s=settings(c,q.source);
   if(q.conversation)fail('UNSUPPORTED_FILTER','Browser metadata has no conversation filter');
-  if(s.bookmarks){if(s.browser==='safari'&&(q.from||q.to))fail('UNSUPPORTED_FILTER','Safari bookmarks have no creation timestamp');return recordPage(await bookmarks(c,q.source),q);}
+  if(s.bookmarks){if(s.browser==='safari'&&(q.from||q.to||q.sort&&q.sort!=='relevance'))fail('UNSUPPORTED_FILTER','Safari bookmarks have no creation timestamp');return recordPage(await bookmarks(c,q.source),q);}
   const key=queryKey(q)+sourceScope(c,q.source),raw=position(q.cursor,key);let state:{profile:number;cursor?:string}={profile:0};
   if(raw!==undefined){try{state=JSON.parse(String(raw));if(!Number.isInteger(state.profile)||state.profile<0||state.profile>=s.profiles.length||state.cursor!==undefined&&typeof state.cursor!=='string')throw Error();}catch{fail('INVALID_CURSOR','Invalid browser profile continuation');}}
   const profile=s.profiles[state.profile]!,store=stores[s.browser],snap=await createSnapshot(await contained(profile.path,store.file));

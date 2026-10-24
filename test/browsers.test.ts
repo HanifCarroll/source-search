@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {configSchema} from '../src/platform/config';
 import {createRuntime} from '../src/application/runtime';
 import {safariBookmarks} from '../src/sources/browser/stores';
+import {build,buildBinary} from 'plist';
 
 async function temporary(fn:(root:string)=>Promise<void>){const root=await mkdtemp(join(tmpdir(),'ss-browsers-'));try{await fn(root);}finally{await rm(root,{recursive:true,force:true});}}
 test('Firefox and Safari retain native visit identities, paginate profiles, filter dates and read current originals',()=>temporary(async root=>{
@@ -41,16 +42,18 @@ test('Safari bookmark trees retain UUIDs and reject duplicate or malformed ident
   for(const tree of [{Children:[leaf,leaf]},{Children:[{...leaf,WebBookmarkUUID:undefined}]},{Children:'bad'}])expect(()=>safariBookmarks(tree)).toThrow();
 });
 
-test('Safari XML and binary bookmarks use the native decoder without changing their files',()=>temporary(async root=>{
-  if(process.platform!=='darwin')return;
+test('Safari XML and binary bookmarks preserve dates and binary metadata without changing their files',()=>temporary(async root=>{
   const file=join(root,'Bookmarks.plist');
-  await writeFile(file,'<?xml version="1.0"?><plist version="1.0"><dict><key>Children</key><array><dict><key>WebBookmarkType</key><string>WebBookmarkTypeLeaf</string><key>WebBookmarkUUID</key><string>saved-one</string><key>URLString</key><string>https://example.test</string><key>URIDictionary</key><dict><key>title</key><string>Invented bookmark</string></dict></dict></array></dict></plist>');
+  const tree={Children:[{WebBookmarkType:'WebBookmarkTypeLeaf',WebBookmarkUUID:'saved-one',URLString:'https://example.test',URIDictionary:{title:'Invented bookmark'},ReadingList:{DateAdded:new Date('2026-01-01T00:00:00Z')},Sync:{ServerData:Buffer.from('invented cloud metadata')}}]};
   const c=configSchema.parse({enabledSources:['saved'],sources:{saved:{adapter:'safari-bookmarks',profiles:[{id:'personal',path:root}]}}});
   for(const binary of [false,true]){
-    if(binary){const child=Bun.spawn(['/usr/bin/plutil','-convert','binary1',file],{stdout:'ignore',stderr:'ignore'});expect(await child.exited).toBe(0);}
+    await writeFile(file,binary?buildBinary(tree):build(tree));
+    if(binary&&process.platform==='darwin'){const child=Bun.spawn(['/usr/bin/plutil','-convert','binary1',file],{stdout:'ignore',stderr:'ignore'});expect(await child.exited).toBe(0);}
     const before=await Bun.file(file).arrayBuffer(),r=createRuntime(c),page=(await r.search_sources({queries:[{source:'saved',query:'invented'}]})).results[0]!;
     expect(page.items).toHaveLength(1);expect((await r.read_record({ref:page.items[0]!.ref})).record.body).toContain('https://example.test');
     expect(await Bun.file(file).arrayBuffer()).toEqual(before);
     expect((await r.search_sources({queries:[{source:'saved',query:'',from:'2026-01-01T00:00:00Z'}]})).results[0]!.error?.code).toBe('UNSUPPORTED_FILTER');
+    expect((await r.search_sources({queries:[{source:'saved',query:'',sort:'newest'}]})).results[0]!.error?.code).toBe('UNSUPPORTED_FILTER');
+    expect((await r.list_sources()).sources[0]!.capabilities.sort).toEqual(['relevance']);
   }
 }));

@@ -211,7 +211,10 @@ function openCopiedDatabase(path: string): {
 } {
   let database: Database | undefined;
   try {
-    database = new Database(path, { readonly: true, strict: true, safeIntegers: true });
+    // This is the disposable copy, never the source. SQLite must be able to
+    // recreate absent WAL/SHM sidecars for a cleanly closed WAL database.
+    // query_only below still rejects all application writes to the snapshot.
+    database = new Database(path, { readwrite: true, strict: true, safeIntegers: true });
     database.run("PRAGMA query_only = ON");
     database.run("PRAGMA busy_timeout = 0");
     const queryOnly = numberValue(firstPragmaValue(database, "query_only"));

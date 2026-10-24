@@ -59,3 +59,19 @@ test('shared SQLite snapshots include WAL data, remain stable, reject writes and
   expect(original.query('SELECT value FROM entries').all()).toEqual([{value:'first'},{value:'second'}]);
  }finally{await snapshot?.close();original.close();await rm(root,{recursive:true,force:true});}
 });
+
+test('closed WAL databases can be read without creating sidecars beside the source',async()=>{
+ const {Database}=await import('bun:sqlite');const {createSnapshot}=await import('../src/platform/sqlite');
+ const {readFile,readdir}=await import('node:fs/promises');
+ const root=await mkdtemp(join(tmpdir(),'ss-closed-wal-')),path=join(root,'source.sqlite');
+ try{
+  const db=new Database(path);db.exec("PRAGMA journal_mode=WAL; CREATE TABLE entries(value TEXT); INSERT INTO entries VALUES('retained'); PRAGMA wal_checkpoint(TRUNCATE);");db.close();
+  await rm(path+'-wal',{force:true});await rm(path+'-shm',{force:true});
+  const before=await readFile(path);expect(await readdir(root)).toEqual(['source.sqlite']);
+  const snapshot=await createSnapshot(path);try{
+   expect(snapshot.database.query('SELECT value FROM entries').all()).toEqual([{value:'retained'}]);
+   expect(()=>snapshot.database.exec("INSERT INTO entries VALUES('forbidden')")).toThrow();
+  }finally{await snapshot.close();}
+  expect(await readdir(root)).toEqual(['source.sqlite']);expect(await readFile(path)).toEqual(before);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
