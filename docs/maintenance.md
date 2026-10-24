@@ -15,6 +15,34 @@ The existing `scripts/embed-library.mjs` launcher remains an alias for the manag
 
 The pinned QMD dependency has a Bun patch for [slow collection-scoped vector lookups](https://github.com/tobi/qmd/issues/952) and unnecessary cache clearing on unchanged updates. It shares nearest-neighbor work across selected collections and retrieves chunk metadata through its primary key. An unfiltered lookup is accepted only when its entire candidate window belongs to the selected sources; otherwise the query is repeated with an exact source filter. Crowded or tied chunk boundaries fall back to per-collection retrieval. Models, candidate counts and ranking stay unchanged. No-op refreshes preserve inference caches. `bun install --frozen-lockfile` applies the patch automatically. When upgrading QMD, remove it once upstream behavior passes the vector and incremental tests and the search benchmark.
 
+## Managed search indexes
+
+Direct Markdown search works immediately. For ranked discovery across a folder, add a `vault` source and enable explicit maintenance:
+
+```json
+{
+  "enabledSources": ["research"],
+  "maintenanceEnabled": true,
+  "sources": {
+    "research": {"adapter": "vault", "roots": {"notes": "/absolute/path/to/notes"}}
+  }
+}
+```
+
+```sh
+bun run start index --source research
+bun run start search '{"queries":[{"source":"research","query":"example","mode":"lexical"}]}'
+# Optional local semantic/hybrid search:
+bun run start models download
+bun run start index --source research --embed
+```
+
+`models download` downloads the embedding, expansion and reranking models (several GB) and saves their paths to private configuration. Existing installations can instead set `searchModels: {"embed":"/path/model.gguf","rerank":"/path/model.gguf","generate":"/path/model.gguf"}` to reuse installed models. The bundled native engine uses a supported GPU or CPU; its installation may need Node 20+ or native build tools on platforms without a compatible prebuilt binary. Search does not download models.
+
+On macOS, semantic and hybrid search also require Homebrew SQLite (`brew install sqlite`) so Bun can load the vector extension. `doctor` checks for it. Direct readers and keyword search work without this dependency.
+
+For a derived library of mail, messages and selected archives, enable `libraryEnabled`, `maintenanceEnabled`, the `library` source and each contributing source, then run `bun run start index --library --embed`. The library works without a vault. Mail backfills may need several runs; `sources` reports progress. Omit `--embed` for keyword-only indexing. Changing the embedding model requires rebuilding embeddings; old vectors are not interchangeable.
+
 ## Incremental updates
 
 | Sources | Update behavior |
@@ -63,7 +91,15 @@ Build the optional macOS helper with `SOURCE_SEARCH_SIGNING_IDENTITY` and `SOURC
 
 To use document extraction, enable `maintenanceEnabled`, `libraryEnabled`, and the `library` and `documents` sources. Select `documentRoots` and an absolute `extractorPython` path in local configuration. Mail attachments additionally require the corresponding mail source/account; Takeout attachments require the selected, enabled Takeout source.
 
-Create a separate Python environment and install `scripts/extraction-requirements.txt`. Extraction reads local documents and downloads supported mail attachments through the configured native JMAP/IMAP connector or legacy provider tool. Native downloads enforce the current account and folder selection, check the parent record version, and cap each attachment at 25 MiB and each message at 250 MiB. Books stay excluded.
+Create a separate Python environment and install the locked extraction dependencies:
+
+```sh
+python3 -m venv "$HOME/.local/share/source-search/extract-env"
+"$HOME/.local/share/source-search/extract-env/bin/python" -m pip install \
+  --require-hashes -r scripts/extraction-requirements.txt
+```
+
+Set `extractorPython` to that environment’s absolute Python path. Reuse an existing extraction environment when updating. Extraction reads local documents and downloads supported mail attachments through the configured native JMAP/IMAP connector or legacy provider tool. Native downloads enforce the current account and folder selection, check the parent record version, and cap each attachment at 25 MiB and each message at 250 MiB. Books stay excluded.
 
 PDF text extraction and rendering use pypdfium2/PDFium; Pillow handles rendered OCR images.
 
@@ -74,3 +110,7 @@ Each file runs in a separate worker with a wall-clock timeout, bounded output an
 Configured folders omit hidden files, links, CSV/TSV tables and common dependency folders. Supported mail attachments may include tables. Extraction skips files uploaded to ChatGPT exports.
 
 Book formats (EPUB, MOBI, AZW/AZW3, FB2 and DJVU) are excluded, including previously cached entries. The PDF page limit also excludes long PDFs; it is a work limit, not a reliable way to identify every book. Files with no detected text are recorded as skipped, while converter errors remain retryable failures.
+
+## Cache retention
+
+Caches store retrieved text, attachments and previews. Disabling a source stops future access while retaining its cache. To remove cached data, stop maintenance and run `bun run start purge-cache` to preview the cleanup, then add `--apply`. The command handles the default managed cache; custom locations and backups need separate cleanup.

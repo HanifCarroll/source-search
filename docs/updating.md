@@ -64,7 +64,7 @@ Parser upgrades also refresh WhatsApp polls/contact cards and affected export pr
 Existing source IDs and flat configuration fields remain supported. For new settings, put repeatable integrations under `sources` and keep the same IDs during migration:
 
 - Move each `mailAccounts` entry to `sources.<same-id>` and add `adapter: "gmail"` or `"fastmail"`.
-- Move note paths to Markdown source definitions. Copy the filename pattern, date fields, content label and timezone you actually use. See the README's daily-journal settings. Legacy voice/call notes used `content: "transcript"`, `reviewed: true`, and date fields `["source_started_at", "date"]`.
+- Move note paths to Markdown source definitions. Copy the filename pattern, date fields, content label and timezone you actually use. See the [Markdown settings](connectors.md#markdown-folders). Legacy voice/call notes used `content: "transcript"`, `reviewed: true`, and date fields `["source_started_at", "date"]`.
 - Move `muesli` to `sources.calls` with `adapter: "muesli"` and `database`; move `whatsapp` to `sources.whatsapp` similarly.
 - Move archive file lists to `sources.<id>.paths`, Things exports to `root` or `database`, Messages to `database`, CASS to `data`/`binary`, and vault collections to `roots`/`database`. Preserve IDs and selected locations.
 - Move browser profiles to `profiles: [{"id":"work","path":"/profile/path"}]`; retain the original numeric order in `legacyProfileIds`. New references use profile IDs.
@@ -76,7 +76,7 @@ For media extraction without adjacent transcripts, choose `transcriptionBackend`
 
 ## Native mail connectors
 
-New sources can use `jmap` or `imap` directly; see the README for authentication and search behavior. Existing Gmail and mailbridge configurations continue working.
+New sources can use `jmap` or `imap` directly; see [mail setup](connectors.md#mail) for authentication and search behavior. Existing Gmail and mailbridge configurations continue working.
 
 For an existing Fastmail source, keep its source ID, account, email and aliases, and select `adapter: "jmap"`, the provider session URL, `accountId` and private authentication. Set `recordFormat: "mailbridge-v1"` to retain the original body and metadata format used by saved references. New JMAP sources default to `complete`, which includes every text body part, CC and the message header ID.
 

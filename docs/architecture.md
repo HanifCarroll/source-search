@@ -65,7 +65,20 @@ Original files, account configuration, source samples, model files, and generate
 
 ## Verification
 
-Run `bun run check`, `bun test`, `bun run demo`, and `bun run test:python` in an environment with the locked extraction dependencies. Tests use invented records. Live source checks are a separate installation audit and their receipts stay private. The GitHub workflow runs tests on Linux and macOS.
+For an existing installation, see [Updating an installation](updating.md) before pulling new code or changing dependencies.
+
+```sh
+bun run check
+bun test
+python -m unittest discover -s test -p '*_test.py'
+bun audit
+# Independent-server test (Docker and openssl):
+bun test/imap-server.integration.ts
+```
+
+Install the [extraction requirements](maintenance.md#document-extraction) in a dedicated virtual environment before running Python extraction tests. Tests use invented records and mocked providers. CI checks Linux and macOS. Keep live installation checks and their receipts outside Git. Before publishing, review the diff, run the demo and dependency audit, and scan Git history for secrets.
+
+Start changes in the owning module; top-level entry points stay stable for installed clients.
 
 Native database projections carry a version as well as a source fingerprint. Changing how stored text is interpreted therefore refreshes unchanged databases too. WhatsApp reads include stored photo, video and GIF captions; filenames and link-preview titles are not treated as authored captions. Coverage counts distinguish entries with searchable text from entries without supported text in the local store. Library embedding warnings apply only to the selected sources.
 
