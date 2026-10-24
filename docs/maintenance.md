@@ -156,7 +156,7 @@ An outcome is a statement unless it includes `verification: {method, observation
 bun run start memory-export /absolute/private/backup/memory.json
 ```
 
-Export includes all revisions, retractions, citations and retry receipts. The destination must be new; its directory must be private (0700). The export is private (0600), checksummed and limited to 60 MiB of revision data. For a larger store use SQLite's supported backup tooling. Avoid copying an active database file without a consistent SQLite snapshot.
+Export includes all revisions, retractions, citations and retry receipts. The destination must be new; its directory must be private (0700). The export is private (0600), checksummed and limited to 60 MiB of revision data and 100,000 revisions. For a larger store use SQLite's supported backup tooling. Avoid copying an active database file without a consistent SQLite snapshot.
 
 To recover, set `memoryRoot` in the destination config to an empty private location, then run:
 
@@ -168,7 +168,7 @@ Restore validates the format, checksum and revision history, preserves IDs and r
 
 ### Resuming changes
 
-Call `list_changes` with `{"feed":"memory"}` or `{"feed":"sources","sources":["todo","agenda"]}`. Save the returned `cursor` **after** processing that page, including empty pages. Pass it in the next request; drain pages while `hasMore` is true. A consumer interrupted before saving its cursor may see events again, so use feed identity plus sequence (or memory ID/revision) to deduplicate its own work.
+Call `list_changes` with `{"feed":"memory"}` or `{"feed":"sources","sources":["todo","agenda"]}`. Save the returned `cursor` **after** processing that page, including empty pages. Pass it in the next request; drain pages while `hasMore` is true. A consumer interrupted before saving its cursor may see events again, so use the returned `streamId` plus event `sequence` (or memory ID/revision) to deduplicate its own work.
 
 The memory feed retains every deliberate revision. The source feed covers adapters loaded by `sync-sources`: tasks, calendars, address books, notes, files, issues, chat and repositories. Read `coverage` for sync freshness/failures and sources without tracking. Direct notes/mail/messages, native PIM, archives, browsers, CASS and QMD do not publish source events in this phase. Their current read/search behavior is unchanged.
 

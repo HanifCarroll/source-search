@@ -77,8 +77,10 @@ test('pagination stays stable while memories change and the feed resumes after a
   await rt.write_memory({...request('one revised'),id:a.id,expectedRevision:1});
   expect((await rt.list_memories({limit:1,cursor:page.nextCursor})).items[0]!.text).toBe('one');
   const first=await rt.list_changes({feed:'memory',cursor:empty.cursor,limit:1}) as any;
+  expect(empty.streamId).toBeNull();expect(first.streamId).toEqual(expect.any(String));
   expect(first.items[0].id).toBe(a.id);expect(first.hasMore).toBe(true);
   const second=await createRuntime(c).list_changes({feed:'memory',cursor:first.cursor,limit:2}) as any;
+  expect(second.streamId).toBe(first.streamId);
   expect(second.items.map((i:any)=>i.sequence)).toEqual([2,3]);expect(second.hasMore).toBe(false);
   expect((await rt.list_changes({feed:'memory',cursor:second.cursor}) as any).items).toEqual([]);
   await rm(c.memoryRoot,{recursive:true});await expect(rt.list_changes({feed:'memory',cursor:second.cursor})).rejects.toMatchObject({code:'FEED_RESET'});
@@ -106,6 +108,7 @@ test('checked portable exports preserve history and retry receipts, reject corru
   expect((await restored.write_memory(input)).replayed).toBe(true);
   await expect(restoreMemory(other,path)).rejects.toMatchObject({code:'MEMORY_NOT_EMPTY'});
   const feed=await rt.list_changes({feed:'memory'}) as any;
+  expect((await restored.list_changes({feed:'memory'}) as any).streamId).not.toBe(feed.streamId);
   await expect(restored.list_changes({feed:'memory',cursor:feed.cursor})).rejects.toMatchObject({code:'FEED_RESET'});
   const backup=JSON.parse(await readFile(path,'utf8'));backup.entries[0].content.text='corrupted';await writeFile(path,JSON.stringify(backup));
   await expect(restoreMemory(join(root,'bad'),path)).rejects.toMatchObject({code:'INVALID_BACKUP'});

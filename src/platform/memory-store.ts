@@ -88,19 +88,19 @@ export function memoryStore(root:string){
   }
   async function changes(token:string|undefined,limit:number){
     const db=await connect();
-    if(!db){changePosition(token,'memory',null,0);return {items:[] as MemoryRevision[],cursor:changeCursor('memory',null,0),hasMore:false};}
+    if(!db){changePosition(token,'memory',null,0);return {streamId:null,items:[] as MemoryRevision[],cursor:changeCursor('memory',null,0),hasMore:false};}
     try{return db.transaction(()=>{
       const top=high(db),identity=epoch(db),after=changePosition(token,'memory',identity,top);
       const rows=db.query('SELECT data FROM revisions WHERE sequence>? ORDER BY sequence LIMIT ?').all(after,limit+1) as Row[],hasMore=rows.length>limit;
       const items=rows.slice(0,limit).map(r=>parse(r)!);
-      return {items,cursor:changeCursor('memory',identity,hasMore?items.at(-1)!.sequence:top),hasMore};
+      return {streamId:identity,items,cursor:changeCursor('memory',identity,hasMore?items.at(-1)!.sequence:top),hasMore};
     })();}finally{db.close();}
   }
   async function exportData(){
     const db=await connect();if(!db)return {format:'source-search-memory' as const,version:1 as const,entries:[] as MemoryRevision[]};
     try{return db.transaction(()=>{
-      const bytes=(db.query('SELECT COALESCE(SUM(length(CAST(data AS BLOB))),0) AS n FROM revisions').get() as {n:number}).n;
-      if(bytes>60*1024*1024)fail('EXPORT_LIMIT','Memory export exceeds 60 MiB; back up the database using SQLite backup tooling');
+      const size=db.query('SELECT COUNT(*) AS count,COALESCE(SUM(length(CAST(data AS BLOB))),0) AS bytes FROM revisions').get() as {count:number;bytes:number};
+      if(size.bytes>60*1024*1024||size.count>100000)fail('EXPORT_LIMIT','Memory export exceeds 60 MiB or 100,000 revisions; back up the database using SQLite backup tooling');
       return {format:'source-search-memory' as const,version:1 as const,entries:(db.query('SELECT data FROM revisions ORDER BY sequence').all() as Row[]).map(r=>parse(r)!)};
     })();}finally{db.close();}
   }

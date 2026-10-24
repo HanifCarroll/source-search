@@ -23,7 +23,8 @@ export async function restoreMemory(root:string,path:string){
   const latest=new Map<string,typeof data.entries[number]>(),operations=new Set<string>();
   for(let i=0;i<data.entries.length;i++){
     const r=data.entries[i]!,old=latest.get(r.id),corrects=r.content.corrects;
-    if(r.sequence!==i+1||r.revision!==(old?.revision||0)+1||operations.has(r.operationId)||old&&r.createdAt!==old.createdAt||r.updatedAt<r.createdAt||old&&r.updatedAt<old.updatedAt)fail('INVALID_BACKUP','Revision history is inconsistent');
+    // Revision order is authoritative even if the host clock moved backwards.
+    if(r.sequence!==i+1||r.revision!==(old?.revision||0)+1||operations.has(r.operationId)||old&&r.createdAt!==old.createdAt)fail('INVALID_BACKUP','Revision history is inconsistent');
     if(corrects&&(!latest.has(corrects.id)||latest.get(corrects.id)!.revision<corrects.revision))fail('INVALID_BACKUP','Correction target is missing from earlier history');
     if(stableJson(r.content.evidence)!==stableJson(r.evidence.map(({checkedAt,scope,...e})=>e)))fail('INVALID_BACKUP','Evidence does not match the stored content');
     if(Buffer.byteLength(JSON.stringify(r))>24000)fail('INVALID_BACKUP','Revision exceeds the memory size limit');

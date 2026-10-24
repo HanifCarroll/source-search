@@ -113,7 +113,7 @@ export function recordStore(path:string){
   }
   async function changes(selection:Record<string,string>,token:string|undefined,limit:number){
     const key=hash(stableJson(selection)),db=await connect();
-    const empty=()=>{changePosition(token,key,null,0);return {items:[] as Change[],cursor:changeCursor(key,null,0),hasMore:false,coverage:Object.keys(selection).map(source=>({source,state:'needs-sync'}))};};
+    const empty=()=>{changePosition(token,key,null,0);return {streamId:null,items:[] as Change[],cursor:changeCursor(key,null,0),hasMore:false,coverage:Object.keys(selection).map(source=>({source,state:'needs-sync'}))};};
     if(!db)return empty();
     try{return db.transaction(()=>{
       if((db.query('PRAGMA user_version').get() as {user_version:number}).user_version===1)return empty();
@@ -126,7 +126,7 @@ export function recordStore(path:string){
         const row=db.query('SELECT scope,data FROM snapshots WHERE source=?').get(source) as StateRow|null;
         return row&&row.scope===scope?{source,state:'tracked',coverage:snapshotCoverage(JSON.parse(row.data))}:{source,state:'needs-sync'};
       });
-      return {items,cursor:changeCursor(key,identity,hasMore?items.at(-1)!.sequence:high),hasMore,coverage};
+      return {streamId:identity,items,cursor:changeCursor(key,identity,hasMore?items.at(-1)!.sequence:high),hasMore,coverage};
     })();}finally{db.close();}
   }
   return {path,read,write,failure,changes};

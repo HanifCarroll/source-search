@@ -17,11 +17,13 @@ const saved=(ids=['a','b']):SourceCache=>({version:1,scope:'scope',records:ids.m
 test('source change feed begins with a baseline and records additions, updates and removals exactly once',()=>temp(async root=>{
   const store=recordStore(join(root,'records.sqlite')),selection={tasks:'scope'},start=await store.changes(selection,undefined,10);
   await store.write('tasks',saved());const first=await store.changes(selection,start.cursor,10);
+  expect(start.streamId).toBeNull();expect(first.streamId).toEqual(expect.any(String));
   expect(first.items.map(r=>r.kind)).toEqual(['reset']);
   const next={...saved(),checkedAt:'2026-10-02T00:00:00Z',records:[record('a','Changed'),record('c')]};
   await store.write('tasks',next);
   const page=await store.changes(selection,first.cursor,1);expect(page.hasMore).toBe(true);
   const rest=await store.changes(selection,page.cursor,10);
+  expect(rest.streamId).toBe(first.streamId);
   expect([...page.items,...rest.items].map(r=>[r.kind,r.ref?.id])).toEqual([['updated','a'],['added','c'],['removed','b']]);
   await store.write('tasks',{...next,records:next.records.toReversed().map(r=>({...r,observedAt:'2026-10-03T00:00:00Z'}))});
   expect((await store.changes(selection,rest.cursor,10)).items).toEqual([]);
