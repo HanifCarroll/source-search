@@ -1,7 +1,7 @@
 import {test,expect} from 'bun:test';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {join,dirname} from 'node:path';
 import {googleCalendarProvider,googleContactsProvider} from '../src/sources/pim/google';
 import {microsoftCalendarProvider,microsoftContactsProvider} from '../src/sources/pim/microsoft';
 import {calendarWindow,timestamp} from '../src/sources/pim/model';
@@ -10,10 +10,64 @@ import {configSchema,sourceScope} from '../src/platform/config';
 import {syncSources} from '../src/maintenance/sources';
 import {createRuntime} from '../src/application/runtime';
 import {sourceAuthorization} from '../src/platform/source-auth';
+import {snapshotStore,scopedProvider} from '../src/sources/sync/cache';
+import {privateDirectory,privateJSON} from '../src/platform/storage';
 
 const windowOptions={pastDays:36500,futureDays:36500};
 const event={id:'event',summary:'Invented telescope',start:{date:'2026-10-24'},end:{date:'2026-10-25'}};
 const expired=()=>Object.assign(new Error('Expired'),{code:'SYNC_STATE_EXPIRED'});
+
+test('an alternate Google calendar and Outlook address book migrate, query through MCP and retain incremental originals',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'ss-pim-foundation-'));let client:import('@modelcontextprotocol/sdk/client/index.js').Client|undefined;
+  try{
+    const token={env:'UNUSED_FIXTURE_TOKEN'},c=configSchema.parse({maintenanceEnabled:true,enabledSources:['agenda','people'],libraryRoot:join(root,'cache'),sources:{
+      agenda:{adapter:'calendars',window:windowOptions,connector:{type:'google',account:'invented-calendar',token}},
+      people:{adapter:'address-books',connector:{type:'microsoft',account:'invented-contacts',token}},
+    }});
+    let phase=0;
+    const calendar=googleCalendarProvider('agenda',undefined,windowOptions,async path=>{
+      if(phase===2)throw expired();
+      if(path.startsWith('/users/'))return {items:[{id:'cal',summary:'Research',timeZone:'America/New_York'}]};
+      const current={...event,summary:phase?'Changed telescope':event.summary};
+      return path.endsWith('/events/event')?current:{items:[current],nextSyncToken:String(phase)};
+    });
+    const firstPerson={id:'a',displayName:'Invented Astronomer',emailAddresses:[{address:'astronomer@example.test'}]};
+    const contacts=microsoftContactsProvider('people',undefined,async path=>{
+      if(phase===2)throw expired();
+      if(path==='/me/contactFolders')return {value:[]};
+      if(path.startsWith('/me/contacts?$top='))return {value:[{parentFolderId:'native-default'}]};
+      if(path.endsWith('/contacts/a'))return firstPerson;
+      return {value:phase?[{id:'b','@removed':{reason:'deleted'}}]:[firstPerson,{id:'b',displayName:'Invented Optician'}],'@odata.deltaLink':'https://graph.microsoft.com/v1.0/me/contactFolders/native-default/contacts/delta?$deltatoken='+phase};
+    });
+    const providers={agenda:scopedProvider(calendar,sourceScope(c,'agenda')),people:scopedProvider(contacts,sourceScope(c,'people'))},factory=(_c:unknown,source:string)=>providers[source as keyof typeof providers];
+    const refs=[];
+    for(const source of c.enabledSources){
+      const store=snapshotStore(c,source),snapshot=await factory(c,source).sync();refs.push(snapshot.records[0]!.ref);
+      await privateDirectory(dirname(store.legacyPath));await privateJSON(store.legacyPath,{...snapshot,version:1,scope:sourceScope(c,source),checkedAt:'2026-10-01T00:00:00Z'});
+    }
+    expect((await syncSources(c,undefined,factory)).ok).toBe(true);
+    for(const ref of refs)expect((await snapshotStore(c,ref.source).original(ref,factory(c,ref.source))).ref).toEqual(ref);
+    const path=join(root,'config.json');await writeFile(path,JSON.stringify(c));
+    const {Client}=await import('@modelcontextprotocol/sdk/client/index.js'),{StdioClientTransport}=await import('@modelcontextprotocol/sdk/client/stdio.js');
+    client=new Client({name:'connected-foundation-fixture',version:'1'});
+    await client.connect(new StdioClientTransport({command:process.execPath,args:[join(import.meta.dir,'../src/mcp.ts')],env:{...process.env as Record<string,string>,SOURCE_SEARCH_CONFIG_FILE:path},stderr:'pipe'}));
+    const search=async(query:object)=>JSON.parse(((await client!.callTool({name:'search_sources',arguments:{queries:[query]}})).content as any[])[0].text).results[0];
+    const agenda=await search({source:'all-calendars',query:'',from:'2026-10-24T18:00:00Z',to:'2026-10-25T01:00:00Z'});
+    expect(agenda.totalMatches).toBe(1);expect(agenda.coverage.window).toBeDefined();expect(agenda.items[0].ref).toEqual(refs[0]);
+    const people=await search({source:'all-contacts',query:'',limit:1});expect(people.totalMatches).toBe(2);expect(people.query.sort).toBe('relevance');
+    expect((await search({source:'people',query:'',from:'2026-10-24T00:00:00Z'})).error.code).toBe('UNSUPPORTED_FILTER');
+    await syncSources(c,undefined,factory);
+    expect((await search({source:'people',query:'',limit:1,cursor:people.nextCursor})).items).toHaveLength(1);
+    phase=1;await syncSources(c,undefined,factory);
+    expect((await search({source:'people',query:''})).totalMatches).toBe(1);
+    expect((await search({source:'people',query:'',limit:1,cursor:people.nextCursor})).error.code).toBe('INVALID_CURSOR');
+    await expect(snapshotStore(c,'agenda').original(refs[0]!,providers.agenda)).rejects.toMatchObject({code:'STALE_RECORD'});
+    expect((await snapshotStore(c,'people').original(refs[1]!,providers.people)).ref).toEqual(refs[1]);
+    const before=(await snapshotStore(c,'people').read())!;phase=2;expect((await syncSources(c,undefined,factory)).ok).toBe(false);
+    const retained=await search({source:'people',query:''});expect(retained.totalMatches).toBe(1);expect(retained.coverage.asOf).toBe(before.checkedAt);expect(retained.coverage.lastError.code).toBe('SYNC_STATE_EXPIRED');
+    expect((await createRuntime(c).list_sources()).sources.find(s=>s.source==='people')!.freshness.lastAttemptAt).toBeDefined();
+  }finally{await client?.close();await rm(root,{recursive:true,force:true});}
+});
 
 test('Google calendars paginate empty pages, expand all-day timezone, apply cancellations and recover expired tokens',async()=>{
   let phase=0;const seen:string[]=[];

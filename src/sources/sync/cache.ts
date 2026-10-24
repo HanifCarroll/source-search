@@ -4,7 +4,8 @@ import {sourceScope,requireSource,type Config} from '../../platform/config';
 import {textFile} from '../../platform/source-files';
 import {recordStore} from '../../platform/record-store';
 import {sourceKind} from '../../domain/source-catalog';
-import {recordPage} from '../../domain/pages';
+import {snapshotPage} from '../../domain/snapshot-query';
+import {snapshotCoverage} from '../../domain/snapshots';
 import {assertVersion,fail,hash,stableJson} from '../../domain/identity';
 import type {Query,Ref} from '../../domain/contracts';
 import type {SourceSnapshot,SourceProvider} from './model';
@@ -42,9 +43,9 @@ export function snapshotStore(c:Config,source:string){
     async failure(previous:SourceCache,error:{code:string;message:string},attemptedAt:string){
       await database.failure(source,previous.scope,error,attemptedAt);
     },
-    async status(){const saved=await read();return {available:!!saved,state:saved?.lastError?'error':undefined,records:saved?.records.length,coverage:saved?.coverage,checkedAt:saved?.checkedAt,snapshotAt:saved?.sourceSnapshotAt,historical:!!saved?.sourceSnapshotAt,syncStrategy:saved?.strategy,
+    async status(){const saved=await read();return {available:!!saved,state:saved?.lastError?'error':undefined,records:saved?.records.length,coverage:saved?.coverage,coverageWindow:saved?.coverageWindow,lastAttemptAt:saved?.lastAttemptAt,checkedAt:saved?.checkedAt,snapshotAt:saved?.sourceSnapshotAt,historical:!!saved?.sourceSnapshotAt,syncStrategy:saved?.strategy,
       filters:['from','to','types'],warnings:saved?.warnings||[],...(saved?.lastError?{error:saved.lastError}:!saved?{error:{code:'NEEDS_SYNC',message:`Run source-search ${command} to load the selected source`}}:{})};},
-    async search(q:Query){const saved=await read();if(!saved)fail('NEEDS_SYNC',`Run source-search ${command} before searching this source`);return recordPage(saved.records,q,[...saved.warnings,...(saved.coverageWindow&&((q.from&&Date.parse(q.from)<Date.parse(saved.coverageWindow.from))||(q.to&&Date.parse(q.to)>Date.parse(saved.coverageWindow.to)))?['Snapshot covers '+saved.coverageWindow.from+' to '+saved.coverageWindow.to+'; widen the configured window and sync to search outside it']:[]),...(saved.lastError?['Using the last successful snapshot; latest sync failed: '+saved.lastError.code]:[])]);},
+    async search(q:Query){const saved=await read();if(!saved)fail('NEEDS_SYNC',`Run source-search ${command} before searching this source`);return snapshotPage(saved.records,q,snapshotCoverage(saved),saved.warnings);},
     async original(ref:Ref,provider:SourceProvider){const saved=await read(),record=await provider.read(ref.id,saved?.checkpoint);assertVersion(ref,record.ref.version!);return record;},
   };
 }

@@ -7,7 +7,7 @@ import {configSchema} from '../src/platform/config';
 import {createRuntime} from '../src/application/runtime';
 import {syncTasks} from '../src/maintenance/sources';
 import {taskDueDate} from '../src/domain/task-fields';
-import {taskPage} from '../src/domain/task-query';
+import {snapshotPage} from '../src/domain/snapshot-query';
 import {querySchema} from '../src/domain/contracts';
 import {taskRecord,checkedTask} from '../src/sources/tasks/model';
 import {hash,versioned} from '../src/domain/identity';
@@ -77,9 +77,9 @@ test('unsupported due dates and old unclassified task records cannot produce mis
  const invalid=taskRecord('work','fixture',checkedTask({id:'invalid',title:'Invalid',due:'next Monday'}),'fixture:invalid');
  const old={...good,type:'historical-task',ref:{...good.ref,id:'old'},metadata:{},task:undefined};
  const coverage={kind:'synchronized-snapshot' as const,asOf:'2026-10-24T00:00:00Z',description:'Invented coverage'};
- const page=taskPage([good,invalid,old],querySchema.parse({source:'work',query:'',task:window}),coverage);
+ const page=snapshotPage([good,invalid,old],querySchema.parse({source:'work',query:'',task:window}),coverage);
  expect(page.items.map(r=>r.ref.id)).toEqual(['good']);expect(page.status).toBe('partial');expect(page.totalMatches).toBeUndefined();expect(page.coverage).toMatchObject({unclassifiedTasks:1,invalidDueDates:1});
- expect(taskPage([invalid],querySchema.parse({source:'work',query:'',task:{status:'open'}}),coverage).items).toHaveLength(1);
+ expect(snapshotPage([invalid],querySchema.parse({source:'work',query:'',task:{status:'open'}}),coverage).items).toHaveLength(1);
  // Derived query fields are outside the original identity contract.
  expect(good.ref.version).toBe(versioned({...good,task:undefined}).ref.version);
 });

@@ -5,7 +5,7 @@ import {fail,hash,assertVersion} from '../../domain/identity';
 import type {Config} from '../../platform/config';
 import type {RecordData,Ref,Query} from '../../domain/contracts';
 import {taskDueDate} from '../../domain/task-fields';
-import {taskPage} from '../../domain/task-query';
+import {snapshotPage} from '../../domain/snapshot-query';
 export async function thingsRecords(config: Config) {
   if(config.thingsDatabase)return thingsDatabase(config.thingsDatabase);
   const [tasksText, contextText, infoText] = await Promise.all([
@@ -38,7 +38,7 @@ export async function thingsRecords(config: Config) {
 }
 export async function searchThingsTasks(config:Config,q:Query){
   const snapshot=await thingsRecords(config);
-  return taskPage([...snapshot.records.values()],q,{kind:'historical-archive',asOf:snapshot.info.exportedAt,description:'Tasks in the selected Things export, excluding Trash. Statuses are historical, not current assignments.'});
+  return snapshotPage([...snapshot.records.values()],q,{kind:'historical-archive',asOf:snapshot.info.exportedAt,description:'Tasks in the selected Things export, excluding Trash. Statuses are historical, not current assignments.'});
 }
 export async function readThings(config: Config, ref: Ref) {
   const { records } = await thingsRecords(config), record = records.get(ref.id);

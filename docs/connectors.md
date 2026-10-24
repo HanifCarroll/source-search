@@ -276,6 +276,8 @@ Use the account name configured in `gog`. Set the top-level `gmailBinary` to its
 
 The services below use explicit synchronization and local keyword search, with no search models required. Enable `maintenanceEnabled` and run `sync-sources SOURCE_ID`; Google Tasks uses `sync-tasks SOURCE_ID`. A library refresh also synchronizes enabled sources. Original reads check the current provider record and detect edits since the saved reference.
 
+Search returns `totalMatches` for the selected snapshot before pagination. Its `coverage` reports the last successful sync, any bounded `window`, provider limits and a later failed attempt. Follow `nextCursor` to enumerate all matches. Unchanged refreshes preserve continuation; changed content or coverage requires a fresh search. Counts describe the synchronized selection, not unselected account data.
+
 Use `source-lists SOURCE_ID` to discover collections where supported. Select `collections` for calendars/address books or `lists` for tasks; omitted selection means all accessible collections. Repository sources always require an explicit `repositories` selection.
 
 Failed synchronization retains the previous complete snapshot and reports the failure. Provider rate limits include retry guidance. Connected services allow ten minutes and 10,000 requests per sync by default. Large imports can set `sync: {"timeoutMs": 1800000, "maxRequests": 20000}` alongside `adapter` and `connector`, up to one hour and 100,000 requests. Changing budgets preserves saved references.
@@ -315,7 +317,7 @@ For Outlook, use `type: "microsoft"` and `oauth: {"clientId": "YOUR_APPLICATION_
 
 Either provider accepts `token` instead of `oauth`, using an environment variable, private file, or token command. Supply a current access token with the corresponding read scope. Keep `account` stable for one account and change it when switching accounts; rotating a credential does not invalidate saved references.
 
-Calendar snapshots contain occurrences in the configured window, including recurring exceptions and all-day events. The window advances daily. Search outside it reports the coverage limit; widen it and synchronize to include older or future events. Google uses sync tokens. Outlook uses delta queries for its primary calendar and full bounded views for other calendars. Contacts use Google sync tokens or Outlook folder deltas. Expired tokens trigger a complete replacement scan. Contact search has no occurrence-date filters.
+Calendar snapshots contain occurrences in the configured window, including recurring exceptions and all-day events. `from`/`to` match events overlapping the requested range: an event ending exactly at `from` or starting exactly at `to` is outside it. Zero-duration events match their start instant. Use `sort: "oldest"` for chronological agendas. The window advances daily. Search outside it reports the coverage limit; widen it and synchronize to include older or future events. Google uses sync tokens. Outlook uses delta queries for its primary calendar and full bounded views for other calendars. Contacts use Google sync tokens or Outlook folder deltas. Expired tokens trigger a complete replacement scan. Contact search has no occurrence-date filters.
 
 ## CalDAV and CardDAV
 

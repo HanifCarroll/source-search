@@ -3,6 +3,7 @@ import {Temporal} from '@js-temporal/polyfill';
 import {parseCalendarComponent} from './calendar';
 import {readableHtml} from './html';
 import {hash,versioned,fail,now} from '../domain/identity';
+import {overlaps} from '../domain/date-range';
 import type {RecordData} from '../domain/contracts';
 function instant(t:ICAL.Time,zone:string){
  if(t.zone===ICAL.Timezone.utcTimezone || t.zone!==ICAL.Timezone.localTimezone && t.zone.tzid!=='floating')return new Date(t.toUnixTime()*1000).toISOString();
@@ -39,7 +40,7 @@ export function parsePimText(text:string,options:{source:string;path:string;form
      if(++examined>100000)fail('SOURCE_LIMIT','Calendar recurrence exceeds the expansion budget');
      const detail=event.getOccurrenceDetails(occurrence),start=instant(detail.startDate,zone),end=instant(detail.endDate,zone);
      if(Date.parse(instant(occurrence,zone))>=Date.parse(range.to)+backwardShift)break;
-     if(Date.parse(start)<Date.parse(range.from)||Date.parse(start)>=Date.parse(range.to))continue;
+     if(!overlaps(start,end,range))continue;
      const actual=detail.item.component;if(String(actual.getFirstPropertyValue('status')||'').toUpperCase()==='CANCELLED')continue;
      const title=String(actual.getFirstPropertyValue('summary')||'(Untitled event)'),description=String(actual.getFirstPropertyValue('description')||'');
      const body=[title,`Start: ${start}`,`End: ${end}`,actual.getFirstPropertyValue('location')&&`Location: ${actual.getFirstPropertyValue('location')}`,readableHtml(description),...actual.getAllProperties('attendee').map(p=>'Attendee: '+p.getFirstValue())].filter(Boolean).join('\n\n');

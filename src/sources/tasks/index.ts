@@ -7,7 +7,6 @@ import {sourceScope,requireSource,type Config} from '../../platform/config';
 import {textFile} from '../../platform/source-files';
 import {fail} from '../../domain/identity';
 import type {Query,Ref} from '../../domain/contracts';
-import {taskPage} from '../../domain/task-query';
 import {taskSchema,taskRecord,type TaskProvider,type TaskSnapshot} from './model';
 import {taskHttp} from './http';
 import {todoistProvider} from './todoist';
@@ -63,11 +62,5 @@ export function taskProvider(c:Config,source:string):TaskProvider {
 
 export const taskCache=(c:Config,source:string)=>snapshotStore(c,source).read();
 export const taskStatus=(c:Config,source:string)=>snapshotStore(c,source).status();
-export async function searchTasks(c:Config,q:Query){
-  const store=snapshotStore(c,q.source);
-  if(!q.task&&q.sort!=='due')return store.search(q);
-  const saved=await store.read();if(!saved)fail('NEEDS_SYNC','Run source-search sync-sources before searching this source');
-  return taskPage(saved.records,q,{kind:saved.sourceSnapshotAt?'historical-archive':'synchronized-snapshot',asOf:saved.sourceSnapshotAt||saved.checkedAt,syncedAt:saved.checkedAt,description:saved.coverage,lastAttemptAt:saved.lastAttemptAt,lastError:saved.lastError},
-    [...saved.warnings,...(saved.lastError?['Using the last successful snapshot; latest sync failed: '+saved.lastError.code]:[])]);
-}
+export const searchTasks=(c:Config,q:Query)=>snapshotStore(c,q.source).search(q);
 export const readTask=(c:Config,ref:Ref)=>snapshotStore(c,ref.source).original(ref,taskProvider(c,ref.source));

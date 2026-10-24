@@ -17,7 +17,7 @@ export function hit(record: RecordData, q: Query, after: string | number): Hit {
   if(compact.metadata?.previewOnly){delete match.start;delete match.end;delete match.section;match.explanation="Matched a provider preview; the original passage and section need a record read";}
   const { body, sections, metadata, locator, observedAt, ...info } = compact;
   if(match.explanation===`Matched ${match.section} text`)delete match.explanation;
-  const keys = ["dateKind","authorship","reshared","replyTo","direction","senderId","senderIdentity","openLink","openAction","messageId","muesliMeetingId","historical","datePrecision","timezone","group","bodyStatus","attachments","profileName","url","downloadsAreMetadataOnly","folders","selectedBranch","nodeId","contentType","category","relatedResource"];
+  const keys = ["dateKind","endedAt","allDay","calendar","addressBook","authorship","reshared","replyTo","direction","senderId","senderIdentity","openLink","openAction","messageId","muesliMeetingId","historical","datePrecision","timezone","group","bodyStatus","attachments","profileName","url","downloadsAreMetadataOnly","folders","selectedBranch","nodeId","contentType","category","relatedResource"];
   const brief = Object.fromEntries(Object.entries(metadata || {}).filter(([k,v])=>keys.includes(k) && !(k === "url" && v === metadata?.openLink)));
   const start = match.start === undefined ? 0 : Math.max(0,match.start - 100);
   const primary=record.ref.source==="linkedin-archive" && !q.sections?.includes("metadata") ? contentSections(compact).filter(s=>s.kind==="primary" && body.slice(s.start,s.end).trim()) : [];

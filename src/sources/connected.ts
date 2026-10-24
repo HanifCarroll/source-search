@@ -46,6 +46,6 @@ export async function searchConnected(c:Config,q:Query){
   if(c.sources[q.source]?.adapter==='address-books'&&(q.from||q.to||q.sort&&q.sort!=='relevance'))fail('UNSUPPORTED_FILTER','Contacts have no occurrence dates; use relevance ordering');
   if(c.sources[q.source]?.adapter==='repositories'&&(q.from||q.to||q.sort&&q.sort!=='relevance'))fail('UNSUPPORTED_FILTER','Repository files have no per-file commit dates; use relevance ordering');
   if(q.conversation&&!['issues','chat'].includes(c.sources[q.source]?.adapter||''))fail('UNSUPPORTED_FILTER','This source has no conversation filter');
-  return snapshotStore(c,q.source).search(q);
+  return snapshotStore(c,q.source).search({...q,sort:q.sort||(['address-books','repositories'].includes(c.sources[q.source]?.adapter||'')?'relevance':'newest')});
 }
 export const readConnected=(c:Config,ref:Ref)=>snapshotStore(c,ref.source).original(ref,connectedProvider(c,ref.source));

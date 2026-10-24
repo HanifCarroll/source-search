@@ -1,5 +1,6 @@
 import {Temporal} from '@js-temporal/polyfill';
 import {versioned,now,fail} from '../../domain/identity';
+import {overlaps} from '../../domain/date-range';
 import type {RecordData} from '../../domain/contracts';
 
 export type Window={from:string;to:string};
@@ -22,4 +23,4 @@ export function eventRecord(source:string,provider:string,item:{id:string;title:
 export function contactRecord(source:string,provider:string,item:{id:string;name:string;book:string;fields:string[];url?:string}):RecordData{
   return versioned({adapter:'address-books',ref:{source,id:item.id},title:item.name||'(Unnamed contact)',body:[item.name,`Address book: ${item.book}`,...item.fields].filter(Boolean).join('\n'),type:'contact',locator:item.url||`source-search://${source}/${item.id}`,observedAt:now(),metadata:{provider,addressBook:item.book}});
 }
-export const withinWindow=(start:string,end:string,window:Window)=>Date.parse(start)<Date.parse(window.to)&&Date.parse(end)>=Date.parse(window.from);
+export const withinWindow=overlaps;

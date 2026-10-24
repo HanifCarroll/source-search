@@ -10,7 +10,7 @@ export const taskFilterSchema=z.object({
   projectId:z.string().min(1).max(500).optional(),projectName:z.string().min(1).max(1000).optional(),
 }).strict().refine(t=>!t.dueFrom||!t.dueBefore||t.dueFrom<t.dueBefore,'dueFrom must precede dueBefore');
 export type TaskFields={status:'open'|'completed'|'canceled';project?:{id?:string;name:string};dueDate?:string;invalidDueDate?:true;trashed?:boolean};
-export type SnapshotCoverage={kind:'synchronized-snapshot'|'historical-archive';asOf:string;syncedAt?:string;description:string;lastAttemptAt?:string;lastError?:{code:string;message:string};unclassifiedTasks?:number;invalidDueDates?:number};
+export type SnapshotCoverage={kind:'synchronized-snapshot'|'historical-archive';asOf:string;syncedAt?:string;description:string;window?:{from:string;to:string};lastAttemptAt?:string;lastError?:{code:string;message:string};unclassifiedTasks?:number;invalidDueDates?:number};
 export const querySchema = z.object({
   source: sourceId, query: z.string().max(1000),
   from: z.iso.datetime({ offset: true }).optional(), to: z.iso.datetime({ offset: true }).optional(),
