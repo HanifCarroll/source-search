@@ -35,7 +35,7 @@ export function runtimeLoader(entry = join(import.meta.dir, "../application/api.
             const current = digest.digest("hex");
             if (module && current === revision)
                 return module;
-            const build = await Bun.build({ entrypoints: [entry], target: "bun" }).catch(error => { throw Error("Source Search update could not load; correct the code and retry. " + String(error.message).slice(0, 500)); });
+            const build = await Bun.build({ entrypoints: [entry], target: "bun", define:{SOURCE_SEARCH_PACKAGE_ROOT:JSON.stringify(packageRoot)} }).catch(error => { throw Error("Source Search update could not load; correct the code and retry. " + String(error.message).slice(0, 500)); });
             if (!build.success)
                 throw Error("Source Search update could not load; correct the code and retry. " + build.logs.map(l => l.message).join("; "));
             const code = await build.outputs[0].text();

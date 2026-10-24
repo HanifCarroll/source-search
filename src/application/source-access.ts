@@ -1,10 +1,12 @@
+import {bindFocus} from '../domain/content';
+import {filePimStatus,searchFilePim,readFilePim} from '../sources/local/pim-files';
 import {sourceKind,isMail} from '../domain/source-catalog';
 import { searchMessages, readMessage, messagesStatus } from "../sources/messages/index";
 import type { Query, Ref, RecordData, Page } from '../domain/contracts';
-import { assertVersion, errorData, fail } from '../domain/identity';
+import { assertVersion, errorData, fail, cursor, position, hash } from '../domain/identity';
 import { contextMode, usesLibrary } from '../domain/source-policy';
 import { validateOptions } from '../domain/query';
-import { requireSource, configuredSourceIds, mailAccount, markdownSettings, type Config } from '../platform/config';
+import { requireSource, configuredSourceIds, mailAccount, markdownSettings, sourceConfig, sourceScope, type Config } from '../platform/config';
 import { libraryStatus, searchLibrary, readLibrary, readDocument } from '../search/library/index';
 import { qmdStatus, searchQmd, readQmd } from '../search/qmd/vault';
 import { cassStatus, searchCass, readCass } from '../sources/agent-history/index';
@@ -29,7 +31,7 @@ const recordOnly = (read: (ref: Ref, context: boolean) => Promise<RecordData>): 
 
 // One registration binds status, native search and original reads for each source.
 // This module owns routing and reference validation, never response formatting.
-export function createSourceAccess(config: Config, execute: Run = run) {
+export function createSourceAccess(config: Config, execute: Run = run, bound = false) {
   function mail(source: MailSource): Adapter {
     return {
       async status() {
@@ -117,6 +119,25 @@ export function createSourceAccess(config: Config, execute: Run = run) {
     if(isMail(id,config))adapters[id]=mail(id);
     else if(kind==='markdown')adapters[id]=isDailyJournal(config,id)?{status:async()=>({available:true,dailyNotes:(await journalPaths(markdownSettings(config,id).root,markdownSettings(config,id).exclude)).paths.length,filters:['from','to'],coverage:'Daily Markdown journals'}),search:q=>searchJournals(config,q),read:recordOnly(ref=>journalRecord(config,ref))}:notes(id);
     else if(kind==='muesli' || kind==='whatsapp')adapters[id]=database(id);
+    else if(kind==='ical'||kind==='vcard')adapters[id]={status:()=>filePimStatus(config,id),search:q=>searchFilePim(config,q),read:recordOnly(ref=>readFilePim(config,ref))};
+    else if(!bound && config.sources[id] && !['library','documents'].includes(kind) && adapters[kind]) {
+      const scoped=sourceConfig(config,id);
+      const inner=createSourceAccess({...scoped,sources:{[kind]:config.sources[id]!},enabledSources:[kind]},execute,true);
+      const key=hash(id+sourceScope(config,id));
+      const token=(value:string)=>id===kind?value:cursor(key,value);
+      function map(value:any):any {
+        if(Array.isArray(value))return value.map(map);
+        if(!value || typeof value!=='object')return value;
+        return {...(value.ref?.source===kind?{adapter:kind}:{}),...Object.fromEntries(Object.entries(value).map(([k,v])=>[k,
+          k==='focus' && typeof v==='string' && id!==kind?bindFocus(v,id,kind):k==='source' && v===kind?id:(k==='nextCursor'||k==='cursorAfter') && typeof v==='string'?token(v):
+          k==='locator' && typeof v==='string'?v.replace('source-search://'+kind+'/','source-search://'+id+'/'):map(v)]))};
+      }
+      adapters[id]={
+        status:()=>inner.status(kind),
+        search:async(q)=>map(await inner.searchSession()({...q,source:kind,cursor:q.cursor && id!==kind?String(position(q.cursor,key)):q.cursor})),
+        read:async(ref,context)=>map(await inner.read({...ref,source:kind},{context})),
+      };
+    }
   }
   async function read(ref: Ref, options: {context?:boolean; continuation?:boolean} = {}): Promise<ReadResult> {
     requireSource(config,ref.source);

@@ -77,3 +77,16 @@ class RefreshTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'PATH'):m.executable({}, 'nodeBinary', 'node')
 
 if __name__=='__main__':unittest.main()
+
+class NamedRefreshTests(unittest.TestCase):
+ def test_named_vaults_and_library_only_are_independent(self):
+  with tempfile.TemporaryDirectory() as work:
+   root=Path(work);notes=root/'notes';notes.mkdir();(notes/'note.md').write_text('Invented note')
+   config={'maintenanceEnabled':True,'enabledSources':['research','library'],'sources':{'research':{'adapter':'vault','roots':{'notes':str(notes)}}},'libraryEnabled':True}
+   self.assertEqual(m.snapshot(config)[1],1)
+   self.assertEqual(list(m.vault_roots(config)),['research/notes'])
+   config['enabledSources']=['library']
+   self.assertEqual(m.vault_roots(config),{})
+   path=root/'config.json';path.write_text(json.dumps(config));calls=[]
+   worker=m.Refresher(path,root/'state',lambda c:calls.append(c));worker.step(0);worker.step(60)
+   self.assertEqual(calls,[])

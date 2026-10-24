@@ -41,11 +41,11 @@ export function validateOptions(q: Query,catalog:SourceCatalog={}) {
         fail("UNSUPPORTED_FILTER", "Folder filters are available only for live mail sources");
     if(q.excludeSpamTrash !== undefined && !mail && source!=="takeout-archive")
         fail("UNSUPPORTED_FILTER", "Spam/trash exclusion is available only for live mail and Takeout email");
-    if(source === "contacts" && q.sort && q.sort !== "relevance")
+    if(["contacts","vcard"].includes(source) && q.sort && q.sort !== "relevance")
         fail("UNSUPPORTED_SORT", "Contacts have no occurrence date; use relevance or omit sort");
     if (q.match && source === "agent-history")
         fail("UNSUPPORTED_FILTER", "Agent history uses CASS native search syntax; omit match");
-    if (q.sort === "relevance" && !["markdown", "things-archive", "takeout-archive", "chatgpt-archive", "linkedin-archive", "twitter-archive", "calendar", "contacts", "chrome-bookmarks", "agent-history", "vault"].includes(source))
+    if (q.sort === "relevance" && !["markdown", "things-archive", "takeout-archive", "chatgpt-archive", "linkedin-archive", "twitter-archive", "calendar", "contacts", "ical", "vcard", "chrome-bookmarks", "agent-history", "vault"].includes(source))
         fail("UNSUPPORTED_SORT", `${source} supports newest/oldest, not relevance ranking`);
     if (source === "agent-history" && q.sort && q.sort !== "relevance")
         fail("UNSUPPORTED_SORT", "CASS uses native relevance ordering");

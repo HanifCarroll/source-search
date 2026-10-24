@@ -42,10 +42,18 @@ export function recordSearchText(record:RecordData){return contentSections(recor
 export function focusToken(record:RecordData,match:MatchInfo) {
   return Buffer.from(JSON.stringify([1,hash(record.ref.source+":"+record.ref.id+":"+(record.ref.version || "")+":"+record.body),match.start,match.end])).toString("base64url");
 }
+export function bindFocus(token:string,source:string,adapter:string) {
+  return Buffer.from(JSON.stringify([2,source,adapter,token])).toString('base64url');
+}
 export function focusedOffset(record:RecordData,token:string) {
   try {
-    const [version,key,start,end]=JSON.parse(Buffer.from(token,"base64url").toString());
-    if(version!==1 || key!==hash(record.ref.source+":"+record.ref.id+":"+(record.ref.version || "")+":"+record.body) || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start<0 || end<start || end>record.body.length)throw Error();
+    let value=JSON.parse(Buffer.from(token,"base64url").toString()),source=record.ref.source;
+    if(value[0]===2){
+      if(value[1]!==source || value[2]!==record.adapter || typeof value[3]!=='string')throw Error();
+      source=value[2];value=JSON.parse(Buffer.from(value[3],'base64url').toString());
+    }
+    const [version,key,start,end]=value;
+    if(version!==1 || key!==hash(source+":"+record.ref.id+":"+(record.ref.version || "")+":"+record.body) || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start<0 || end<start || end>record.body.length)throw Error();
     return Math.max(0,start-1000);
   } catch {return fail("STALE_FOCUS","Focus does not match this original; search again for its current passage");}
 }

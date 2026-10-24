@@ -33,11 +33,20 @@ def save(path, value):
     os.replace(temporary, path)
 
 
+def vault_roots(config):
+    roots = {}
+    for source in config.get('enabledSources', []):
+        setting = config.get('sources', {}).get(source, {})
+        if setting.get('adapter', source) == 'vault':
+            roots.update({source + '/' + name: path for name, path in setting.get('roots', config.get('qmdRoots', {})).items()})
+    return roots
+
+
 def snapshot(config):
-    roots = config.get('qmdRoots', {})
+    roots = vault_roots(config)
     if not roots:
         raise RuntimeError('No QMD collection roots configured')
-    digest = hashlib.sha256(json.dumps({k: config.get(k) for k in ('qmdRoots', 'qmdIndex', 'qmdBinary')}, sort_keys=True).encode())
+    digest = hashlib.sha256(json.dumps({'sdk':2,'roots':roots,'models':config.get('searchModels',config.get('qmdModels'))}, sort_keys=True).encode())
     count = 0
     for collection, root in sorted(roots.items()):
         root = Path(root)
@@ -69,7 +78,7 @@ def materialize(config, timeout=60, download=None, is_dataless=None, sleep=time.
     download = download or (lambda path: subprocess.run(['/usr/bin/brctl', 'download', str(path)], stdin=subprocess.DEVNULL, capture_output=True, timeout=30))
     is_dataless = is_dataless or (lambda path: bool(getattr(path.lstat(), 'st_flags', 0) & SF_DATALESS))
     waiting = []
-    for root in config.get('qmdRoots', {}).values():
+    for root in vault_roots(config).values():
         for base, directories, files in os.walk(root, followlinks=False):
             directories[:] = [d for d in directories if not d.startswith('.') and not Path(base, d).is_symlink()]
             waiting += [Path(base, name) for name in files if name.endswith('.md') and not name.startswith('.') and is_dataless(Path(base, name))]
@@ -105,7 +114,7 @@ class Refresher:
             return
         try:
             config = json.loads(self.config_path.read_text())
-            if not config.get('maintenanceEnabled') or 'vault' not in config.get('enabledSources',[]):
+            if not config.get('maintenanceEnabled') or not vault_roots(config):
                 self.status(state='disabled');return
             signature, count = snapshot(config)
             if signature == self.completed:
@@ -151,22 +160,20 @@ def run(config_path, state_dir):
 
     def refresh(config):
         nonlocal child
-        binary = executable(config, 'qmdBinary', 'qmd')
-        index = config.get('qmdIndex', 'source-search')
-        if not Path(binary).is_absolute():
-            raise RuntimeError('QMD binary must be an absolute path')
+        binary = executable(config, 'bunBinary', 'bun')
+        cli = str(Path(__file__).resolve().parents[2] / 'src/cli.ts')
         log = state_dir / 'refresh.log'
         if log.exists() and log.stat().st_size > 2 * 1024 * 1024:
             os.replace(log, state_dir / 'refresh.previous.log')
-        if not config.get('maintenanceEnabled') or 'vault' not in config.get('enabledSources',[]):
+        if not config.get('maintenanceEnabled') or not vault_roots(config):
             raise RuntimeError('Vault maintenance is disabled')
         materialize(config)
         with log.open('a') as output:
-            for command, timeout in [('update', 600), ('embed', 1800)]:
+            for command, timeout in [([], 600), (['--embed-only'], 1800)]:
                 if stopping.is_set():
                     raise RuntimeError('Refresh interrupted; will resume after restart')
-                output.write('\n' + stamp() + ' QMD ' + command + '\n'); output.flush()
-                child = subprocess.Popen([binary, '--index', index, command], stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True, env={**os.environ,"SOURCE_SEARCH_CONFIG_FILE":str(config_path)})
+                output.write('\n' + stamp() + ' Search index ' + ' '.join(command) + '\n'); output.flush()
+                child = subprocess.Popen([binary, cli, 'index', *command], stdin=subprocess.DEVNULL, stdout=output, stderr=output, start_new_session=True, env={**os.environ,"SOURCE_SEARCH_CONFIG_FILE":str(config_path)})
                 try:
                     code = child.wait(timeout=timeout)
                 except subprocess.TimeoutExpired:
@@ -175,11 +182,11 @@ def run(config_path, state_dir):
                         child.wait(timeout=10)
                     except subprocess.TimeoutExpired:
                         os.killpg(child.pid, signal.SIGKILL); child.wait()
-                    raise RuntimeError('QMD ' + command + ' timed out')
+                    raise RuntimeError('Search index timed out')
                 finally:
                     child = None
                 if code:
-                    raise RuntimeError('QMD ' + command + ' failed (exit ' + str(code) + '); see private refresh.log')
+                    raise RuntimeError('Search index failed (exit ' + str(code) + '); see private refresh.log')
     def library_refresh(config):
         nonlocal child
         if not config.get('maintenanceEnabled') or 'library' not in config.get('enabledSources',[]):
@@ -187,9 +194,10 @@ def run(config_path, state_dir):
         log = state_dir / 'library-refresh.log'
         if log.exists() and log.stat().st_size > 2 * 1024 * 1024:
             os.replace(log, state_dir / 'library-refresh.previous.log')
-        commands = [([executable(config, 'bunBinary', 'bun'), str(Path(__file__).resolve().parents[2] / 'src/maintenance/library-sync.ts')], 3600),
-                    ([executable(config, 'qmdBinary', 'qmd'), '--index', config.get('libraryIndex', 'source-search-library'), 'update'], 600),
-                    ([executable(config, 'nodeBinary', 'node'), str(Path(__file__).resolve().parent / 'embeddings/run.mjs')], 900)]
+        cli = str(Path(__file__).resolve().parents[2] / 'src/cli.ts')
+        bun = executable(config, 'bunBinary', 'bun')
+        commands = [([bun, cli, 'index', '--library'], 3600),
+                    ([bun, cli, 'index', '--library', '--embed-only'], 1800)]
         with log.open('a') as output:
             for args, timeout in commands:
                 if stopping.is_set(): return

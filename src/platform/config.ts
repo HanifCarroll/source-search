@@ -27,6 +27,9 @@ export const configSchema = z.object({
   voiceNotes: path.optional(),
   callNotes: path.default(join(home, ".config/source-search/unconfigured/calls")),
   chromeProfiles: z.array(path).max(20).default([]),
+  chromeProfileIds: z.array(sourceId).max(20).optional(),
+  chromeLegacyProfileIds: z.array(sourceId).max(20).optional(),
+  thingsDatabase: path.optional(),
   pimHelper: path.default(join(home, ".local/share/source-search/native/Context macOS PIM Helper.app/Contents/MacOS/context-macos-pim-helper")),
   pimLauncher: path.default(join(home, ".local/share/source-search/native/context-macos-pim-disclaim")),
   chatgpt: z.array(path).max(20).default([]),
@@ -49,6 +52,7 @@ export const configSchema = z.object({
   qmdIndex: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("source-search"),
   qmdDatabase: path.default(join(state, "vault.sqlite")),
   qmdModels: z.array(path).default([]),
+  searchModels: z.object({embed:path,rerank:path,generate:path}).strict().optional(),
   qmdRoots: z.record(z.string().regex(/^[a-zA-Z0-9_-]+$/), path).default({}),
   libraryEnabled: z.boolean().default(false),
   libraryRoot: path.default(join(state, "library")),
@@ -76,7 +80,7 @@ export function mailAccount(c:Config,id:string){
  if(s && ('account' in s && isMail(id,c)))return {account:s.account,email:s.email,aliases:s.aliases};
  return c.mailAccounts[id];
 }
-export function databasePath(c:Config,id:string){const s=c.sources[id];return s && 'database' in s ? s.database : sourceKind(id,c)==='muesli'?c.muesli:c.whatsapp;}
+export function databasePath(c:Config,id:string){const s=c.sources[id];return s && 'database' in s && s.database ? s.database : sourceKind(id,c)==='muesli'?c.muesli:c.whatsapp;}
 export function markdownSettings(c:Config,id:string):MarkdownSettings{
  const s=c.sources[id];if(s?.adapter==='markdown')return {...s,timeZone:s.timeZone || c.timeZone};
  // Old flat configuration remains readable; personal timezone lives in config.
@@ -103,10 +107,28 @@ export function sourceScope(config:Config,source:string):string {
     }
     return createHash('sha256').update(JSON.stringify(kind===sourceKind(source)?account:{adapter:kind,...account})||'unconfigured').digest('hex');
   }
-  if(definition && 'database' in definition){
+  if(definition && ['muesli','whatsapp'].includes(kind) && 'database' in definition){
     const value=source==='calls' && kind==='muesli'?{muesli:definition.database}:source==='whatsapp' && kind==='whatsapp'?{whatsapp:definition.database}:{adapter:kind,database:definition.database};
     return createHash('sha256').update(JSON.stringify(value)).digest('hex');
   }
-  const value=Object.fromEntries((fields[source]||[]).map(key=>[key,(config as any)[key]]));
+  const effective=sourceConfig(config,source);
+  const value=Object.fromEntries((fields[kind]||fields[source]||[]).map(key=>[key,(effective as any)[key]]));
+  if(kind==='things-archive' && effective.thingsDatabase)value.database=effective.thingsDatabase;
+  if(source!==kind && definition && !['markdown'].includes(kind))Object.assign(value,{adapter:kind,definition});
   return createHash("sha256").update(JSON.stringify(value)||"unconfigured").digest("hex");
+}
+
+// Per-instance settings resolve at the boundary; old flat settings remain defaults.
+export function sourceConfig(c:Config,id:string):Config {
+ const s=c.sources[id];if(!s)return c;
+ const v={...c};
+ if(s.adapter==='messages' && s.database)v.messages=s.database;
+ if(s.adapter==='things-archive'){if(s.root)v.things=s.root;if(s.database)v.thingsDatabase=s.database;}
+ if('paths' in s && s.adapter.endsWith('-archive'))(v as any)[s.adapter.replace('-archive','')]=s.paths || (v as any)[s.adapter.replace('-archive','')];
+ if('profiles' in s && s.profiles){v.chromeProfiles=s.profiles.map(p=>p.path);v.chromeProfileIds=s.profiles.map(p=>p.id);v.chromeLegacyProfileIds=s.legacyProfileIds;}
+ if(s.adapter==='calendar'||s.adapter==='contacts'){v.pimHelper=s.helper||v.pimHelper;v.pimLauncher=s.launcher||v.pimLauncher;}
+ if(s.adapter==='agent-history'){v.cassData=s.data||v.cassData;v.cassBinary=s.binary||v.cassBinary;}
+ if(s.adapter==='vault'){v.qmdRoots=s.roots||v.qmdRoots;v.qmdDatabase=s.database||(id==='vault'?v.qmdDatabase:join(state,'indexes',id+'.sqlite'));}
+ if(id!==s.adapter && s.adapter.endsWith('-archive'))v.index=join(c.index+'.sources',id+'.sqlite');
+ return v;
 }

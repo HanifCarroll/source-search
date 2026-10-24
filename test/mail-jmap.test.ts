@@ -116,3 +116,40 @@ test('native JMAP library sync captures raw records, preserves references and re
     const after=libraryDB(c);expect(getState(after,'team-mail').state).toBe('error');expect((after.query('SELECT count(*) AS n FROM mail').get() as any).n).toBe(7);after.close();
   }finally{await rm(root,{recursive:true,force:true});}
 }));
+
+test('native attachment maintenance downloads JMAP blobs, excludes books and validates parent and folder scope',()=>fixture(async(f,c)=>{
+ const {downloadAttachments}=await import('../src/maintenance/mail-attachments');
+ const {connector}=await import('../src/sources/mail');
+ const {readFile}=await import('node:fs/promises');
+ const root=await mkdtemp(join(tmpdir(),'ss-attachment-'));
+ try{
+  c=configSchema.parse({...c,libraryRoot:root,maintenanceEnabled:true,enabledSources:['team-mail','documents']});
+  f.state.emails[0]!.attachments.push({name:'book.epub',type:'application/epub+zip',blobId:'book',size:50});
+  const record=await readMail('team-mail','m0',undefined,c),input={source:'team-mail',id:'m0',version:record.ref.version,scope:sourceScope(c,'team-mail')};
+  const files=await downloadAttachments(c,input);expect(files.entries).toHaveLength(1);expect((await readFile(files.entries[0]!.path)).toString()).toBe('invented file');expect(f.state.downloads).toHaveLength(1);
+  await expect(downloadAttachments(c,{...input,scope:'old-account'})).rejects.toMatchObject({code:'STALE_RECORD'});
+  await expect(downloadAttachments(c,{...input,version:'old-version'})).rejects.toMatchObject({code:'STALE_RECORD'});
+  const restricted=configSchema.parse({...c,sources:{'team-mail':{...c.sources['team-mail'],folders:['Sent']}}});
+  await expect(connector(restricted,'team-mail')!.download('m0','blob',100)).rejects.toMatchObject({code:'SOURCE_RESTRICTED'});
+  await expect(connector(c,'team-mail')!.download('m0','blob',5)).rejects.toMatchObject({code:'OUTPUT_LIMIT'});
+  f.state.blob='short';await expect(connector(c,'team-mail')!.download('m0','blob',100)).rejects.toMatchObject({code:'INVALID_PROVIDER_RESPONSE'});
+  expect(f.state.requests.every(r=>['Email/get','Mailbox/get'].includes(r.method))).toBe(true);
+ }finally{await rm(root,{recursive:true,force:true});}
+}));
+
+test('document pipeline uses its selected native-mail config and reuses verified attachment extraction',()=>fixture(async(f,c)=>{
+ const {mkdir,readFile}=await import('node:fs/promises');
+ const root=await mkdtemp(join(tmpdir(),'ss-native-documents-'));
+ try{
+  c=configSchema.parse({...c,maintenanceEnabled:true,libraryRoot:root,enabledSources:['team-mail','documents']});
+  f.state.emails[0]!.attachments=[{name:'agenda.txt',type:'text/plain',blobId:'blob',size:13}];
+  let raw:any;const record=await readMail('team-mail','m0',undefined,c,data=>raw=data);
+  await mkdir(join(root,'mail-raw'));await writeFile(join(root,'mail-raw/one.json'),JSON.stringify({source:'team-mail',id:'m0',ref:record.ref,raw,accountSignature:sourceScope(c,'team-mail')}));
+  const path=join(root,'config.json');await writeFile(path,JSON.stringify(c));
+  for(let i=0;i<2;i++){
+   const child=Bun.spawn([Bun.which('python3')||'python3',join(import.meta.dir,'../scripts/extract-documents.py'),'--config',path],{env:{...process.env,SOURCE_SEARCH_CONFIG_FILE:'/deliberately/not/this/config'},stdout:'pipe',stderr:'pipe'});
+   const [out,err,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);expect(code,err).toBe(0);expect(JSON.parse(out)).toMatchObject({documents:1,failures:0});
+  }
+  const result=JSON.parse(await readFile(join(root,'documents.json'),'utf8'));expect(result.records[0].body).toBe('invented file');expect(result.records[0].metadata.mailRef).toEqual(record.ref);expect(f.state.downloads).toHaveLength(1);
+ }finally{await rm(root,{recursive:true,force:true});}
+}));

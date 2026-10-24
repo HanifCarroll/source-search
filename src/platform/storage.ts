@@ -2,7 +2,7 @@ import { lstat, mkdir, writeFile, readFile, readdir, rm, realpath } from "node:f
 import { resolve, dirname, join, relative, isAbsolute, sep } from "node:path";
 import { homedir } from "node:os";
 import { fail } from "../domain/identity";
-import type { Config } from "./config";
+import {sourceConfig,type Config} from "./config";
 
 export const managedCacheRoot = () => join(homedir(), ".cache/source-search");
 const marker = ".source-search-cache";
@@ -28,9 +28,14 @@ export async function markManagedCache(path:string) {
 function overlaps(a:string,b:string){const rel=relative(resolve(a),resolve(b));return !rel || rel!==".." && !rel.startsWith(".."+sep) && !isAbsolute(rel);}
 export async function purgeCache(c:Config,apply=false) {
   const root=managedCacheRoot();
-  const originals=[c.journals,c.things,c.messages,c.whatsapp,c.muesli,c.voiceNotes,c.callNotes,c.cassData,...c.chromeProfiles,...c.chatgpt,...c.takeout,...c.linkedin,...c.twitter,...c.documentRoots,...Object.values(c.qmdRoots),...c.qmdModels,...Object.values(c.sources).flatMap(s=>"root" in s?[s.root]:"database" in s?[s.database]:[])];
-  if(originals.some(p=>overlaps(root,p)))fail("UNSAFE_PATH","A configured original or model is inside the cache directory; move it before purging");
-  const custom=[c.index,c.libraryRoot,c.libraryDatabase,c.qmdDatabase,c.previews].filter(p=>!overlaps(root,p));
+  const selected=Object.values(c.sources).flatMap(s=>[
+    ...('root' in s&&s.root?[s.root]:[]),...('database' in s&&s.database&&s.adapter!=='vault'?[s.database]:[]),
+    ...('paths' in s?s.paths||[]:[]),...('profiles' in s?s.profiles?.map(p=>p.path)||[]:[]),
+    ...('roots' in s?Object.values(s.roots||{}):[]),...('data' in s&&s.data?[s.data]:[]),
+  ]);
+  const originals=[c.journals,c.things,c.thingsDatabase,c.messages,c.whatsapp,c.muesli,c.voiceNotes,c.callNotes,c.cassData,...c.chromeProfiles,...c.chatgpt,...c.takeout,...c.linkedin,...c.twitter,...c.documentRoots,...Object.values(c.qmdRoots),...c.qmdModels,...Object.values(c.searchModels||{}),...selected];
+  if(originals.some(p=>p && overlaps(root,p)))fail("UNSAFE_PATH","A configured original or model is inside the cache directory; move it before purging");
+  const custom=[c.index,c.libraryRoot,c.libraryDatabase,c.qmdDatabase,c.previews,...Object.entries(c.sources).filter(([,s])=>s.adapter==='vault').map(([id])=>sourceConfig(c,id).qmdDatabase)].filter(p=>!overlaps(root,p));
   if(custom.length)fail("CUSTOM_CACHE_PATHS","Custom cache paths require manual cleanup; purge refuses to claim complete deletion");
   const result={root,scope:"All Source Search managed caches, extracted attachments and previews",applied:false};
   if(!apply)return result;

@@ -3,7 +3,8 @@ import {createReadStream} from "node:fs";
 import {createHash} from "node:crypto";
 import { lstat } from "node:fs/promises";
 import { basename } from "node:path";
-import type { Config } from "../../platform/config";
+import {sourceConfig,type Config} from "../../platform/config";
+import {sourceKind} from "../../domain/source-catalog";
 import { thingsRecords } from "../local/journals-and-tasks";
 import { sourceFiles } from "../local/notes";
 import { loadSafeZipArchive,DEFAULT_MAX_ARCHIVE_BYTES } from "../../vendor/takeout/zip";
@@ -20,7 +21,8 @@ export const archiveSources = ["things-archive", "chatgpt-archive", "takeout-arc
 export type ArchiveSource = typeof archiveSources[number];
 export const exportProjectionVersion=(source:ArchiveSource)=>source === "linkedin-archive" ? 6 : source === "twitter-archive" ? 3 : source === "takeout-archive" ? 3 : 1;
 export function exportPaths(config:Config,source:ArchiveSource) {
-  return source === "things-archive" ? [config.things] : source === "chatgpt-archive" ? config.chatgpt : source === "linkedin-archive" ? config.linkedin : source === "twitter-archive" ? config.twitter : config.takeout;
+  config=sourceConfig(config,source);
+  return source === "things-archive" ? [config.thingsDatabase||config.things] : source === "chatgpt-archive" ? config.chatgpt : source === "linkedin-archive" ? config.linkedin : source === "twitter-archive" ? config.twitter : config.takeout;
 }
 export async function checkExportSelection(config: Config, source: ArchiveSource) {
   if (source === "things-archive") return;
@@ -28,10 +30,13 @@ export async function checkExportSelection(config: Config, source: ArchiveSource
   if (!selected.length) fail("SOURCE_NOT_CONFIGURED", "Fresh export has not been downloaded and selected yet");
   for (const path of selected) { const st = await lstat(path); if (st.isSymbolicLink() || !(st.isFile() || source === "chatgpt-archive" && st.isDirectory())) fail("UNSAFE_PATH", "Selected exports must be ordinary ZIP files or ChatGPT export directories"); }
 }
-export async function archiveSignature(config:Config,source:ArchiveSource) {
+export async function archiveSignature(config:Config,source:string) {
+  const kind=sourceKind(source,config) as ArchiveSource;
+  if(source!==kind)return archiveSignature({...sourceConfig(config,source),sources:{[kind]:config.sources[source]!}},kind);
+  config=sourceConfig(config,source);
   if(source === "things-archive")return (await thingsRecords(config)).generation;
-  await checkExportSelection(config,source);
-  const selected=exportPaths(config,source), stamps:any[]=[];
+  await checkExportSelection(config,source as ArchiveSource);
+  const selected=exportPaths(config,source as ArchiveSource), stamps:any[]=[];
   for(const path of selected){const stat=await lstat(path);const paths=stat.isDirectory()?(await sourceFiles(path,n=>/^(?:conversations(?:[-_]?\d+)?|group_chats)\.json$/i.test(n))).paths.map(p=>path+"/"+p):[path];
     for(const file of paths)stamps.push([file,await fileDigest(file)]);}
   return hash(JSON.stringify(source === "twitter-archive" || source === "linkedin-archive" ? [stamps,"content-only-v1"] : stamps));
@@ -48,6 +53,7 @@ async function fileDigest(path:string){
 }
 
 export async function exportRecords(config: Config, source: ArchiveSource, only?: { part: number; entry: string; messageIndex?:number }) {
+  config=sourceConfig(config,source);
   if (source === "things-archive") { const r = await thingsRecords(config); return { ...r, warnings: [] as string[] }; }
   await checkExportSelection(config, source);
   const selected = exportPaths(config,source);
@@ -149,6 +155,7 @@ export async function exportRecords(config: Config, source: ArchiveSource, only?
   return { records, generation, warnings: reported, info: { taskCount: undefined, exportedAt: undefined, categories:source === "linkedin-archive" || source === "twitter-archive" ? categories : undefined,conversations:source === "chatgpt-archive" ? conversations : undefined } };
 }
 export async function readExport(config: Config, ref: Ref) {
+  config=sourceConfig(config,ref.source);
   if (ref.source === "things-archive") { const { readThings } = await import("../local/journals-and-tasks"); return readThings(config, ref); }
   const r = (await exportOriginals(config,ref)).records.get(ref.id);
   if (!r) fail("RECORD_NOT_FOUND", "Record is absent from the selected current export");

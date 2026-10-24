@@ -10,7 +10,7 @@ import type {MailConnector,MailContinuation,MailDetail,MailSummary} from './type
 import * as legacy from './legacy';
 export {run,type Run,type PreviewBudget,type MailSource} from './legacy';
 
-function connector(config:Config,source:string):MailConnector|undefined{
+export function connector(config:Config,source:string):MailConnector|undefined{
   requireSource(config,source);
   const setting=config.sources[source];
   if(setting?.adapter==='jmap')return jmapConnector(setting);

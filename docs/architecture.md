@@ -5,7 +5,7 @@ Source Search has one read interface: `createRuntime(config)` supplies source st
 ```
 src/
   application/       Source registration, request orchestration, catalogue, previews
-  interfaces/        CLI, MCP transport, runtime reload
+  interfaces/        CLI, guided setup, diagnostics, MCP transport, runtime reload
   domain/            Record/query contracts, matching, identity, pagination, presentation
   platform/          Configuration, private storage, files, SQLite snapshots
   formats/           HTML, MIME, calendar and YAML format adapters
@@ -17,12 +17,12 @@ src/
     agent-history/   CASS search and original conversation reads
   search/
     library/         Projection store, ranked discovery, provenance checks
-    qmd/             Vault adapter, bounded subprocess runner, hybrid ranking worker
+    qmd/             Vault adapter and isolated public QMD SDK worker
   maintenance/
     library-sync.ts  Explicit projection orchestration
     refresh.py       Existing optional refresh process
     documents/       Inventory, format readers, incremental pipeline, worker CLI
-    embeddings/      Atomic embedding batches and Node entry point
+    embeddings/      Compatibility launcher for managed SDK embedding
   vendor/            Self-contained upstream-derived parsers and CASS protocol code
 ```
 
@@ -36,7 +36,7 @@ The four files directly in `src/` are compatibility entry points. `cli.ts`, `mcp
 
 `application/runtime.ts` orchestrates requests: it expands groups, contains individual source failures, budgets combined results, paginates text, and writes requested previews. It calls source access through three operations: status, a search session, and an original read. CLI and MCP share this runtime; CLI additionally imports explicit maintenance commands.
 
-`platform/source-settings.ts` validates source definitions and derives groups. `domain/source-catalog.ts` resolves instance IDs to adapter kinds and retains compatibility aliases for old references. Mail, Markdown and supported local database adapters receive the instance ID throughout search, pagination, indexing and reads. Capability checks depend on the adapter kind; references and QMD collections use the instance ID. Other integrations keep their standard IDs and existing storage configuration.
+`platform/source-settings.ts` validates source definitions and derives groups. `domain/source-catalog.ts` resolves instance IDs to adapter kinds and retains compatibility aliases for old references. Mail, Markdown and supported local database adapters receive the instance ID throughout search, pagination, indexing and reads. Capability checks depend on the adapter kind; references and QMD collections use the instance ID. The remaining adapters are bound to per-instance resolved configuration at registration. Their source IDs and continuation tokens are mapped at this boundary; aggregate library/documents retain their fixed IDs. Named archive and vault instances get separate indexes.
 
 `domain/source-policy.ts` defines which sources can use library projections, how context participates in continuation, and which search routes have item-level cursors. Validation, routing, the catalogue, and maintenance use these same decisions. CASS context is part of the record body and must remain identical across continuation pages; other sources return neighboring records separately, on the first page.
 
@@ -48,9 +48,9 @@ Maintenance may use source readers and projection storage. The read interface ca
 
 ## Search engines
 
-CASS owns agent-history retrieval. QMD owns vault and library ranking. The QMD subprocess runner accepts a typed request containing the target (`vault` or `library`), mode, query, and optional collection. It selects the database and constructs fixed command arguments itself, keeping process details, time limits, and output budgets out of both adapters. It does not infer the target from an index name or parse a caller-built command line. Lexical and semantic requests use the installed CLI. Hybrid requests use the version-pinned Node worker embedded in the Bun runtime, so reloads do not depend on temporary bundle-relative script paths.
+CASS owns agent-history retrieval. QMD owns vault and library ranking. The QMD subprocess runner accepts a typed request containing the target (`vault` or `library`), mode, query, and optional collection. It selects the database and constructs fixed command arguments itself, keeping process details, time limits, and output budgets out of both adapters. It does not infer the target from an index name or parse a caller-built command line. All three search modes, collection updates and embeddings use the public `@tobilu/qmd` SDK. The dependency is installed with the application. Collections come directly from source configuration or enabled library projections. An isolated Bun process bounds model lifetime, output and time; native diagnostics stay off MCP stdout. QMD owns chunking, ranking and embedding batches. Source Search owns source selection, original-reference validation and response budgets.
 
-QMD's embedding tokenizer can underestimate the ranking model's input length. The hybrid worker measures complete ranking inputs, including query and template. Oversized passages are divided into windows; each candidate keeps its highest window score and original identity. One ranking context bounds GPU memory and prevents teardown while another ranking operation is still running. Errors remain errors; no lexical fallback substitutes for hybrid search.
+Current QMD indexes retain literal filenames. The vault reader resolves legacy normalized references to their unchanged originals, so saved references survive the index upgrade. The metadata reads used for provenance remain in the vault/library adapters; no internal QMD modules are imported. Index refresh checks collection roots before updating and reports skipped files.
 
 ## Document maintenance
 
@@ -76,6 +76,6 @@ The ZIP adapter keeps strict archive checks enabled. It validates redundant opti
 
 ## Mail connectors
 
-`mail/index.ts` owns record formatting, source opt-in and continuation. JMAP and IMAP implement the same small search/read/thread interface in `mail/types.ts`. JMAP uses bounded HTTP requests and validates protocol responses; IMAP uses ImapFlow for connections, mailbox locks, UID search and MIME part fetching. `credentials.ts` resolves private credentials at connection time. `legacy.ts` retains the existing Gmail and mailbridge commands.
+`mail/index.ts` owns record formatting, source opt-in and continuation. JMAP and IMAP implement the same small search/read/thread/attachment interface in `mail/types.ts`. JMAP uses bounded HTTP requests and validates protocol responses; IMAP uses ImapFlow for connections, mailbox locks, UID search and MIME part fetching. `credentials.ts` resolves private credentials at connection time. `legacy.ts` retains the existing Gmail and mailbridge commands.
 
 Identity is separate from transport. JMAP retains provider email IDs. IMAP uses account-wide server IDs when available, otherwise mailbox path plus UIDVALIDITY and UID. Cache scopes bind mail to its configured account, endpoint and folder selection. Provider errors cannot become successful empty scans that would prune the library. The Dovecot integration test runs independently of the protocol fixtures and is included in Linux CI.

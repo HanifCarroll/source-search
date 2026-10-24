@@ -16,5 +16,7 @@ def main():
    print(json.dumps({'body':body,'warnings':warnings}))
   except Skipped as e:print(json.dumps({'skipped':str(e)}))
   except Exception as e:print(json.dumps({'error':type(e).__name__+': '+str(e)[:200]}))
- elif args.config:run_pipeline(json.loads(Path(args.config).read_text()))
+ elif args.config:
+  os.environ['SOURCE_SEARCH_CONFIG_FILE']=str(Path(args.config).resolve())
+  run_pipeline(json.loads(Path(args.config).read_text()))
  else:parser.error('--config is required')

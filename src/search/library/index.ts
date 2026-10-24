@@ -3,10 +3,10 @@ import { isProjected } from "../../domain/source-policy";
 import { Database } from "bun:sqlite";
 import { readFile, lstat, access } from "node:fs/promises";
 import { join, relative, sep, isAbsolute, extname } from "node:path";
-import {sourceEnabled, requireSource, sourceScope, configuredSourceIds, type Config} from "../../platform/config";
+import {sourceEnabled, requireSource, sourceScope, sourceConfig, configuredSourceIds, type Config} from "../../platform/config";
 import { libraryDB } from "./store";
 import { archiveSignature, type ArchiveSource } from "../../sources/archives/originals";
-import { runQmd, type QmdRun } from "../qmd/runner";
+import { runQmd, modelsPresent as checkModels, type QmdRun } from "../qmd/runner";
 import { fail, hash, now, cursor, numberPosition, queryKey, assertVersion } from "../../domain/identity";
 import { hit } from "../../domain/results";
 import { regular } from "../../platform/source-files";
@@ -14,7 +14,7 @@ import { type Ref, type RecordData, type Query, type Page } from "../../domain/c
 
 export async function libraryStatus(c:Config){
  if(!c.libraryEnabled || !sourceEnabled(c,"library"))return {available:false,state:"not-configured"};
- const modelsPresent=c.qmdModels.length===3 && (await Promise.all(c.qmdModels.map(p=>access(p).then(()=>true,()=>false)))).every(Boolean);
+ const modelsPresent = await checkModels(c);
  const db=libraryDB(c);
  try{
   const states=new Map((db.query("SELECT source,data FROM states").all() as any[]).map(r=>[r.source,JSON.parse(r.data)]));
@@ -81,7 +81,7 @@ export async function readDocument(c:Config,ref:Ref):Promise<RecordData>{
  if([r.title,origin.path,origin.name].some(name=>typeof name==="string" && [".epub",".mobi",".azw",".azw3",".fb2",".djvu"].includes(extname(name).toLowerCase())))fail("SOURCE_EXCLUDED","Book format excluded from document indexing");
  if(origin.mailRef)requireSource(c,origin.mailRef.source);
  if(origin.source)requireSource(c,origin.source);
- if(origin.source==="takeout-archive" && !c.takeout.includes(origin.signature[0]))fail("SOURCE_DISABLED","Archive is no longer selected");
+ if(origin.source && sourceKind(origin.source,c)==="takeout-archive" && !sourceConfig(c,origin.source).takeout.includes(origin.signature[0]))fail("SOURCE_DISABLED","Archive is no longer selected");
  if(origin.mailRef && origin.accountSignature!==sourceScope(c,origin.mailRef.source))fail("SOURCE_DISABLED","Attachment belongs to a previous account configuration");
  if(!origin.mailRef && !origin.source){
    const path=origin.path as string;

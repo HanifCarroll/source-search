@@ -1,3 +1,4 @@
+import {thingsDatabase} from './things-database';
 import {sourceFiles} from "./notes";
 import {noteDate} from '../../formats/note-date';
 import {markdownSettings} from '../../platform/config';
@@ -46,6 +47,7 @@ export async function searchJournals(config: Config, q: Query): Promise<Page> {
   return { source: q.source, status: warnings.length ? "partial" : "ok", items,scan:{checked,undecodable:0,exhausted:offset>=paths.length,...(checked>=1000 && offset<paths.length ? {workLimit:"1000 files"} : {})}, ...(offset < paths.length ? { nextCursor: cursor(key, offset) } : {}), warnings: [...new Set(warnings)].slice(0, 5), observedAt: now() };
 }
 export async function thingsRecords(config: Config) {
+  if(config.thingsDatabase)return thingsDatabase(config.thingsDatabase);
   const [tasksText, contextText, infoText] = await Promise.all([
     contained(config.things, "tasks.jsonl").then(p => textFile(p, 32 * 1024 * 1024)),
     contained(config.things, "context.json").then(p => textFile(p)),

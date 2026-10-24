@@ -19,7 +19,7 @@ const emailSchema=z.object({
   textBody:z.array(z.object({partId:z.string().nullable()})).optional(),
   htmlBody:z.array(z.object({partId:z.string().nullable()})).optional(),
   bodyValues:z.record(z.string(),z.object({value:z.string(),isTruncated:z.boolean().optional(),isEncodingProblem:z.boolean().optional()})).optional(),
-  attachments:z.array(z.object({name:z.string().nullable(),type:z.string()})).optional(),
+  attachments:z.array(z.object({name:z.string().nullable(),type:z.string(),blobId:idSchema.optional(),partId:z.string().nullable().optional(),size:z.number().int().nonnegative().optional()})).optional(),
 });
 type Email=z.infer<typeof emailSchema>;
 function parse<T>(schema:z.ZodType<T>,data:unknown):T {
@@ -43,6 +43,7 @@ class Session {
   private apiUrl='';
   private accountId='';
   private authorization='';
+  private downloadUrl='';
   private maxGet=1;
   private signal:AbortSignal;
   constructor(private settings:JmapSettings,signal:AbortSignal){this.signal=signal;}
@@ -70,12 +71,13 @@ class Session {
   async connect(){
     const auth=this.settings.auth;
     this.authorization=auth.type==='bearer' ? 'Bearer '+await readSecret(auth.token) : 'Basic '+Buffer.from(auth.username+':'+await readSecret(auth.password)).toString('base64');
-    const session=parse(z.object({apiUrl:z.url(),capabilities:z.record(z.string(),z.unknown()),primaryAccounts:z.record(z.string(),z.string()),accounts:z.record(z.string(),z.object({accountCapabilities:z.record(z.string(),z.unknown())}))}),await this.request(this.settings.sessionUrl));
+    const session=parse(z.object({apiUrl:z.url(),downloadUrl:z.string().optional(),capabilities:z.record(z.string(),z.unknown()),primaryAccounts:z.record(z.string(),z.string()),accounts:z.record(z.string(),z.object({accountCapabilities:z.record(z.string(),z.unknown())}))}),await this.request(this.settings.sessionUrl));
     if(!(MAIL in session.capabilities) || !(CORE in session.capabilities))fail('UNSUPPORTED_PROVIDER','Server does not advertise JMAP Mail');
     const accountId=this.settings.accountId || session.primaryAccounts[MAIL];
     if(!accountId || !session.accounts[accountId]?.accountCapabilities[MAIL])fail('SOURCE_NOT_CONFIGURED','Select an accessible JMAP mail accountId');
     const core=parse(z.object({maxObjectsInGet:z.number().int().positive()}),session.capabilities[CORE]);
     this.accountId=accountId;this.apiUrl=session.apiUrl;this.maxGet=Math.min(core.maxObjectsInGet,100);
+    this.downloadUrl=session.downloadUrl||'';
   }
   async call(method:'Mailbox/get'|'Email/query'|'Email/get'|'Thread/get',args:Record<string,unknown>):Promise<any>{
     const response=await this.request(this.apiUrl,{using:[CORE,MAIL],methodCalls:[[method,{...args,accountId:this.accountId},'read']]});
@@ -139,6 +141,23 @@ class Session {
     if(this.settings.folders){const [metadata]=await this.emails([id],false);this.checkAccess(metadata!,boxes);}
     const [e]=await this.emails([id],true);this.checkAccess(e!,boxes);return this.detail(e!,boxes);
   }
+  private async attachmentEmail(id:string){const boxes=await this.boxes(),[email]=await this.emails([providerId(id)],false);this.checkAccess(email!,boxes);return email!;}
+  async attachments(id:string){return (await this.attachmentEmail(id)).attachments?.map(a=>{if(!a.blobId || a.size===undefined)fail('UNSUPPORTED_PROVIDER','JMAP attachment metadata lacks blob ID or size');return {id:a.blobId,filename:a.name||'attachment.bin',mime_type:a.type,size:a.size};})||[];}
+  async download(id:string,attachment:string,maxBytes:number){
+    const item=(await this.attachments(id)).find(a=>a.id===attachment);if(!item)fail('NOT_FOUND','Attachment is absent from this email');
+    if(item.size>maxBytes)fail('OUTPUT_LIMIT','Attachment exceeds download budget');
+    if(!this.downloadUrl)fail('UNSUPPORTED_PROVIDER','JMAP session has no download URL');
+    const fields:Record<string,string>={accountId:this.accountId,blobId:attachment,name:item.filename,type:item.mime_type};
+    const target=new URL(this.downloadUrl.replace(/\{(accountId|blobId|name|type)\}/g,(_,key)=>encodeURIComponent(fields[key]!)));
+    const original=new URL(this.settings.sessionUrl);
+    if(target.username||target.password||target.hash||target.protocol!=='https:' && target.origin!==original.origin)fail('INVALID_PROVIDER_RESPONSE','Unsupported attachment download URL');
+    const response=await fetch(target,{headers:{Authorization:this.authorization},signal:this.signal,redirect:'error'});
+    if(!response.ok){await response.body?.cancel();fail('MAIL_PROVIDER_ERROR','Attachment download failed');}
+    const reader=response.body?.getReader();if(!reader)fail('INVALID_PROVIDER_RESPONSE','Empty attachment response');
+    const chunks:Uint8Array[]=[];let size=0;
+    try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>maxBytes)fail('OUTPUT_LIMIT','Attachment exceeds download budget');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
+    if(size!==item.size)fail('INVALID_PROVIDER_RESPONSE','Attachment byte count differs from metadata');return Buffer.concat(chunks);
+  }
   async thread(id:string,selectedId:string){
     const boxes=await this.boxes(),result=await this.call('Thread/get',{ids:[providerId(id)],properties:['id','emailIds']});
     const threads=parse(z.array(z.object({id:idSchema,emailIds:z.array(idSchema)})),result.list);
@@ -163,5 +182,5 @@ export function jmapConnector(settings:JmapSettings):MailConnector {
     }
     finally {clearTimeout(timer);}
   }
-  return {status:()=>use(s=>s.status()),search:(q,p)=>use(s=>s.search(q,p)),read:id=>use(s=>s.read(id)),thread:(id,selected)=>use(s=>s.thread(id,selected))};
+  return {status:()=>use(s=>s.status()),search:(q,p)=>use(s=>s.search(q,p)),read:id=>use(s=>s.read(id)),thread:(id,selected)=>use(s=>s.thread(id,selected)),attachments:id=>use(s=>s.attachments(id)),download:(id,a,max)=>use(s=>s.download(id,a,max))};
 }

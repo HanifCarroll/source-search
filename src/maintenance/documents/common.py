@@ -35,15 +35,15 @@ def save(path,value):
   temp.replace(path)
  finally:temp.unlink(missing_ok=True)
 
-def child_limits():
+def child_limits(address_space=True):
  # Disk output and CPU bounds also cover native converter children.
  resource.setrlimit(resource.RLIMIT_FSIZE,(256*1024*1024,256*1024*1024))
  resource.setrlimit(resource.RLIMIT_CPU,(1800,1800))
- if sys.platform=='linux':resource.setrlimit(resource.RLIMIT_AS,(2*1024**3,2*1024**3))
+ if address_space and sys.platform=='linux':resource.setrlimit(resource.RLIMIT_AS,(2*1024**3,2*1024**3))
 
-def command(args,timeout=120,input_data=None,max_output=8*1024*1024):
+def command(args,timeout=120,input_data=None,max_output=8*1024*1024,native_runtime=False):
  with tempfile.TemporaryFile() as out,tempfile.TemporaryFile() as err:
-  p=subprocess.run(args,input=input_data,stdin=subprocess.DEVNULL if input_data is None else None,stdout=out,stderr=err,timeout=timeout,preexec_fn=child_limits,env={**os.environ,'HF_HUB_OFFLINE':'1'})
+  p=subprocess.run(args,input=input_data,stdin=subprocess.DEVNULL if input_data is None else None,stdout=out,stderr=err,timeout=timeout,preexec_fn=lambda:child_limits(address_space=not native_runtime),env={**os.environ,'HF_HUB_OFFLINE':'1'})
   if p.returncode:raise RuntimeError(Path(args[0]).name+' failed (exit '+str(p.returncode)+')')
   if out.tell()>max_output:raise ValueError('Command output exceeds extraction budget')
   out.seek(0);return out.read(max_output+1)

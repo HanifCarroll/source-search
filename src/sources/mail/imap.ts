@@ -164,6 +164,31 @@ class Session {
     });
   }
   async read(id:string){return this.detail(await this.locate(id,this.allowed(await this.boxes())));}
+  private async attachmentParts(id:string){
+    const row=await this.locate(id,this.allowed(await this.boxes()));
+    return this.inBox(row.folder,async validity=>{
+      if(validity!==row.validity)fail('STALE_RECORD','Mailbox identity changed');
+      const message=await this.client.fetchOne(row.message.uid,{uid:true,bodyStructure:true},{uid:true});
+      if(!message || message.uid!==row.message.uid || ('e' in row.ref && message.emailId!==row.ref.e))fail('NOT_FOUND','Email changed during attachment read');
+      if(!message.bodyStructure)fail('INVALID_PROVIDER_RESPONSE','Email has no MIME structure');
+      const parts=leaves(message.bodyStructure).filter(p=>p.disposition==='attachment'||p.dispositionParameters?.filename||p.parameters?.name);
+      return {row,parts};
+    });
+  }
+  async attachments(id:string){return (await this.attachmentParts(id)).parts.map(p=>({id:p.part||'TEXT',filename:p.dispositionParameters?.filename||p.parameters?.name||'attachment.bin',mime_type:p.type,size:p.size||0}));}
+  async download(id:string,attachment:string,maxBytes:number){
+    const {row,parts}=await this.attachmentParts(id),part=parts.find(p=>(p.part||'TEXT')===attachment);
+    if(!part)fail('NOT_FOUND','Attachment is absent from this email');
+    if((part.size||0)>Math.ceil(maxBytes*1.4)+1024)fail('OUTPUT_LIMIT','Attachment exceeds download budget');
+    return this.inBox(row.folder,async validity=>{
+      if(validity!==row.validity)fail('STALE_RECORD','Mailbox identity changed');
+      const {content}=await this.client.download(row.message.uid,attachment,{uid:true,maxBytes:maxBytes+1});
+      if(!content)fail('NOT_FOUND','Attachment content is unavailable');
+      const chunks:Uint8Array[]=[];let size=0;
+      try{for await(const bytes of content){size+=bytes.length;if(size>maxBytes)fail('OUTPUT_LIMIT','Attachment exceeds download budget');chunks.push(bytes);}}finally{content.destroy();}
+      return Buffer.concat(chunks);
+    });
+  }
   async thread(id:string,selectedId:string){
     if(!this.stableIds())return {messages:[],warnings:['This IMAP server does not provide thread IDs; open individual messages.']};
     const records=this.merge(await this.collect(this.allowed(await this.boxes()),{threadId:id}));
@@ -192,5 +217,5 @@ export function imapConnector(settings:ImapSettings,create:(options:ImapFlowOpti
       fail('MAIL_CONNECTION_FAILED','IMAP request failed; check server, TLS, account access and supported search features');
     }finally{clearTimeout(timer);client.close();}
   }
-  return {status:()=>use(s=>s.status()),search:(q,p)=>use(s=>s.search(q,p)),read:id=>use(s=>s.read(id)),thread:(id,selected)=>use(s=>s.thread(id,selected))};
+  return {status:()=>use(s=>s.status()),search:(q,p)=>use(s=>s.search(q,p)),read:id=>use(s=>s.read(id)),thread:(id,selected)=>use(s=>s.thread(id,selected)),attachments:id=>use(s=>s.attachments(id)),download:(id,a,max)=>use(s=>s.download(id,a,max))};
 }

@@ -1,14 +1,15 @@
 export function jmapFixture(){
   const mail='urn:ietf:params:jmap:mail',core='urn:ietf:params:jmap:core';
   const boxes=[{id:'inbox',name:'Inbox',role:'inbox'},{id:'sent',name:'Sent',role:'sent'},{id:'junk',name:'Junk',role:'junk'},{id:'trash',name:'Trash',role:'trash'}];
-  const emails=Array.from({length:7},(_,i)=>({id:'m'+i,threadId:'t1',mailboxIds:{inbox:true},receivedAt:`2026-10-${String(i+1).padStart(2,'0')}T12:00:00Z`,subject:'Planning '+i,from:[{name:'Alice',email:'alice@example.test'}],to:[{name:null,email:'bob@example.test'}],preview:'Preview '+i,textBody:[{partId:'1'}],htmlBody:[],bodyValues:{'1':{value:'Body '+i,isTruncated:false}},attachments:[{name:'agenda.pdf',type:'application/pdf'}]}));
-  const state={version:'state1',status:200,delay:0,methodError:'',wrongAccount:false,missing:false,reverse:true,primary:'one',maxGet:3,requests:[] as any[],auth:[] as string[],emails,boxes};
+  const emails=Array.from({length:7},(_,i)=>({id:'m'+i,threadId:'t1',mailboxIds:{inbox:true},receivedAt:`2026-10-${String(i+1).padStart(2,'0')}T12:00:00Z`,subject:'Planning '+i,from:[{name:'Alice',email:'alice@example.test'}],to:[{name:null,email:'bob@example.test'}],preview:'Preview '+i,textBody:[{partId:'1'}],htmlBody:[],bodyValues:{'1':{value:'Body '+i,isTruncated:false}},attachments:[{name:'agenda.pdf',type:'application/pdf',blobId:'blob',size:13}]}));
+  const state={version:'state1',status:200,delay:0,methodError:'',wrongAccount:false,missing:false,reverse:true,primary:'one',maxGet:3,requests:[] as any[],auth:[] as string[],blob:'invented file',blobStatus:200,downloads:[] as string[],emails,boxes};
   const server=Bun.serve({hostname:'127.0.0.1',port:0,async fetch(req):Promise<Response>{
     if(new URL(req.url).pathname==='/.well-known/jmap')return new Response(null,{status:307,headers:{location:'/session'}});
     state.auth.push(req.headers.get('authorization')||'');
     if(state.delay)await Bun.sleep(state.delay);
     if(state.status!==200)return new Response('Do not disclose provider data',{status:state.status});
-    if(req.method==='GET')return Response.json({apiUrl:`http://127.0.0.1:${server.port}/api`,capabilities:{[core]:{maxObjectsInGet:state.maxGet},[mail]:{}},accounts:{one:{accountCapabilities:{[mail]:{}}},two:{accountCapabilities:{[mail]:{}}}},primaryAccounts:state.primary?{[mail]:state.primary}:{}});
+    if(new URL(req.url).pathname.startsWith('/download/')){state.downloads.push(req.url);return new Response(state.blob,{status:state.blobStatus});}
+    if(req.method==='GET')return Response.json({downloadUrl:`http://127.0.0.1:${server.port}/download/{accountId}/{blobId}/{name}?type={type}`,apiUrl:`http://127.0.0.1:${server.port}/api`,capabilities:{[core]:{maxObjectsInGet:state.maxGet},[mail]:{}},accounts:{one:{accountCapabilities:{[mail]:{}}},two:{accountCapabilities:{[mail]:{}}}},primaryAccounts:state.primary?{[mail]:state.primary}:{}});
     const request=await req.json() as any;
     const [method,args,tag]=request.methodCalls[0];state.requests.push({method,args});
     if(state.methodError)return Response.json({methodResponses:[['error',{type:state.methodError},tag]]});

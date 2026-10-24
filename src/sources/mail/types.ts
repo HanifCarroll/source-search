@@ -6,9 +6,12 @@ export type MailDetail={summary:MailSummary;body_text?:string|null;body_html?:st
 export type MailContinuation={position:number;state:string;scope?:string};
 export type MailResults={messages:MailSummary[];position:number;queryState:string;total:number;warnings:string[]};
 export type MailThread={messages:MailDetail[];warnings:string[]};
+export type MailAttachment={id:string;filename:string;mime_type:string;size:number};
 export interface MailConnector {
   status():Promise<{folders:Folder[];warnings:string[]}>;
   search(q:Query,page?:MailContinuation):Promise<MailResults>;
   read(id:string):Promise<MailDetail>;
   thread(id:string,selectedId:string):Promise<MailThread>;
+  attachments(id:string):Promise<MailAttachment[]>;
+  download(id:string,attachment:string,maxBytes:number):Promise<Uint8Array>;
 }

@@ -28,19 +28,28 @@ def mail_attachments(config,root):
    if source not in config.get('enabledSources',[]):continue
    account=config.get('sources',{}).get(source) or config.get('mailAccounts',{}).get(source)
    if not account:raise ValueError('Mail account is not configured')
-   folder=downloads/(source+'-'+mid);private_dir(folder)
+   folder=downloads/(source+'-'+(digest(mid) if len(mid)>180 else mid));private_dir(folder)
    manifest=folder/'manifest.json'
    cached=json.loads(manifest.read_text()) if manifest.exists() else {}
    parent_signature=signature(rawfile)
-   if not isinstance(cached,dict) or cached.get('parent')!=parent_signature:
+   adapter=config.get('sources',{}).get(source,{}).get('adapter', 'fastmail' if source=='mail-fastmail' else 'gmail')
+   native=adapter in ('imap','jmap')
+   if not isinstance(cached,dict) or cached.get('parent')!=parent_signature or native and cached.get('connectorVersion')!=1:
     entries=[]
-    if config.get('sources',{}).get(source,{}).get('adapter', 'fastmail' if source=='mail-fastmail' else 'gmail')=='fastmail':
+    if native:
+     known=raw.get('attachments')
+     if not isinstance(known,list) or any(Path(a.get('filename',a.get('name',''))).suffix.lower() in SUPPORTED for a in known):
+      request={'source':source,'id':mid,'version':item.get('ref',{}).get('version'),'scope':item.get('accountSignature')}
+      helper=Path(__file__).resolve().parents[1]/'mail-attachments.ts'
+      data=json.loads(command([config.get('bunBinary') or 'bun',str(helper)],180,input_data=json.dumps(request).encode(),native_runtime=True))
+      entries=data['entries']
+    elif adapter=='fastmail':
      supported=[a for a in raw.get('attachments',[]) if Path(a.get('filename','')).suffix.lower() in SUPPORTED]
      if supported:
       if sum(a.get('size_bytes') or 0 for a in raw.get('attachments',[]))>250*1024*1024:raise ValueError('Message attachments exceed download byte budget')
       data=json.loads(command([config['mailbridgeBinary'],'--json','attachments','download','--account',account['account'],'--message-id',mid,'--out',str(folder)],120))
       entries=[{'path':a['output_path'],'name':a['filename']} for a in data.get('attachments',[]) if Path(a['filename']).suffix.lower() in SUPPORTED]
-    else:
+    elif adapter=='gmail':
      def parts(node):
       yield node
       for child in node.get('parts',[]):yield from parts(child)
@@ -56,7 +65,8 @@ def mail_attachments(config,root):
        target.write_bytes(base64.urlsafe_b64decode(body['data']+'==='))
       else:continue
       entries.append({'path':str(target),'name':name})
-    save(manifest,{'parent':parent_signature,'entries':entries})
+    else:raise ValueError('Unsupported attachment connector: '+adapter)
+    save(manifest,{'parent':parent_signature,'entries':entries,**({'connectorVersion':1} if native else {})})
    entries=list({(entry['path'],entry['name']):entry for entry in json.loads(manifest.read_text())['entries']}.values())
    names=Counter(entry['name'] for entry in entries)
    for entry in entries:
@@ -68,7 +78,8 @@ def mail_attachments(config,root):
 
 def takeout_attachments(config,root):
  candidates=[];failures=[];folder=root/'takeout-attachments';private_dir(folder)
- for archive in (config.get('takeout',[]) if 'takeout-archive' in config.get('enabledSources',[]) else []):
+ selections=[(source,archive) for source in config.get('enabledSources',[]) if config.get('sources',{}).get(source,{}).get('adapter',source)=='takeout-archive' for archive in config.get('sources',{}).get(source,{}).get('paths',config.get('takeout',[]))]
+ for source,archive in selections:
   p=Path(archive);parent=signature(p);manifest=folder/(digest(str(p))+'.json')
   prior=json.loads(manifest.read_text()) if manifest.exists() else {}
   try:
@@ -103,6 +114,6 @@ def takeout_attachments(config,root):
           entries.append({'path':str(out),'name':name,'signature':parent+[entry.CRC,index,part_index,hashlib.sha256(payload).hexdigest()],'locator':identity,'source':'takeout-archive','messageId':message.get('Message-ID')})
        finally:box.close()
     save(manifest,{'parent':parent,'entries':entries})
-   candidates.extend({**entry,'source':'takeout-archive'} for entry in json.loads(manifest.read_text())['entries'])
+   candidates.extend({**entry,'source':source} for entry in json.loads(manifest.read_text())['entries'])
   except Exception as e:failures.append({'source':str(p),'error':type(e).__name__+': '+str(e)[:180]})
  return candidates,failures

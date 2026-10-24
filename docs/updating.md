@@ -14,7 +14,7 @@ From the application checkout:
 
 ```sh
 git pull --ff-only origin main
-bun install --frozen-lockfile --ignore-scripts
+bun install --frozen-lockfile
 bun run check
 bun test
 ```
@@ -47,7 +47,9 @@ Before adopting this release from an older private installation, configure the s
 
 If an update fails, keep maintenance stopped and return to the recorded public commit or a preserved installation. Restore matching dependencies and configuration. Restore cache snapshots only if the update changed their format. Original source files stay in place.
 
-Hybrid QMD search now uses the configured `nodeBinary` and `qmdPackage` directly. Keep QMD at 1.0.7 for this adapter. Existing CLI, MCP and refresh launch paths are unchanged; implementation modules moved into the folders described in [architecture](architecture.md).
+Search now uses the bundled public QMD SDK. Global `qmdBinary`, `qmdPackage`, and index names are no longer used. Keep the database and model paths. Set `searchModels` explicitly or retain the old `qmdModels` list until migration; old model filenames are recognized. Existing CLI, MCP and refresh launch paths remain available.
+
+Back up old QMD databases before the first managed update. Run `index` for literal-filename indexing; old normalized vault references remain readable. Older vectors lack current model fingerprints. Rebuild them with `index --embed`, or validate and adopt them using the bundled QMD CLI's `doctor` against a private copy before replacing the cache. Never mark arbitrary vectors compatible solely by changing their model label. The original installation backup should retain both database files and configuration.
 
 Parser upgrades also refresh WhatsApp polls/contact cards and affected export projections during the next explicit maintenance run. Existing cached mail is reformatted from saved responses. Allow the library update and embedding steps to finish before checking semantic coverage. No new source configuration is needed.
 
@@ -58,6 +60,8 @@ Existing source IDs and flat configuration fields remain supported. For new sett
 - Move each `mailAccounts` entry to `sources.<same-id>` and add `adapter: "gmail"` or `"fastmail"`.
 - Move note paths to Markdown source definitions. Copy the filename pattern, date fields, content label and timezone you actually use. See the README's daily-journal settings. Legacy voice/call notes used `content: "transcript"`, `reviewed: true`, and date fields `["source_started_at", "date"]`.
 - Move `muesli` to `sources.calls` with `adapter: "muesli"` and `database`; move `whatsapp` to `sources.whatsapp` similarly.
+- Move archive file lists to `sources.<id>.paths`, Things exports to `root` or `database`, Messages to `database`, CASS to `data`/`binary`, and vault collections to `roots`/`database`. Preserve IDs and selected locations.
+- Move browser profiles to `profiles: [{"id":"work","path":"/profile/path"}]`; retain the original numeric order in `legacyProfileIds`. New references use profile IDs.
 - Set `timeZone` explicitly. Older versions interpreted journal days in `America/Buenos_Aires`; new installations default to UTC. Use the old zone when preserving those dates.
 
 Keep account values, aliases, database locations and source IDs unchanged to retain existing library identities. If switching an instance to a different account or provider, use a new ID or clear its old cache. Renaming an ID creates a new reference namespace and QMD collection; it does not migrate old references.

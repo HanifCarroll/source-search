@@ -1,3 +1,4 @@
+import {archiveInstances,archiveConfig} from './archives';
 import {sourceKind,isMail} from '../domain/source-catalog';
 import { isProjected } from "../domain/source-policy";
 import {privateDirectory,markManagedCache} from "../platform/storage";
@@ -5,11 +6,11 @@ import {privateDirectory,markManagedCache} from "../platform/storage";
 import { lstat, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
-import { loadConfig, sourceEnabled, requireMaintenance, configuredSourceIds, databasePath, mailAccount, sourceScope, type Config } from "../platform/config";
+import { loadConfig, sourceEnabled, requireMaintenance, configuredSourceIds, databasePath, mailAccount, sourceScope, sourceConfig, type Config } from "../platform/config";
 import { allDatabaseRecords, databaseProjectionVersion } from "../sources/local/databases";
 import { allMessageRecords } from "../sources/messages/index";
-import { archiveSources, exportPaths, archiveSignature, exportProjectionVersion } from "../sources/archives/originals";
-import { rebuildArchive } from "../sources/archives/index";
+import { exportPaths, archiveSignature, exportProjectionVersion, type ArchiveSource } from "../sources/archives/originals";
+import { rebuildArchive, indexStatus } from "../sources/archives/index";
 import { readMail, searchMail, formatMail, run, type Run, type MailSource } from "../sources/mail/index";
 import { hash, now, errorData } from "../domain/identity";
 import { type Query } from "../domain/contracts";
@@ -22,10 +23,10 @@ async function native(c:Config){
   for(const source of configuredSourceIds(c).filter(id=>["muesli","messages","whatsapp"].includes(sourceKind(id,c)))){
    try{
     if(!sourceEnabled(c,source))continue;
-    const path=source==="messages"?c.messages:databasePath(c,source),paths=[path,path+"-wal"],signature=await stampPaths(paths);
-    const projectionVersion=source==="messages" ? 1 : databaseProjectionVersion(source,c);
+    const kind=sourceKind(source,c), scoped=sourceConfig(c,source),path=kind==="messages"?scoped.messages:databasePath(c,source),paths=[path,path+"-wal"],signature=await stampPaths(paths);
+    const projectionVersion=kind==="messages" ? 1 : databaseProjectionVersion(source,c);
     if(getState(db,source).signature===signature && (getState(db,source).projectionVersion||1)===projectionVersion && getState(db,source).state!=="error")continue;
-    const records=source==="messages"?await allMessageRecords(c):await allDatabaseRecords(c,source);
+    const records=kind==="messages"?(await allMessageRecords(scoped)).map(r=>({...r,...(source!==kind?{adapter:kind}:{}),ref:{...r.ref,source}})):await allDatabaseRecords(c,source);
     if(signature!==await stampPaths(paths))throw Error("Source changed during snapshot; retaining previous projection and retrying");
     await publish(c,source,records,{paths,signature},{signature,projectionVersion,state:"ready",error:null,checkedAt:now(),coverage:"Current local database; absent text and phone-only history cannot be recovered"});
    }catch(e){setState(db,source,{...getState(db,source),state:"error",error:errorData(e),checkedAt:now()});}
@@ -33,23 +34,23 @@ async function native(c:Config){
  }finally{db.close();}
 }
 async function archives(c:Config){
- let index:Database|undefined;const db=libraryDB(c,true);
- try{
-  let rebuild=false;
-  try{index=new Database(c.index,{readonly:true});for(const source of archiveSources.filter(s=>sourceEnabled(c,s) && exportPaths(c,s).length)){const r=index.query("SELECT value FROM meta WHERE key=?").get(source) as any;const state=r?JSON.parse(r.value):{};if(state.signature!==await archiveSignature(c,source)||state.projectionVersion!==exportProjectionVersion(source))rebuild=true;}}catch{rebuild=true;}finally{index?.close();index=undefined;}
-  if(rebuild)await rebuildArchive(c);
-  index=new Database(c.index,{readonly:true});
-  for(const source of archiveSources){
-    if(!sourceEnabled(c,source))continue;
-   if(!exportPaths(c,source).length){setState(db,source,{state:"waiting-for-export",records:0,chunks:0});continue;}
-   try{
-    const row=index.query("SELECT value FROM meta WHERE key=?").get(source) as any;const state=JSON.parse(row.value);
-    if(getState(db,source).signature===state.signature && getState(db,source).projectionFormat===2 && getState(db,source).projectionVersion===exportProjectionVersion(source) && getState(db,source).state!=="error")continue;
-    const records=(index.query("SELECT data,body FROM records WHERE source=? ORDER BY id").all(source) as any[]).map(r=>({...JSON.parse(r.data),body:r.body}));
-    await publish(c,source,records,{archive:source,signature:state.signature},{projectionFormat:2,projectionVersion:exportProjectionVersion(source),signature:state.signature,state:"ready",error:null,checkedAt:now(),coverage:"Selected export snapshot only; no automatic account export"});
-   }catch(e){setState(db,source,{...getState(db,source),state:"error",error:errorData(e),checkedAt:now()});}
-  }
- }finally{index?.close();db.close();}
+ const db=libraryDB(c,true);
+ try {for(const source of archiveInstances(c)) {
+  const kind=sourceKind(source,c) as ArchiveSource,scoped=source===kind?c:archiveConfig(c,source);
+  if(!exportPaths(scoped,kind).length){setState(db,source,{state:"waiting-for-export",records:0,chunks:0});continue;}
+  try {
+   const signature=await archiveSignature(c,source),projectionVersion=exportProjectionVersion(kind);
+   let state:any;try{state=JSON.parse((await indexStatus(scoped))[kind]||'{}');}catch{state={};}
+   if(state.signature!==signature||state.projectionVersion!==projectionVersion)await rebuildArchive(scoped);
+   const previous=getState(db,source);
+   if(previous.signature===signature&&previous.projectionFormat===2&&previous.projectionVersion===projectionVersion&&previous.state!=="error")continue;
+   const index=new Database(scoped.index,{readonly:true});
+   try {
+    const records=(index.query("SELECT data,body FROM records WHERE source=? ORDER BY id").all(kind) as any[]).map(r=>{const record={...JSON.parse(r.data),body:r.body};record.ref.source=source;if(source!==kind)record.adapter=kind;return record;});
+    await publish(c,source,records,{archive:source,signature},{projectionFormat:2,projectionVersion,signature,state:"ready",error:null,checkedAt:now(),coverage:"Selected export snapshot only; no automatic account export"});
+   }finally{index.close();}
+  }catch(e){setState(db,source,{...getState(db,source),state:"error",error:errorData(e),checkedAt:now()});}
+ }}finally{db.close();}
 }
 export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSource[]=configuredSourceIds(c).filter(id=>isMail(id,c))){
  requireMaintenance(c);
@@ -131,7 +132,7 @@ async function documents(c:Config){
  const temporaryConfig=join(c.libraryRoot,"extraction-config.json");
  await privateJSON(temporaryConfig,{...c,mailAccounts:Object.fromEntries(configuredSourceIds(c).filter(id=>isMail(id,c)).map(id=>[id,mailAccount(c,id)]))});
  try{
-  const child=Bun.spawn([c.extractorPython,join(import.meta.dir,"../../scripts/extract-documents.py"),"--config",temporaryConfig],{stdin:"ignore",stdout:"inherit",stderr:"inherit"});
+  const child=Bun.spawn([c.extractorPython,join(import.meta.dir,"../../scripts/extract-documents.py"),"--config",temporaryConfig],{stdin:"ignore",stdout:"inherit",stderr:"inherit",env:{...process.env,SOURCE_SEARCH_CONFIG_FILE:temporaryConfig}});
   if(await child.exited)throw Error("Document extraction failed; see private maintenance log");
  }finally{await rm(temporaryConfig,{force:true});}
  const inventory=JSON.parse(await readFile(join(c.libraryRoot,"documents.json"),"utf8"));

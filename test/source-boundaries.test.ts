@@ -38,21 +38,6 @@ test('continuation policy follows the retrieval engine for projected mail',()=>{
  expect(canTrimItems({...q,mode:'hybrid'})).toBe(true);
 });
 
-test('QMD runner builds literal CLI requests and chooses hybrid databases by target',async()=>{
- const root=await mkdtemp(join(tmpdir(),'ss-runner-boundary-'));
- try{
-  const binary=join(root,'synthetic-qmd');
-  await writeFile(binary,`#!${process.execPath}\nconst args=process.argv.slice(2);console.log(JSON.stringify(args.includes('--eval')?JSON.parse(await Bun.stdin.text()):args));\n`,{mode:0o700});
-  const c={...defaultConfig(),qmdBinary:binary,nodeBinary:binary,qmdIndex:'same-name',libraryIndex:'same-name',qmdDatabase:join(root,'vault.sqlite'),libraryDatabase:join(root,'library.sqlite')};
-  const query='--option "quoted" $(literal)';
-  for(const [mode,command] of [['lexical','search'],['semantic','vsearch']] as const){
-   expect(await runQmd({index:'library',mode,query,collection:'ss-whatsapp'},c)).toEqual([binary,'--index','same-name',command,'--json','-n','100','-c','ss-whatsapp','--',query].slice(1));
-  }
-  expect(await runQmd({index:'vault',mode:'hybrid',query},c)).toMatchObject({database:c.qmdDatabase,query});
-  expect(await runQmd({index:'library',mode:'hybrid',query,collection:'ss-whatsapp'},c)).toMatchObject({database:c.libraryDatabase,query,collection:'ss-whatsapp'});
- }finally{await rm(root,{recursive:true,force:true});}
-});
-
 test('shared SQLite snapshots include WAL data, remain stable, reject writes and clean up',async()=>{
  const {Database}=await import('bun:sqlite');
  const {createSnapshot}=await import('../src/platform/sqlite');

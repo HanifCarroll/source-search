@@ -1,5 +1,5 @@
 // Source IDs name configured instances; adapters describe their behavior.
-export const adapterKinds = ['gmail','fastmail','jmap','imap','markdown','muesli','whatsapp','messages','things-archive','chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive','calendar','contacts','chrome-history','chrome-bookmarks','chrome-downloads','agent-history','vault','library','documents'] as const;
+export const adapterKinds = ['gmail','fastmail','jmap','imap','markdown','muesli','whatsapp','messages','things-archive','chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive','calendar','contacts','ical','vcard','chrome-history','chrome-bookmarks','chrome-downloads','agent-history','vault','library','documents'] as const;
 export type AdapterKind = typeof adapterKinds[number];
 export type SourceCatalog = {sources?:Record<string,{adapter:AdapterKind}>};
 

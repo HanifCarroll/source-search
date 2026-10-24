@@ -68,11 +68,9 @@ const markdown = z.object({
   reviewed:z.boolean().default(false),
   author:z.string().max(200).optional(),
 }).strict();
-const repeatable = ['gmail','fastmail','jmap','imap','markdown','muesli','whatsapp'] as const;
-const single = [
-  'messages','things-archive','chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive',
-  'calendar','contacts','chrome-history','chrome-bookmarks','chrome-downloads','agent-history','vault','library','documents',
-] as const;
+const files = z.array(path).min(1).max(20);
+const profile = z.object({id:sourceId,path}).strict();
+const single = ['library','documents'] as const;
 export const sourceSettings = z.discriminatedUnion('adapter', [
   z.object({...common, adapter:z.literal('gmail'), ...accountSchema.shape}).strict(),
   z.object({...common, adapter:z.literal('fastmail'), ...accountSchema.shape}).strict(),
@@ -81,6 +79,15 @@ export const sourceSettings = z.discriminatedUnion('adapter', [
   markdown,
   z.object({...common, adapter:z.literal('muesli'), database:path}).strict(),
   z.object({...common, adapter:z.literal('whatsapp'), database:path}).strict(),
+  z.object({...common, adapter:z.literal('messages'), database:path.optional()}).strict(),
+  z.object({...common, adapter:z.literal('things-archive'), root:path.optional(), database:path.optional()}).strict(),
+  ...(['chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive'] as const).map(adapter=>z.object({...common,adapter:z.literal(adapter),paths:files.optional()}).strict()),
+  ...(['chrome-history','chrome-bookmarks','chrome-downloads'] as const).map(adapter=>z.object({...common,adapter:z.literal(adapter),profiles:z.array(profile).min(1).max(20).refine(p=>new Set(p.map(v=>v.id)).size===p.length,'Profile IDs must be unique').optional(),legacyProfileIds:z.array(sourceId).max(20).optional()}).strict()),
+  ...(['calendar','contacts'] as const).map(adapter=>z.object({...common,adapter:z.literal(adapter),helper:path.optional(),launcher:path.optional()}).strict()),
+  z.object({...common,adapter:z.literal('ical'),paths:files,timeZone:timeZoneSchema.optional()}).strict(),
+  z.object({...common,adapter:z.literal('vcard'),paths:files}).strict(),
+  z.object({...common,adapter:z.literal('agent-history'),data:path.optional(),binary:path.optional()}).strict(),
+  z.object({...common,adapter:z.literal('vault'),roots:z.record(sourceId,path).optional(),database:path.optional()}).strict(),
   ...single.map(adapter => z.object({...common, adapter:z.literal(adapter)}).strict()),
 ]);
 export type SourceSettings = z.infer<typeof sourceSettings>;
@@ -90,7 +97,7 @@ export const sourcesSchema = z.record(sourceId, sourceSettings).default({}).supe
   for(const [id, setting] of Object.entries(sources)) {
     if(groupIds.includes(id as typeof groupIds[number]))
       ctx.addIssue({code:'custom', path:[id], message:'Source ID conflicts with a source group'});
-    if(!repeatable.includes(setting.adapter as typeof repeatable[number]) && id !== setting.adapter)
+    if(single.includes(setting.adapter as typeof single[number]) && id !== setting.adapter)
       ctx.addIssue({code:'custom', path:[id], message:'This integration uses its standard source ID; label can customize its display name'});
     if(adapterKinds.includes(id as typeof adapterKinds[number]) && id !== setting.adapter)
       ctx.addIssue({code:'custom', path:[id], message:'Source ID is reserved for another integration'});

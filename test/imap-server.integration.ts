@@ -62,6 +62,10 @@ try{
   const again=await readMail('test-mail',record.ref.id,undefined,c);assert.equal(again.ref.version,record.ref.version);checks.push('stable record version');
   const other=await searchMail({source:'second-mail',query:'',limit:25},undefined,undefined,c);assert.equal(other.totalMatches,1);assert.equal(other.items[0]!.title,'second account');checks.push('independent account isolation');
   const settings=c.sources['test-mail'];assert(settings?.adapter==='imap');
+  const backend=imapConnector(settings);
+  const attachments=await backend.attachments(record.ref.id);assert.equal(attachments[0]?.filename,'sample.pdf');
+  assert((await backend.download(record.ref.id,attachments[0]!.id,200000)).toString().includes('attachment data'));
+  await assert.rejects(backend.download(record.ref.id,attachments[0]!.id,10),{code:'OUTPUT_LIMIT'});checks.push('native attachment downloads, size limits and unchanged unread flags');
   const starttls=imapConnector({...settings,security:'starttls',port:plainPort});assert.equal((await starttls.search({source:'test-mail',query:'',limit:25})).total,6);checks.push('required STARTTLS and validated private CA');
   const restricted=configSchema.parse({...c,sources:{...c.sources,'test-mail':{...settings,folders:['Sent']}}});
   await assert.rejects(readMail('test-mail',all.items[0]!.ref.id,undefined,restricted));checks.push('folder restrictions apply to saved reads');
