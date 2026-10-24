@@ -8,11 +8,11 @@ export function sourceAuthorization(c:Config,source:string):{kind:'google';oauth
   const setting=c.sources[source];if(!setting||!('connector' in setting))fail('INVALID_CONFIG','Configure an OAuth-capable source first');
   const connector=setting.connector;
   if(connector.type==='google'||connector.type==='google-tasks'){
-    const permission=connector.type==='google-tasks'?'tasks.readonly':setting.adapter==='calendars'?'calendar.readonly':'contacts.readonly';
+    const permission=connector.type==='google-tasks'?'tasks.readonly':setting.adapter==='calendars'?'calendar.readonly':setting.adapter==='files'?(setting.content==='text'?'drive.readonly':'drive.metadata.readonly'):'contacts.readonly';
     return {kind:'google',oauth:connector.oauth,token:connector.token,scopes:['https://www.googleapis.com/auth/'+permission]};
   }
   if(connector.type==='microsoft'||connector.type==='microsoft-todo'){
-    const permission=connector.type==='microsoft-todo'?'Tasks.Read':setting.adapter==='calendars'?'Calendars.Read':'Contacts.Read';
+    const permission=connector.type==='microsoft-todo'?'Tasks.Read':setting.adapter==='calendars'?'Calendars.Read':setting.adapter==='files'?'Files.Read':'Contacts.Read';
     return {kind:'microsoft',oauth:connector.oauth,token:connector.token,scopes:['https://graph.microsoft.com/'+permission]};
   }
   return fail('INVALID_CONFIG','This source uses an externally supplied credential');

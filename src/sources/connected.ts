@@ -4,6 +4,9 @@ import {providerHttp} from '../platform/http';
 import {scopedProvider,snapshotStore} from './sync/cache';
 import {googleCalendarProvider,googleContactsProvider} from './pim/google';
 import {microsoftCalendarProvider,microsoftContactsProvider} from './pim/microsoft';
+import {fileProvider} from './files/model';
+import {googleFiles} from './files/google';
+import {microsoftFiles} from './files/microsoft';
 import {notionProvider} from './notes/notion';
 import {davProvider} from './pim/dav';
 import {graphOrigin,graphHeaders} from './sync/graph';
@@ -16,6 +19,7 @@ import type {Query,Ref} from '../domain/contracts';
 export function connectedProvider(c:Config,source:string):SourceProvider{
   requireSource(c,source);const s=c.sources[source];
   const bind=(p:SourceProvider)=>scopedProvider(p,sourceScope(c,source));
+  if(s?.adapter==='files'){const http=providerHttp(s.connector.type==='google'?'https://www.googleapis.com/drive/v3':graphOrigin,{token:sourceToken(c,source)});return bind(fileProvider(source,s,s.connector.type==='google'?googleFiles(s,http.json,http.text):microsoftFiles(s,s.connector.driveId,http.json)));}
   if(s?.adapter==='notes')return bind(notionProvider(source,s.connector,providerHttp('https://api.notion.com/v1',{token:s.connector.token,minIntervalMs:350,headers:{'Notion-Version':'2026-03-11'}}).json));
   if(s?.adapter!=='calendars'&&s?.adapter!=='address-books')fail('SOURCE_NOT_CONFIGURED','Configure a connected source');
   const connector=s.connector;

@@ -1,4 +1,4 @@
-export const connectedKinds=['calendars','address-books','notes'] as const;
+export const connectedKinds=['calendars','address-books','notes','files'] as const;
 // Source IDs name configured instances; adapters describe their behavior.
 export const adapterKinds = [...connectedKinds,'firefox-history','firefox-bookmarks','safari-history','safari-bookmarks','tasks','browser-history','browser-bookmarks','browser-downloads','gmail','fastmail','jmap','imap','markdown','muesli','whatsapp','messages','things-archive','chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive','calendar','contacts','ical','vcard','chrome-history','chrome-bookmarks','chrome-downloads','agent-history','vault','library','documents'] as const;
 export type AdapterKind = typeof adapterKinds[number];
@@ -24,4 +24,4 @@ export function sourceCategory(source:string,catalog:SourceCatalog={}){
  return kind;
 }
 export function isMail(source:string,catalog:SourceCatalog={}){return ['gmail','fastmail','jmap','imap'].includes(sourceKind(source,catalog));}
-export const groupIds=['all-mail','all-journals','all-notes','historical-exports','all-tasks','all-browser-history','all-bookmarks','all-calendars','all-contacts'] as const;
+export const groupIds=['all-mail','all-journals','all-notes','historical-exports','all-tasks','all-browser-history','all-bookmarks','all-calendars','all-contacts','all-files'] as const;
