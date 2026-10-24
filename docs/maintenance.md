@@ -27,6 +27,14 @@ The pinned QMD dependency has a Bun patch for [slow collection-scoped vector loo
 | TickTick tasks | Complete snapshots of selected projects, followed by record/projection diffs. No change token is exposed by these endpoints. |
 | Apple Reminders | Complete EventKit snapshots of selected lists, including completed reminders, followed by record/projection diffs. Incomplete or unauthorized scans retain the previous snapshot. |
 | Microsoft To Do | Paginated list inventory plus per-list task deltas, with daily full reconciliation for changes omitted by the feed. Expired delta history restarts a full pass. Tenants rejecting read-only delta access use complete snapshots. Changed tasks refresh steps/linked resources; original reads always fetch current data. |
+| Google Tasks | Modified-since polling with overlap, including completed, hidden and deleted tasks, plus daily full reconciliation. |
+| Google calendars and contacts | Per-calendar sync tokens and People contact sync tokens; expired tokens reset the affected inventory. Calendar occurrence windows advance daily. |
+| Outlook calendars and contacts | Primary-calendar and contact-folder deltas. Secondary calendars use bounded full views. Expired delta history restarts the affected inventory. |
+| CalDAV and CardDAV | Server sync tokens where available, otherwise collection tags and full changed-collection reads through tsdav. |
+| Notion | Selected page/data-source inventories, content revision reuse and daily full content reconciliation. |
+| Drive and OneDrive | Change feeds trigger selected-folder inventory refreshes; unchanged text reuses its revision. Daily reconciliation checks moves and permission changes. |
+| GitHub and Linear | Independent issue/comment update feeds with overlap, plus daily full reconciliation for removals and moves. |
+| Slack | Recent history and known threads refresh each pass; daily full reconciliation covers older edits, removals and first replies to old roots within the configured window. |
 | Generic task files and Things task connector | Read the selected snapshots and publish changed records only. Existing `things-archive` sources retain their export index behavior. |
 | Messages, WhatsApp, Muesli calls | Skip unchanged database/WAL snapshots. On change, compare row fingerprints, including joined text and metadata; decode only changed rows. A complete inventory detects edits and deletions, without assuming rows are append-only. |
 | Things and selected ChatGPT, Takeout, LinkedIn, X exports | Skip unchanged selected files. Parse changed exports, then update only changed records and search projections. ZIP/JSON exports do not supply a change feed, so a changed file must be parsed. |

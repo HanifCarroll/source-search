@@ -6,6 +6,8 @@ Run `bun run start source-lists SOURCE_ID` to discover calendars, address books 
 
 If synchronization fails, search retains the previous complete snapshot and reports the failure. Provider rate limits are reported with retry guidance; rerun synchronization later. Checkpoints and record changes are saved together.
 
+Connected sources allow ten minutes and 10,000 requests per sync by default. Large initial imports can set `sync: {"timeoutMs": 1800000, "maxRequests": 20000}` alongside `adapter` and `connector`. Limits can be raised to one hour and 100,000 requests. Changing these budgets preserves saved references; it does not change provider rate limits or selected content.
+
 ## Google Tasks
 
 Use a task connector with `type: "google-tasks"`, a stable `account` name, and optional `lists` containing selected task-list IDs. Authenticate with either `token: {"env": "GOOGLE_ACCESS_TOKEN"}` or `oauth: {"clientId": "YOUR_DESKTOP_CLIENT_ID", "clientSecret": {"file": "/absolute/private/client-secret"}, "cache": "/absolute/private/google-login.json"}`. Create a Desktop OAuth client in Google Cloud and enable the Tasks API. The client secret field is optional when your client supports token exchange without it.

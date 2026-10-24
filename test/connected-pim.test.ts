@@ -87,6 +87,8 @@ test('connected sources share runtime groups, readonly scopes, bounded coverage 
     const c=configSchema.parse({enabledSources:['agenda'],maintenanceEnabled:true,libraryRoot:root,sources:{agenda:definition}});
     const rotated=configSchema.parse({...c,sources:{agenda:{...definition,connector:{...definition.connector,token:{env:'ROTATED_TOKEN'}}}}});
     expect(sourceScope(c,'agenda')).toBe(sourceScope(rotated,'agenda'));expect(sourceAuthorization(c,'agenda').scopes).toEqual(['https://www.googleapis.com/auth/calendar.readonly']);
+    const largerBudget=configSchema.parse({...c,sources:{agenda:{...definition,sync:{timeoutMs:1800000,maxRequests:20000}}}});
+    expect(sourceScope(c,'agenda')).toBe(sourceScope(largerBudget,'agenda'));
     const provider=googleCalendarProvider('agenda',undefined,windowOptions,async path=>path.startsWith('/users/')?{items:[{id:'cal',summary:'Lab'}]}:{items:[event],nextSyncToken:'one'});
     expect((await syncConnected(c,undefined,()=>provider)).ok).toBe(true);
     const runtime=createRuntime(c);expect((await runtime.search_sources({queries:[{source:'all-calendars',query:'telescope'}]})).results[0]!.items).toHaveLength(1);

@@ -1,5 +1,5 @@
-import {googleTasksProvider,googleTasksScope} from './google-tasks';
-import {googleToken} from '../../platform/google-auth';
+import {googleTasksProvider} from './google-tasks';
+import {sourceToken} from '../../platform/source-auth';
 import {providerHttp} from '../../platform/http';
 import {snapshotStore,scopedProvider} from '../sync/cache';
 import {z} from 'zod';
@@ -14,7 +14,6 @@ import {ticktickProvider} from './ticktick';
 import {thingsRecords} from './things';
 import {appleRemindersProvider} from './apple-reminders';
 import {microsoftTodoProvider,graphOrigin} from './microsoft-todo';
-import {microsoftToken} from '../../platform/microsoft-auth';
 import {helper} from '../local/pim';
 
 export function taskProvider(c:Config,source:string):TaskProvider {
@@ -25,8 +24,7 @@ export function taskProvider(c:Config,source:string):TaskProvider {
   const scope=sourceScope(c,source);
   const bind=(provider:TaskProvider)=>scopedProvider(provider,scope);
   if(connector.type==='google-tasks'){
-    let accessToken:Promise<string>|undefined;
-    return bind(googleTasksProvider(source,connector.lists,providerHttp('https://tasks.googleapis.com/tasks/v1',{token:connector.token||(()=>accessToken??=googleToken(connector.oauth!,[googleTasksScope]))}).json));
+    return bind(googleTasksProvider(source,connector.lists,providerHttp('https://tasks.googleapis.com/tasks/v1',{token:sourceToken(c,source)}).json));
   }
   if(connector.type==='todoist')return bind(todoistProvider(source,taskHttp('https://api.todoist.com/api/v1',connector.token,'form')));
   if(connector.type==='ticktick')return bind(ticktickProvider(source,connector.projects,taskHttp('https://api.ticktick.com/open/v1',connector.token)));
@@ -35,8 +33,7 @@ export function taskProvider(c:Config,source:string):TaskProvider {
     return helper({...c,pimHelper:connector.helper||c.pimHelper,pimLauncher:connector.launcher||c.pimLauncher},args,32*1024*1024);
   }));
   if(connector.type==='microsoft-todo'){
-    let accessToken:Promise<string>|undefined;
-    const token=connector.token||(()=>accessToken??=microsoftToken(connector.oauth!));
+    const token=sourceToken(c,source);
     return bind(microsoftTodoProvider(source,connector.lists,taskHttp(graphOrigin,token)));
   }
   async function sync():Promise<TaskSnapshot>{

@@ -11,18 +11,19 @@ import type {SourceProvider} from '../sync/model';
 
 // tsdav owns discovery, XML, sync tokens and ctag fallback. The transport bounds
 // reads and only forwards credentials to explicitly configured DAV origins.
-export function davTransport(settings:Pick<DavSettings,'serverUrl'|'allowedOrigins'>,fetcher:typeof fetch=fetch):typeof fetch{
-  const origins=new Set([new URL(settings.serverUrl).origin,...settings.allowedOrigins]),deadline=Date.now()+600000;let count=0;
+export function davTransport(settings:Pick<DavSettings,'serverUrl'|'allowedOrigins'>,fetcher:typeof fetch=fetch,limits:{timeoutMs:number;maxRequests:number}={timeoutMs:600000,maxRequests:10000}):typeof fetch{
+  const origins=new Set([new URL(settings.serverUrl).origin,...settings.allowedOrigins]),deadline=Date.now()+limits.timeoutMs;let count=0;
   return (async(input:RequestInfo|URL,init:RequestInit={})=>{
     const url=new URL(input instanceof Request?input.url:String(input)),method=(init.method||'GET').toUpperCase();
     if(!origins.has(url.origin)||url.username||url.password||url.hash)fail('INVALID_PROVIDER_RESPONSE','DAV discovery requires an origin listed in allowedOrigins');
     if(!['GET','HEAD','OPTIONS','PROPFIND','REPORT'].includes(method))fail('READ_ONLY','DAV connector only supports reads');
-    if(++count>10000||Date.now()>deadline)fail('SOURCE_LIMIT','DAV sync exceeded its request budget');
+    if(++count>limits.maxRequests||Date.now()>deadline)fail('SOURCE_LIMIT','DAV sync exceeded its request budget');
     let response:Response;
     try{response=await fetcher(url,{...init,method,redirect:'manual',signal:AbortSignal.timeout(Math.max(1,Math.min(30000,deadline-Date.now())))});}catch{return fail('PROVIDER_UNAVAILABLE','DAV request failed or timed out');}
     if(response.status===401||response.status===429){await response.body?.cancel();fail(response.status===401?'AUTH_REQUIRED':'RATE_LIMITED','DAV returned HTTP '+response.status+'; check the credential or retry later');}
     const text=response.body?await boundedBody(response,32*1024*1024):null;
-    return new Response(text,{status:response.status,statusText:response.statusText,headers:response.headers});
+    const copy=new Response(text,{status:response.status,statusText:response.statusText,headers:response.headers});
+    Object.defineProperty(copy,'url',{value:response.url||url.href});return copy;
   }) as typeof fetch;
 }
 
@@ -30,9 +31,9 @@ type Client=Pick<DAVClient,'login'|'fetchCalendars'|'fetchAddressBooks'|'smartCo
 const object=z.object({url:z.string(),etag:z.string().optional(),data:z.string()});
 const state=z.object({version:z.literal(1),collections:z.array(z.object({url:z.string(),ctag:z.string().optional(),syncToken:z.string().optional(),objects:z.array(object)}))});
 function within(url:string,collection:string){const u=new URL(url),c=new URL(collection);if(u.origin!==c.origin||!u.pathname.startsWith(c.pathname.replace(/\/$/,'')+'/')||u.username||u.password||u.hash)fail('INVALID_PROVIDER_RESPONSE','DAV object left its selected collection');return u.href;}
-export function davProvider(source:string,settings:DavSettings,windowOptions:{pastDays:number;futureDays:number},create?:()=>Promise<Client>):SourceProvider{
+export function davProvider(source:string,settings:DavSettings,windowOptions:{pastDays:number;futureDays:number},create?:()=>Promise<Client>,limits?:{timeoutMs:number;maxRequests:number}):SourceProvider{
   let connection:Promise<Client>|undefined;
-  const client=()=>connection??=(create?create():(async()=>{const c=new DAVClient({serverUrl:settings.serverUrl,credentials:{username:settings.username,password:await readSecret(settings.password)},authMethod:'Basic',defaultAccountType:settings.type,fetch:davTransport(settings)});await c.login({loadCollections:false});return c;})());
+  const client=()=>connection??=(create?create():(async()=>{const c=new DAVClient({serverUrl:settings.serverUrl,credentials:{username:settings.username,password:await readSecret(settings.password)},authMethod:'Basic',defaultAccountType:settings.type,fetch:davTransport(settings,fetch,limits)});await c.login({loadCollections:false});return c;})());
   async function inventory(){const c=await client();const collections=settings.type==='caldav'?await c.fetchCalendars():await c.fetchAddressBooks();
     if(new Set(collections.map(v=>v.url)).size!==collections.length)fail('INVALID_PROVIDER_RESPONSE','DAV repeated a collection');
     if(settings.collections?.some(id=>!collections.some(v=>v.url===id)))fail('SOURCE_UNAVAILABLE','A selected DAV collection is missing or inaccessible');

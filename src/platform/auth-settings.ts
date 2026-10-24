@@ -21,5 +21,5 @@ export const oneCredential=(s:{token?:unknown;oauth?:unknown})=>!!s.token!==!!s.
 export function connectionIdentity(value:unknown):unknown{
   if(Array.isArray(value))return value.map(connectionIdentity);
   if(!value||typeof value!=='object')return value;
-  return Object.fromEntries(Object.entries(value).filter(([key])=>!['token','password','clientSecret','label'].includes(key)).map(([key,v])=>[key,connectionIdentity(v)]));
+  return Object.fromEntries(Object.entries(value).filter(([key])=>!['token','password','clientSecret','label','sync'].includes(key)).map(([key,v])=>[key,connectionIdentity(v)]));
 }

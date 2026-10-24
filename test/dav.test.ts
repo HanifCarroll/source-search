@@ -49,3 +49,10 @@ test('DAV transport disallows writes and credential forwarding; configuration ac
   const c=configSchema.parse({sources:{nextcloud:{adapter:'address-books',connector:{type:'carddav',account:'test',serverUrl:'https://cloud.example.test/remote.php/dav',username:'invented',password:{env:'NEXTCLOUD_PASSWORD'}}}}});
   expect(c.enabledSources).toEqual([]);
 });
+
+test('DAV transport retains the response URL for discovery and enforces the configured request limit',async()=>{
+  const f=davTransport({serverUrl:root,allowedOrigins:[]},(async()=>new Response('DAV response',{status:200})) as unknown as typeof fetch,{timeoutMs:30000,maxRequests:1});
+  const response=await f(root+'/books/',{method:'PROPFIND'});
+  expect(response.url).toBe(root+'/books/');expect(await response.text()).toBe('DAV response');
+  await expect(f(root+'/books/',{method:'PROPFIND'})).rejects.toMatchObject({code:'SOURCE_LIMIT'});
+});
