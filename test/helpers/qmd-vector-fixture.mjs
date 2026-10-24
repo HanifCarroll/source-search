@@ -57,22 +57,44 @@ try {
   const hits=await store.searchVector('invented query',{collection:'notes',limit:3});
   assert.deepEqual(hits.map(hit=>hit.filepath),[0,1,2].map(i=>'qmd://notes/note-'+i+'.md'));
   assert.equal(hits[0].score,1-db.prepare('SELECT vec_distance_cosine(?,?) AS d').get(new Float32Array(embedding),new Float32Array([Math.cos(0.2),Math.sin(0.2),0,0])).d);
-  // Work budget, not a wall-clock threshold: one vector lookup per collection
-  // must not become repeated whole-index passes as that collection grows.
-  assert.ok(vectorLookups<=1,`One collection caused ${vectorLookups} vector lookups`);
+  // One shared lookup, plus one scoped retry if excluded vectors are closer.
+  // Work must not grow into repeated whole-index passes with each collection.
+  assert.ok(vectorLookups<=2,`One collection caused ${vectorLookups} vector lookups`);
   vectorLookups=0;
-  const hybrid=await store.search({queries:[{type:'vec',query:'invented query'}],collections:['notes','other'],limit:10,chunkStrategy:'regex'});
+  store.internal.expandQuery=async()=>[];
+  const hybrid=await store.search({query:'invented query',collections:['notes','other'],limit:10,chunkStrategy:'regex'});
   assert.equal(hybrid.length,10);
   assert.ok(hybrid.every(hit=>hit.file.startsWith('qmd://notes/')||hit.file.startsWith('qmd://other/')));
   assert.ok(hybrid.some(hit=>hit.file==='qmd://notes/note-0.md'));
   assert.ok(vectorLookups<=2,`Two collections caused ${vectorLookups} vector lookups`);
+  // Shared lookup must agree with independently searching each collection.
+  const individual=await Promise.all(['notes','other'].map(collection=>store.searchVector('invented query',{collection,limit:10})));
+  const expected=individual.flat().sort((a,b)=>b.score-a.score).slice(0,10);
+  const together=await store.searchVector('invented query',{collection:['notes','other'],limit:10});
+  assert.deepEqual(together,expected);
+  // A tie at the document limit must keep the original collection-order merge.
+  for(let i=0;i<8;i++){insert('tie-note-'+i,'notes',0.0001);insert('tie-other-'+i,'other',0.0001);}
+  const tiedSeparate=(await Promise.all(['other','notes'].map(collection=>store.searchVector('invented query',{collection,limit:5})))).flat().sort((a,b)=>b.score-a.score).slice(0,5);
+  assert.deepEqual(await store.searchVector('invented query',{collection:['other','notes'],limit:5}),tiedSeparate);
+  db.exec("DELETE FROM documents WHERE path LIKE 'tie-%'; DELETE FROM vectors_vec WHERE hash_seq LIKE 'tie-%'; DELETE FROM content_vectors WHERE hash LIKE 'tie-%'; DELETE FROM content WHERE hash LIKE 'tie-%'");
+  // Thousands of chunks from one document can occupy the global nearest set.
+  // Fall back to per-collection retrieval instead of dropping the other sources.
+  const crowded=await store.searchVector('invented query',{collection:['large','other'],limit:3});
+  const crowdedSeparate=(await Promise.all(['large','other'].map(collection=>store.searchVector('invented query',{collection,limit:3})))).flat().sort((a,b)=>b.score-a.score).slice(0,3);
+  assert.deepEqual(crowded,crowdedSeparate);
   // The old large-collection fallback selected global neighbors first, letting
   // closer excluded records hide every result in the requested collection.
   vectorLookups=0;
   const large=await store.searchVector('invented query',{collection:'large',limit:3});
   assert.deepEqual(large.map(hit=>hit.filepath),['qmd://large/large-target.md','qmd://large/large-body.md']);
-  assert.ok(vectorLookups<=1);
+  assert.ok(vectorLookups<=2);
   assert.deepEqual(await store.searchVector('invented query',{collection:'missing',limit:3}),[]);
+  vectorLookups=0;
+  const all=await store.searchVector('invented query',{collection:['notes','other','large','excluded'],limit:3});
+  assert.equal(all.length,3);
+  // The inactive closest vector forces the scoped fallback even when all
+  // collection names are included. It must never leak into the result.
+  assert.ok(all.every(hit=>!hit.filepath.endsWith('/inactive.md')));
   const active=db.prepare('SELECT count(*) n FROM documents WHERE active=1').get().n;
   const maintenance=new Maintenance(store.internal);
   assert.equal(maintenance.cleanupOrphanedVectors(),1);

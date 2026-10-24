@@ -19,7 +19,7 @@ index 8f8df72d31e1016a728e98e1f85e0a0115c9527f..8f11123d4ea823e33e4d6b9df68e1c19
                  collections: filtered.length,
                  indexed: totalIndexed,
 diff --git a/dist/store.js b/dist/store.js
-index cd6c7cd87d4b912f19ca30d0bcf4adec4046a877..660e0480e09d9b4cd5314976837896a8af0a4733 100644
+index cd6c7cd87d4b912f19ca30d0bcf4adec4046a877..8f1299e66201b3a9b371431b23b0aaa42613f6ea 100644
 --- a/dist/store.js
 +++ b/dist/store.js
 @@ -3265,37 +3265,24 @@ export function searchFTS(db, query, limit = 20, collectionName) {
@@ -69,7 +69,19 @@ index cd6c7cd87d4b912f19ca30d0bcf4adec4046a877..660e0480e09d9b4cd5314976837896a8
  }
  function annVecScan(db, embedding, k) {
      const vecK = Math.max(1, Math.min(SQLITE_VEC_MAX_K, k));
-@@ -3324,12 +3311,9 @@ export async function searchVec(db, query, model, limit = 20, collectionName, se
+@@ -3313,10 +3300,7 @@ export async function searchVec(db, query, model, limit = 20, collectionName, se
+     if (!embedding)
+         return [];
+     const names = scopedCollectionNames(collectionName);
+-    if (names && names.length > 1) {
+-        const lists = await Promise.all(names.map(name => searchVec(db, query, model, limit, name, session, embedding, llm)));
+-        return mergeSearchResultsByScore(lists, limit);
+-    }
++    const multiple = names && names.length > 1;
+     const collectionFilter = names?.[0];
+     // IMPORTANT: We use a two-step query approach here because sqlite-vec virtual tables
+     // hang indefinitely when combined with JOINs in the same query. Do NOT try to
+@@ -3324,29 +3308,26 @@ export async function searchVec(db, query, model, limit = 20, collectionName, se
      // See: https://github.com/tobi/qmd/pull/23
      // Step 1: Get vector matches from sqlite-vec (no JOINs allowed).
      //
@@ -85,8 +97,13 @@ index cd6c7cd87d4b912f19ca30d0bcf4adec4046a877..660e0480e09d9b4cd5314976837896a8
      let vecResults;
      if (collectionFilter) {
          const collectionHashSeqs = withLazyContentVectorMigration(db, () => db.prepare(`
-@@ -3340,13 +3324,7 @@ export async function searchVec(db, query, model, limit = 20, collectionName, se
-       `).all(collectionFilter)).map((r) => r.hash_seq);
+         SELECT cv.hash || '_' || cv.seq AS hash_seq
+         FROM content_vectors cv
+         JOIN documents d ON d.hash = cv.hash AND d.active = 1
+-        WHERE d.collection = ?
+-      `).all(collectionFilter)).map((r) => r.hash_seq);
++        WHERE d.collection IN (${names.map(() => '?').join(',')})
++      `).all(...names)).map((r) => r.hash_seq);
          if (collectionHashSeqs.length === 0)
              return [];
 -        if (collectionHashSeqs.length <= COLLECTION_VEC_EXACT_SCAN_MAX) {
@@ -96,7 +113,85 @@ index cd6c7cd87d4b912f19ca30d0bcf4adec4046a877..660e0480e09d9b4cd5314976837896a8
 -            // Large collection: ANN with over-fetch, hard-capped at sqlite-vec's max k.
 -            vecResults = annVecScan(db, embedding, Math.max(limit * 30, limit * 3));
 -        }
-+        vecResults = exactVecScanByHashSeq(db, embedding, collectionHashSeqs, limit);
++        const allowed = new Set(collectionHashSeqs);
++        // Common case: all nearest vectors are already in the selected sources.
++        // Verify the entire window before using it; any excluded vector triggers
++        // the scoped lookup, so small collections cannot be starved.
++        const nearest = annVecScan(db, embedding, limit * 3);
++        vecResults = nearest.every(row => allowed.has(row.hash_seq))
++            ? nearest : exactVecScanByHashSeq(db, embedding, [...allowed], limit);
      }
      else {
          vecResults = annVecScan(db, embedding, limit * 3);
+@@ -3357,25 +3338,22 @@ export async function searchVec(db, query, model, limit = 20, collectionName, se
+     const hashSeqs = vecResults.map(r => r.hash_seq);
+     const distanceMap = new Map(vecResults.map(r => [r.hash_seq, r.distance]));
+     // Build query for document lookup
+-    const placeholders = hashSeqs.map(() => '?').join(',');
++    const keys = hashSeqs.map(key => { const at = key.lastIndexOf('_'); return [key.slice(0, at), Number(key.slice(at + 1))]; });
++    // Join through the composite primary key. Concatenating hash/seq in WHERE
++    // defeats it and scans all chunk metadata for every source and expansion.
+     let docSql = `
+-    SELECT
+-      cv.hash || '_' || cv.seq as hash_seq,
+-      cv.hash,
+-      cv.pos,
++    SELECT cv.hash || '_' || cv.seq as hash_seq, cv.hash, cv.pos,
+       'qmd://' || d.collection || '/' || d.path as filepath,
+-      d.collection || '/' || d.path as display_path,
+-      d.title,
+-      content.doc as body
+-    FROM content_vectors cv
++      d.collection || '/' || d.path as display_path, d.title, content.doc as body
++    FROM json_each(?) hit
++    JOIN content_vectors cv ON cv.hash = json_extract(hit.value, '$[0]') AND cv.seq = json_extract(hit.value, '$[1]')
+     JOIN documents d ON d.hash = cv.hash AND d.active = 1
+     JOIN content ON content.hash = d.hash
+-    WHERE cv.hash || '_' || cv.seq IN (${placeholders})
+-  `;
+-    const params = [...hashSeqs];
+-    if (collectionFilter) {
+-        docSql += ` AND d.collection = ?`;
+-        params.push(collectionFilter);
++    `;
++    const params = [JSON.stringify(keys)];
++    if (names) {
++        docSql += ` WHERE d.collection IN (${names.map(() => '?').join(',')})`;
++        params.push(...names);
+     }
+     const docRows = withLazyContentVectorMigration(db, () => db.prepare(docSql).all(...params));
+     // Combine with distances and dedupe by filepath
+@@ -3387,8 +3365,8 @@ export async function searchVec(db, query, model, limit = 20, collectionName, se
+             seen.set(row.filepath, { row, bestDist: distance });
+         }
+     }
+-    return Array.from(seen.values())
+-        .sort((a, b) => a.bestDist - b.bestDist)
++    const results = Array.from(seen.values())
++        .sort((a, b) => a.bestDist - b.bestDist || (multiple ? names.indexOf(a.row.display_path.split('/')[0]) - names.indexOf(b.row.display_path.split('/')[0]) : 0))
+         .slice(0, limit)
+         .map(({ row, bestDist }) => {
+         const collectionName = row.filepath.split('//')[1]?.split('/')[0] || "";
+@@ -3408,6 +3386,22 @@ export async function searchVec(db, query, model, limit = 20, collectionName, se
+             chunkPos: row.pos,
+         };
+     });
++    if (multiple) {
++        // A shared nearest-neighbor pass is equivalent to merging per-collection
++        // results when it contains the complete top documents. If many chunks
++        // crowd that window (or tie at its edge), preserve scoped recall by
++        // falling back to the original per-collection search. Never reduce k or
++        // search globally and then discard excluded collections.
++        const boundary = 1 - vecResults[vecResults.length - 1].distance;
++        const fullWindow = vecResults.length >= Math.min(SQLITE_VEC_MAX_K, Math.max(limit * 3, limit));
++        if (fullWindow && (results.length < limit || results[results.length - 1].score <= boundary)) {
++            return mergeSearchResultsByScore(await Promise.all(names.map(name => searchVec(db, query, model, limit, name, session, embedding, llm))), limit);
++        }
++        // Match the collection order used to break equal-score ties originally.
++        results.sort((a, b) => b.score - a.score || names.indexOf(a.collectionName) - names.indexOf(b.collectionName));
++    }
++    return results;
++
+ }
+ // =============================================================================
+ // Embeddings
