@@ -1,3 +1,6 @@
+import {nativeCache} from './native-cache';
+import {sourceFiles} from '../sources/local/notes';
+import {syncNativeMail,syncGmailChanges,gmailAnchor} from './mail-sync';
 import {archiveInstances,archiveConfig} from './archives';
 import {sourceKind,isMail} from '../domain/source-catalog';
 import { isProjected } from "../domain/source-policy";
@@ -11,7 +14,7 @@ import { allDatabaseRecords, databaseProjectionVersion } from "../sources/local/
 import { allMessageRecords } from "../sources/messages/index";
 import { exportPaths, archiveSignature, exportProjectionVersion, type ArchiveSource } from "../sources/archives/originals";
 import { rebuildArchive, indexStatus } from "../sources/archives/index";
-import { readMail, searchMail, formatMail, run, type Run, type MailSource } from "../sources/mail/index";
+import { readMail, searchMail, formatMail, connector, run, type Run, type MailSource } from "../sources/mail/index";
 import { hash, now, errorData } from "../domain/identity";
 import { type Query } from "../domain/contracts";
 import { libraryDB, getState, setState, publish, privateJSON } from "../search/library/store";
@@ -25,10 +28,12 @@ async function native(c:Config){
     if(!sourceEnabled(c,source))continue;
     const kind=sourceKind(source,c), scoped=sourceConfig(c,source),path=kind==="messages"?scoped.messages:databasePath(c,source),paths=[path,path+"-wal"],signature=await stampPaths(paths);
     const projectionVersion=kind==="messages" ? 1 : databaseProjectionVersion(source,c);
-    if(getState(db,source).signature===signature && (getState(db,source).projectionVersion||1)===projectionVersion && getState(db,source).state!=="error")continue;
-    const records=kind==="messages"?(await allMessageRecords(scoped)).map(r=>({...r,...(source!==kind?{adapter:kind}:{}),ref:{...r.ref,source}})):await allDatabaseRecords(c,source);
+    if(getState(db,source).signature===signature && (getState(db,source).projectionVersion||1)===projectionVersion && getState(db,source).scope===sourceScope(c,source) && getState(db,source).state!=="error"){setState(db,source,{...getState(db,source),checkedAt:now()});continue;}
+    const cache=nativeCache(db,source,projectionVersion+sourceScope(c,source));
+    const records=kind==="messages"?(await allMessageRecords(scoped,cache.reuse)).map(r=>({...r,...(source!==kind?{adapter:kind}:{}),ref:{...r.ref,source}})):await allDatabaseRecords(c,source,cache.reuse);
     if(signature!==await stampPaths(paths))throw Error("Source changed during snapshot; retaining previous projection and retrying");
-    await publish(c,source,records,{paths,signature},{signature,projectionVersion,state:"ready",error:null,checkedAt:now(),coverage:"Current local database; absent text and phone-only history cannot be recovered"});
+    await publish(c,source,records,{paths},{signature,scope:sourceScope(c,source),projectionVersion,syncStrategy:"snapshot-row-diff",state:"ready",error:null,checkedAt:now(),coverage:"Current local database; absent text and phone-only history cannot be recovered"});
+    setState(db,source,{...getState(db,source),lastSuccessfulSync:now(),incremental:cache.commit()});
    }catch(e){setState(db,source,{...getState(db,source),state:"error",error:errorData(e),checkedAt:now()});}
   }
  }finally{db.close();}
@@ -39,15 +44,18 @@ async function archives(c:Config){
   const kind=sourceKind(source,c) as ArchiveSource,scoped=source===kind?c:archiveConfig(c,source);
   if(!exportPaths(scoped,kind).length){setState(db,source,{state:"waiting-for-export",records:0,chunks:0});continue;}
   try {
-   const signature=await archiveSignature(c,source),projectionVersion=exportProjectionVersion(kind);
+   const paths:string[]=[];
+   for(const p of exportPaths(scoped,kind)){const s=await lstat(p);if(s.isDirectory())paths.push(...(await sourceFiles(p,()=>true)).paths.map(name=>join(p,name)));else paths.push(p,p+'-wal');}
+   const fileStamp=await stampPaths(paths),previous=getState(db,source),projectionVersion=exportProjectionVersion(kind),scope=sourceScope(c,source);
+   if(previous.fileStamp===fileStamp && previous.scope===scope && previous.projectionVersion===projectionVersion && previous.state==='ready'){setState(db,source,{...previous,checkedAt:now()});continue;}
+   const signature=await archiveSignature(c,source);
    let state:any;try{state=JSON.parse((await indexStatus(scoped))[kind]||'{}');}catch{state={};}
    if(state.signature!==signature||state.projectionVersion!==projectionVersion)await rebuildArchive(scoped);
-   const previous=getState(db,source);
-   if(previous.signature===signature&&previous.projectionFormat===2&&previous.projectionVersion===projectionVersion&&previous.state!=="error")continue;
+   if(previous.signature===signature&&previous.scope===scope&&previous.projectionFormat===2&&previous.projectionVersion===projectionVersion&&previous.state!=="error"){setState(db,source,{...previous,fileStamp,checkedAt:now()});continue;}
    const index=new Database(scoped.index,{readonly:true});
    try {
     const records=(index.query("SELECT data,body FROM records WHERE source=? ORDER BY id").all(kind) as any[]).map(r=>{const record={...JSON.parse(r.data),body:r.body};record.ref.source=source;if(source!==kind)record.adapter=kind;return record;});
-    await publish(c,source,records,{archive:source,signature},{projectionFormat:2,projectionVersion,signature,state:"ready",error:null,checkedAt:now(),coverage:"Selected export snapshot only; no automatic account export"});
+    await publish(c,source,records,{archive:source,signature},{projectionFormat:2,projectionVersion,signature,fileStamp,scope,syncStrategy:"changed-export",state:"ready",error:null,checkedAt:now(),coverage:"Selected export snapshot only; no automatic account export"});
    }finally{index.close();}
   }catch(e){setState(db,source,{...getState(db,source),state:"error",error:errorData(e),checkedAt:now()});}
  }}finally{db.close();}
@@ -77,7 +85,11 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
     state=getState(db,source);
    }
    if(state.nextScanAt && Date.now()<state.nextScanAt)continue;
-   state={...state,accountSignature,cycle:state.cycle||now(),state:"backfilling",error:null};
+   const backend=connector(c,source);
+   if(backend){await syncNativeMail(c,db,source,backend);continue;}
+   if(sourceKind(source,c)==='gmail' && await syncGmailChanges(c,db,source,execute))continue;
+   state=getState(db,source);
+   state={...state,accountSignature,cycle:state.cycle||now(),state:state.lastCompleteScan?'refreshing':'backfilling',error:null,syncStrategy:'snapshot-reconciliation'};
    const cacheItems=async(items:any[])=>{
     for(let offset=0;offset<items.length;offset+=4){
      const batch=await Promise.allSettled(items.slice(offset,offset+4).map(async item=>{
@@ -87,6 +99,8 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
        // Write attachment evidence before committing its cached-record checkpoint.
        await privateJSON(join(c.libraryRoot,"mail-raw",source+"-"+(item.id.length>180?hash(item.id):item.id)+".json"),{source,id:item.id,ref:record.ref,accountSignature,raw});
        db.query("INSERT OR REPLACE INTO mail VALUES(?,?,?,?,?)").run(source,item.id,JSON.stringify(record),item.summary,state.cycle);changed=true;
+       state.dirty=true;
+       if(sourceKind(source,c)==='gmail' && !state.gmailAnchor)state.gmailAnchor=await gmailAnchor(c,source,item.id);
       }else db.query("UPDATE mail SET seen=? WHERE source=? AND id=?").run(state.cycle,source,item.id);
      }));
      const failed=batch.find(r=>r.status==="rejected");if(failed?.status==="rejected")throw failed.reason;
@@ -94,7 +108,9 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
    };
    const summaries=(items:any[])=>items.map(item=>({id:item.ref.id,summary:hash(JSON.stringify([item.title,item.author,item.occurredAt,item.metadata]))}));
    // Keep new arrivals visible while historical pages are still backfilling.
-   await cacheItems(summaries((await searchMail({source,query:"",limit:25,excludeSpamTrash:true},execute,{remaining:0,records:new Map()},c)).items));
+   const recent=summaries((await searchMail({source,query:"",limit:25,excludeSpamTrash:true},execute,{remaining:0,records:new Map()},c)).items);
+   await cacheItems(recent);
+   if(sourceKind(source,c)==='gmail' && !state.gmailAnchor && recent[0])state.gmailAnchor=await gmailAnchor(c,source,recent[0].id);
    let pending:any[]=state.pending||[],next=state.cursor;
    // A complete paginated listing is the deletion reconciliation boundary. Interrupted/failed passes never prune.
    for(let page=0;page<8;page++){
@@ -113,13 +129,13 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
      const removed=db.query("SELECT id FROM mail WHERE source=? AND seen!=?").all(source,state.cycle) as any[];
      db.query("DELETE FROM mail WHERE source=? AND seen!=?").run(source,state.cycle);
      for(const row of removed)await rm(join(c.libraryRoot,"mail-raw",source+"-"+(row.id.length>180?hash(row.id):row.id)+".json"),{force:true});
-     changed ||= removed.length>0;
-     state={...state,cycle:null,cursor:undefined,pending:[],pageEnd:false,lastCompleteScan:now(),nextScanAt:Date.now()+15*60*1000,state:"ready"};break;
+     changed ||= removed.length>0;state.dirty ||= removed.length>0;
+     state={...state,cycle:null,cursor:undefined,pending:[],pageEnd:false,lastCompleteScan:now(),lastSuccessfulSync:now(),gmailHistory:state.gmailAnchor,gmailPage:undefined,gmailAnchor:undefined,nextScanAt:Date.now()+(state.gmailAnchor?60000:15*60*1000),state:"ready"};break;
     }
    }
    const records=(db.query("SELECT data FROM mail WHERE source=? ORDER BY id").all(source) as any[]).map(r=>JSON.parse(r.data));
    setState(db,source,{...state,checkedAt:now(),records:records.length,coverage:"Cached mailbox text excluding spam/trash; deletion reconciliation only after complete provider scan"});
-   if(changed || !state.publishedAt)await publish(c,source,records,{mail:source,accountSignature},{...getState(db,source)});
+   if(changed || state.dirty || !state.publishedAt){await publish(c,source,records,{mail:source,accountSignature},{...getState(db,source)});setState(db,source,{...getState(db,source),dirty:false});}
   }catch(e){
    // Fastmail invalidates offsets if mailbox changes. Re-enumerate; keep cached records until a complete pass succeeds.
    const code=errorData(e).code;

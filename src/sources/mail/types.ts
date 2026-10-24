@@ -7,7 +7,11 @@ export type MailContinuation={position:number;state:string;scope?:string};
 export type MailResults={messages:MailSummary[];position:number;queryState:string;total:number;warnings:string[]};
 export type MailThread={messages:MailDetail[];warnings:string[]};
 export type MailAttachment={id:string;filename:string;mime_type:string;size:number};
+// Checkpoints are local to an account/scope. A full inventory may prune only
+// when its final page succeeds; deltas name removals explicitly.
+export type MailSyncPage={checkpoint:unknown;messages:MailDetail[];removed:string[];inventory?:string[];hasMore:boolean;strategy:string};
 export interface MailConnector {
+  sync(checkpoint?:unknown):Promise<MailSyncPage>;
   status():Promise<{folders:Folder[];warnings:string[]}>;
   search(q:Query,page?:MailContinuation):Promise<MailResults>;
   read(id:string):Promise<MailDetail>;

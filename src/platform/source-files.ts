@@ -22,7 +22,22 @@ export async function contained(root: string, name: string) {
 }
 export async function textFile(path: string, maxBytes = 2 * 1024 * 1024) {
   const st = await regular(path); if (st.size > maxBytes) fail("SOURCE_LIMIT", "Source file exceeds the read budget");
+  const stamp=JSON.stringify([st.dev,st.ino,st.size,st.mtimeMs,st.ctimeMs,st.mode]),saved=textCache.get(path);
+  if(saved?.stamp===stamp)return saved.text;
+  if(saved){textBytes-=saved.bytes;textCache.delete(path);}
   const data = await readFile(path);
   if (data.length > maxBytes) fail("SOURCE_LIMIT", "Source grew beyond the read budget");
-  return data.toString("utf8");
+  const text=data.toString('utf8');
+  // Small live text sources (notes, ICS, vCards, bookmarks) reuse unchanged
+  // bytes. Full exports remain streamed/uncached and reads still check paths.
+  if(data.length<=256*1024){
+    const after=await regular(path);
+    if(stamp===JSON.stringify([after.dev,after.ino,after.size,after.mtimeMs,after.ctimeMs,after.mode])){
+      while(textBytes+data.length>32*1024*1024 || textCache.size>=2048){const key=textCache.keys().next().value!;textBytes-=textCache.get(key)!.bytes;textCache.delete(key);}
+      textCache.set(path,{stamp,text,bytes:data.length});textBytes+=data.length;
+    }
+  }
+  return text;
 }
+const textCache=new Map<string,{stamp:string;text:string;bytes:number}>();
+let textBytes=0;

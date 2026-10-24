@@ -1,10 +1,10 @@
 import {z} from 'zod';
-import {fail} from '../../domain/identity';
+import {fail,hash,stableJson} from '../../domain/identity';
 import {words} from '../../domain/query';
 import type {Query} from '../../domain/contracts';
 import type {JmapSettings} from '../../platform/source-settings';
 import {readSecret} from './credentials';
-import type {Folder,MailConnector,MailContinuation,MailDetail,MailSummary} from './types';
+import type {Folder,MailConnector,MailContinuation,MailDetail,MailSummary,MailSyncPage} from './types';
 
 const CORE='urn:ietf:params:jmap:core', MAIL='urn:ietf:params:jmap:mail';
 const idSchema=z.string().regex(/^[A-Za-z0-9_-]{1,255}$/);
@@ -79,11 +79,12 @@ class Session {
     this.accountId=accountId;this.apiUrl=session.apiUrl;this.maxGet=Math.min(core.maxObjectsInGet,100);
     this.downloadUrl=session.downloadUrl||'';
   }
-  async call(method:'Mailbox/get'|'Email/query'|'Email/get'|'Thread/get',args:Record<string,unknown>):Promise<any>{
+  async call(method:'Mailbox/get'|'Email/query'|'Email/get'|'Thread/get'|'Email/changes',args:Record<string,unknown>):Promise<any>{
     const response=await this.request(this.apiUrl,{using:[CORE,MAIL],methodCalls:[[method,{...args,accountId:this.accountId},'read']]});
     const result=response?.methodResponses?.find((r:any)=>Array.isArray(r) && r[2]==='read');
     if(result?.[0]==='error'){
       const type=result[1]?.type;
+      if(type==='cannotCalculateChanges')fail('SYNC_STATE_EXPIRED','JMAP change history expired; a new inventory is required');
       fail(type==='unsupportedFilter'?'UNSUPPORTED_FILTER':type==='unsupportedSort'?'UNSUPPORTED_SORT':type==='accountNotFound'?'SOURCE_NOT_CONFIGURED':type==='forbidden'?'PERMISSION_DENIED':'MAIL_PROVIDER_ERROR',`JMAP ${method} failed; ${['unsupportedFilter','unsupportedSort','accountNotFound','forbidden','serverFail','serverUnavailable','tooManyObjects'].includes(type)?type:'provider rejected the request'}`);
     }
     if(result?.[0]!==method || result[1]?.accountId!==this.accountId)fail('INVALID_PROVIDER_RESPONSE','Unexpected JMAP method or account');
@@ -91,6 +92,34 @@ class Session {
   }
   async boxes(){return parse(boxesSchema,(await this.call('Mailbox/get',{properties:['id','name','role']})).list);}
   async status(){const boxes=await this.boxes();return {folders:this.settings.folders?resolveFolders(boxes,this.settings.folders):boxes,warnings:[]};}
+  async sync(checkpoint?:unknown):Promise<MailSyncPage>{
+    const boxes=await this.boxes(),boxKey=hash(stableJson([...boxes].sort((a,b)=>a.id.localeCompare(b.id))));
+    const saved=checkpoint as {kind?:string;state?:string;boxes?:string;position?:number;queryState?:string;ids?:string[]}|undefined;
+    let previous=saved?.kind==='jmap' && saved.boxes===boxKey?saved:undefined;
+    const eligible=(e:Email)=>!boxes.some(b=>(b.role==='junk'||b.role==='trash') && e.mailboxIds[b.id]) && (!this.settings.folders || resolveFolders(boxes,this.settings.folders).some(b=>e.mailboxIds[b.id]));
+    const base={kind:'jmap',boxes:boxKey};
+    if(previous?.state && previous.position===undefined){
+      try {
+        const changes=parse(z.object({oldState:z.string(),newState:z.string().min(1),hasMoreChanges:z.boolean(),created:z.array(idSchema),updated:z.array(idSchema),destroyed:z.array(idSchema)}),await this.call('Email/changes',{sinceState:previous.state,maxChanges:25}));
+        if(changes.oldState!==previous.state || changes.hasMoreChanges && changes.newState===previous.state)fail('INVALID_PROVIDER_RESPONSE','JMAP did not advance its change checkpoint');
+        const ids=[...new Set([...changes.created,...changes.updated])].filter(id=>!changes.destroyed.includes(id));
+        const messages:MailDetail[]=[],removed=[...changes.destroyed];
+        // get can race a later deletion. notFound is a removal, never an empty
+        // successful full inventory; other failures leave the checkpoint intact.
+        for(const id of ids){try{const [metadata]=await this.emails([id],false);if(!eligible(metadata!)){removed.push(id);continue;}const [e]=await this.emails([id],true);if(eligible(e!))messages.push(this.detail(e!,boxes));else removed.push(id);}catch(e){if((e as any).code==='NOT_FOUND')removed.push(id);else throw e;}}
+        return {checkpoint:{...base,state:changes.newState},messages,removed,hasMore:changes.hasMoreChanges,strategy:'jmap-changes'};
+      }catch(e){if((e as any).code!=='SYNC_STATE_EXPIRED')throw e;previous=undefined;}
+    }
+    // Capture Email state BEFORE enumeration. After the snapshot, changes since
+    // this token cover modifications made while bodies were being downloaded.
+    const state=previous?.state || parse(z.object({state:z.string().min(1)}),await this.call('Email/get',{ids:[],properties:['id']})).state;
+    const position=previous?.position||0;
+    const page=await this.search({source:'sync',query:'',limit:25,excludeSpamTrash:true},position?{position,state:previous!.queryState!}:undefined);
+    const ids=[...(previous?.ids||[]),...page.messages.map(m=>m.message_id)],messages:MailDetail[]=[];
+    for(const m of page.messages){const [e]=await this.emails([m.message_id],true);if(eligible(e!))messages.push(this.detail(e!,boxes));else fail('STALE_CURSOR','Mail folders changed during inventory');}
+    const end=position+page.messages.length,hasMore=end<page.total;
+    return {checkpoint:{...base,state,...(hasMore?{position:end,queryState:page.queryState,ids}:{})},messages,removed:[],...(!hasMore?{inventory:ids}:{}),hasMore,strategy:'jmap-changes'};
+  }
   async emails(ids:string[],body:boolean){
     const records:Email[]=[];
     for(let i=0;i<ids.length;i+=Math.min(this.maxGet,body?1:100)){
@@ -177,10 +206,10 @@ export function jmapConnector(settings:JmapSettings):MailConnector {
     try {const session=new Session(settings,controller.signal);await session.connect();return await fn(session);}
     catch(e){
       if(controller.signal.aborted)fail('TIMEOUT','JMAP request timed out');
-      if(['CREDENTIAL_UNAVAILABLE','INVALID_PROVIDER_RESPONSE','AUTHENTICATION_FAILED','RATE_LIMITED','MAIL_CONNECTION_FAILED','OUTPUT_LIMIT','UNSUPPORTED_PROVIDER','SOURCE_NOT_CONFIGURED','UNSUPPORTED_FILTER','UNSUPPORTED_SORT','PERMISSION_DENIED','MAIL_PROVIDER_ERROR','UNKNOWN_FOLDER','NOT_FOUND','SOURCE_RESTRICTED','STALE_CURSOR','PARTIAL_CONTEXT'].includes((e as any)?.code))throw e;
+      if(['CREDENTIAL_UNAVAILABLE','INVALID_PROVIDER_RESPONSE','AUTHENTICATION_FAILED','RATE_LIMITED','MAIL_CONNECTION_FAILED','OUTPUT_LIMIT','UNSUPPORTED_PROVIDER','SOURCE_NOT_CONFIGURED','UNSUPPORTED_FILTER','UNSUPPORTED_SORT','PERMISSION_DENIED','MAIL_PROVIDER_ERROR','UNKNOWN_FOLDER','NOT_FOUND','SOURCE_RESTRICTED','STALE_CURSOR','PARTIAL_CONTEXT','SYNC_STATE_EXPIRED'].includes((e as any)?.code))throw e;
       return fail('MAIL_CONNECTION_FAILED','Could not reach JMAP; check the session URL and TLS connection');
     }
     finally {clearTimeout(timer);}
   }
-  return {status:()=>use(s=>s.status()),search:(q,p)=>use(s=>s.search(q,p)),read:id=>use(s=>s.read(id)),thread:(id,selected)=>use(s=>s.thread(id,selected)),attachments:id=>use(s=>s.attachments(id)),download:(id,a,max)=>use(s=>s.download(id,a,max))};
+  return {sync:checkpoint=>use(s=>s.sync(checkpoint)),status:()=>use(s=>s.status()),search:(q,p)=>use(s=>s.search(q,p)),read:id=>use(s=>s.read(id)),thread:(id,selected)=>use(s=>s.thread(id,selected)),attachments:id=>use(s=>s.attachments(id)),download:(id,a,max)=>use(s=>s.download(id,a,max))};
 }

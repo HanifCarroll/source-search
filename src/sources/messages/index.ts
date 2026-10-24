@@ -21,7 +21,7 @@ function queryRows(db: Database, suffix: string, values: (string | number)[]) {
 function record(db: Database, row: any): RecordData {
   const decoded = typeof row.text === "string" ? { text: row.text, status: "text" } : row.attributedBody ? decodeAttributedBody(row.attributedBody) : { text: "", status: "missing" };
   const body = decoded.text || "", id = row.guid || `row:${row.rowid}`;
-  const chats = db.query("SELECT c.guid FROM chat c JOIN chat_message_join j ON j.chat_id=c.ROWID WHERE j.message_id=? ORDER BY c.ROWID").all(row.rowid) as { guid: string }[];
+  const chats: {guid:string}[] = row.chats ?? db.query("SELECT c.guid FROM chat c JOIN chat_message_join j ON j.chat_id=c.ROWID WHERE j.message_id=? ORDER BY c.ROWID").all(row.rowid) as { guid: string }[];
   const outgoing = row.is_from_me === 1n, known = row.is_from_me === 1n || row.is_from_me === 0n;
   return { ref: { source: "messages", id, version: hash(JSON.stringify([body, String(row.date), String(row.is_from_me)])) }, title: body.slice(0, 120) || "(Message without readable text)", body, type: "message", locator: `source-search://messages/${encodeURIComponent(id)}`,
     occurredAt: messagesTimestampToIso(row.date), observedAt: now(), author: row.itemType ? "unknown (system item)" : known ? outgoing ? "self" : row.sender || "unknown sender" : "unknown direction",
@@ -64,7 +64,9 @@ export async function readMessage(config: Config, ref: Ref, context: boolean) {
   } finally { await snap.close(); }
 }
 
-export async function allMessageRecords(config:Config){
+export async function allMessageRecords(config:Config,reuse?:(id:string,raw:unknown,project:()=>RecordData)=>RecordData){
  const snap=await createSnapshot(config.messages);
- try{return queryRows(snap.database,"ORDER BY m.ROWID",[]).map(r=>record(snap.database,r));}finally{await snap.close();}
+ try{const chats=new Map<string,{guid:string}[]>();
+ for(const r of snap.database.query('SELECT j.message_id,c.guid FROM chat_message_join j JOIN chat c ON c.ROWID=j.chat_id ORDER BY c.ROWID').all() as {message_id:bigint;guid:string}[]){const key=String(r.message_id);chats.set(key,[...(chats.get(key)||[]),{guid:r.guid}]);}
+ return queryRows(snap.database,"ORDER BY m.ROWID",[]).map(r=>{r.chats=chats.get(String(r.rowid))||[];return reuse?reuse(String(r.rowid),r,()=>record(snap.database,r)):record(snap.database,r);});}finally{await snap.close();}
 }

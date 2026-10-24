@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite";
 import { writeFile, rename, rm, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {sourceScope, type Config} from "../../platform/config";
-import { hash, now } from "../../domain/identity";
+import { hash, now, stableJson } from "../../domain/identity";
 import { type RecordData, type Ref } from "../../domain/contracts";
 import { contentSections } from "../../domain/content";
 
@@ -53,11 +53,14 @@ export async function publish(c:Config,source:string,records:RecordData[],guard:
  const chunks=makeChunks(source,records,guard),folder=join(c.libraryRoot,"collections","ss-"+source);
  await privateDirectory(c.libraryRoot);await privateDirectory(folder);const db=libraryDB(c,true);
  try{
-  const old=new Map((db.query("SELECT id,hash FROM chunks WHERE source=?").all(source) as any[]).map(r=>[r.id,r.hash]));
+  const old=new Map((db.query("SELECT id,hash,body,refs,guard FROM chunks WHERE source=?").all(source) as any[]).map(r=>[r.id,r]));
+  const changed:Chunk[]=[];
   let next=0;
-  await Promise.all(Array.from({length:16},async()=>{while(next<chunks.length){const ch=chunks[next++]!;if(old.get(ch.id)!==ch.hash){const p=join(folder,ch.id+".md");await writeFile(p+".tmp",ch.body,{mode:0o600});await rename(p+".tmp",p);}old.delete(ch.id);}}));
+  await Promise.all(Array.from({length:16},async()=>{while(next<chunks.length){const ch=chunks[next++]!;if(old.get(ch.id)?.hash!==ch.hash){const p=join(folder,ch.id+".md");await writeFile(p+".tmp",ch.body,{mode:0o600});await rename(p+".tmp",p);}
+    const previous=old.get(ch.id);if(!previous || previous.hash!==ch.hash || previous.body!==ch.body || previous.refs!==JSON.stringify(ch.refs) || stableJson(JSON.parse(previous.guard))!==stableJson(ch.guard))changed.push(ch);
+    old.delete(ch.id);}}));
   // Files precede manifest commit. Readers compare QMD hash with manifest and reject a mid-update mismatch.
-  db.transaction(()=>{db.query("DELETE FROM chunks WHERE source=?").run(source);const put=db.query("INSERT INTO chunks VALUES(?,?,?,?,?,?,?)");for(const ch of chunks)put.run(ch.id,ch.source,ch.title,ch.body,ch.hash,JSON.stringify(ch.refs),JSON.stringify(ch.guard));setState(db,source,{...getState(db,source),...extra,records:records.length,textRecords:records.filter(r=>r.body.trim()).length,chunks:chunks.length,publishedAt:now(),guard});})();
+  db.transaction(()=>{for(const id of old.keys())db.query("DELETE FROM chunks WHERE source=? AND id=?").run(source,id);const put=db.query("INSERT OR REPLACE INTO chunks VALUES(?,?,?,?,?,?,?)");for(const ch of changed)put.run(ch.id,ch.source,ch.title,ch.body,ch.hash,JSON.stringify(ch.refs),JSON.stringify(ch.guard));setState(db,source,{...getState(db,source),...extra,records:records.length,textRecords:records.filter(r=>r.body.trim()).length,chunks:chunks.length,publishedAt:changed.length||old.size?now():getState(db,source).publishedAt||now(),projectionRevision:changed.length||old.size?randomUUID():getState(db,source).projectionRevision||randomUUID(),guard});})();
   const live=new Set(chunks.map(ch=>ch.id+".md"));
   for(const name of await readdir(folder))if(/^[a-f0-9]{64}\.md(?:\.tmp)?$/.test(name) && !live.has(name))await rm(join(folder,name),{force:true});
  }finally{db.close();}

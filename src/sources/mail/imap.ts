@@ -6,7 +6,7 @@ import {parseMimeMessage} from '../../formats/mime';
 import type {Query} from '../../domain/contracts';
 import type {ImapSettings} from '../../platform/source-settings';
 import {readSecret} from './credentials';
-import type {Folder,MailConnector,MailContinuation,MailDetail,MailSummary} from './types';
+import type {Folder,MailConnector,MailContinuation,MailDetail,MailSummary,MailSyncPage} from './types';
 
 const refSchema=z.union([
   z.object({e:z.string().min(1).max(255)}).strict(),
@@ -14,6 +14,8 @@ const refSchema=z.union([
 ]);
 type ImapRef=z.infer<typeof refSchema>;
 type Candidate={ref:ImapRef;message:FetchMessageObject;folder:Folder;folders:Folder[];validity:string;date:string};
+type MailboxCheckpoint={validity:string;modseq?:string;uidNext?:number;exists?:number;rows:Record<string,MailSummary>};
+type SyncCheckpoint={kind:'imap';boxes:Record<string,MailboxCheckpoint>;visible:Record<string,MailSummary>;pending?:string[];removed?:string[]};
 const encode=(ref:ImapRef)=>'imap_'+Buffer.from(JSON.stringify(ref)).toString('base64url');
 function decode(id:string):ImapRef{
   try{if(!id.startsWith('imap_') || id.length>4000)throw Error();return refSchema.parse(JSON.parse(Buffer.from(id.slice(5),'base64url').toString()));}
@@ -57,6 +59,53 @@ class Session {
     return boxes;
   }
   async status(){const boxes=await this.boxes();return {folders:this.allowed(boxes),warnings:[]};}
+  async sync(checkpoint?:unknown):Promise<MailSyncPage>{
+    const previous=(checkpoint as SyncCheckpoint|undefined)?.kind==='imap'?checkpoint as SyncCheckpoint:undefined;
+    let next:SyncCheckpoint;
+    if(previous?.pending?.length)next=previous;
+    else {
+      const boxes=this.allowed(await this.boxes()),snapshots:Record<string,MailboxCheckpoint>={};
+      let count=0;
+      for(const box of boxes)await this.inBox(box,async validity=>{
+        const mailbox=this.client.mailbox;if(!mailbox)fail('INVALID_PROVIDER_RESPONSE','Mailbox closed during sync');
+        const old=previous?.boxes[box.id],modseq=mailbox.highestModseq?String(mailbox.highestModseq):undefined;
+        const current:MailboxCheckpoint={validity,modseq,uidNext:mailbox.uidNext,exists:mailbox.exists,rows:{}};
+        if(old && old.validity===validity && modseq && old.modseq===modseq && old.uidNext===current.uidNext && old.exists===current.exists)current.rows=old.rows;
+        else {
+          // UID inventories also work on servers without CONDSTORE. Fetch only
+          // new envelopes; IMAP message contents are immutable for a given UID.
+          const ids=await this.ids({all:true}),missing:number[]=[];
+          for(const uid of ids){const cached=old?.validity===validity?old.rows[String(uid)]:undefined;if(cached)current.rows[String(uid)]=cached;else missing.push(uid);}
+          for(let offset=0;offset<missing.length;offset+=200){
+            const batch=missing.slice(offset,offset+200),messages=await this.client.fetchAll(batch,{uid:true,envelope:true,internalDate:true,size:true,threadId:true},{uid:true});
+            if(messages.length!==batch.length || new Set(messages.map(m=>m.uid)).size!==batch.length || messages.some(m=>!batch.includes(m.uid)))fail('STALE_CURSOR','Mailbox changed during inventory');
+            for(const message of messages){
+              const ref:ImapRef=message.emailId?{e:message.emailId}:{f:box.id,v:validity,u:message.uid};
+              current.rows[String(message.uid)]=summary({ref,message,folder:box,folders:[box],validity,date:receivedAt(message)});
+            }
+          }
+        }
+        count+=Object.keys(current.rows).length;
+        if(count>this.settings.maxSearchMessages)fail('SEARCH_TOO_BROAD','Mailbox inventory exceeds maxSearchMessages; select fewer folders or increase that limit');
+        // Names and special-use roles can change without any message UID change.
+        current.rows=Object.fromEntries(Object.entries(current.rows).map(([uid,row])=>[uid,{...row,folders:[box]}]));
+        snapshots[box.id]=current;
+      });
+      const visible:Record<string,MailSummary>={},excluded=new Set<string>();
+      for(const box of Object.values(snapshots))for(const row of Object.values(box.rows)){
+        if(row.folders.some(b=>b.role==='junk'||b.role==='trash')){excluded.add(row.message_id);continue;}
+        const old=visible[row.message_id];visible[row.message_id]=old?{...old,folders:[...old.folders,...row.folders]}:row;
+      }
+      for(const id of excluded)delete visible[id];
+      for(const row of Object.values(visible))row.folders.sort((a,b)=>textCompare(a.id,b.id));
+      const changed=Object.keys(visible).filter(id=>stableJson(visible[id])!==stableJson(previous?.visible[id]??null));
+      next={kind:'imap',boxes:snapshots,visible,pending:changed,removed:Object.keys(previous?.visible||{}).filter(id=>!visible[id])};
+    }
+    const pending=next.pending||[],messages:MailDetail[]=[];
+    for(const id of pending.slice(0,25))messages.push(await this.read(id));
+    const remaining=pending.slice(25),hasMore=remaining.length>0;
+    return {checkpoint:{...next,pending:remaining,removed:hasMore?next.removed:[]},messages,removed:hasMore?[]:next.removed||[],...(!hasMore?{inventory:Object.keys(next.visible)}:{}),hasMore,strategy:'imap-uids'};
+  }
   private async inBox<T>(box:Folder,fn:(validity:string)=>Promise<T>){
     const lock=await this.client.getMailboxLock(box.id,{readOnly:true});
     try {
@@ -152,7 +201,7 @@ class Session {
         if((part.size||0)+total>this.settings.maxMessageBytes)fail('OUTPUT_LIMIT','Email text exceeds maxMessageBytes');
         const key=part.part||'TEXT';
         const fetched=await this.client.fetchOne(row.message.uid,{uid:true,bodyParts:[{key,start:0,maxLength:this.settings.maxMessageBytes-total+1}]},{uid:true});
-        const bytes=fetched && fetched.bodyParts?.get(key);if(!bytes)fail('NOT_FOUND','Email text part is unavailable');
+        const bytes=fetched && fetched.bodyParts?.get(key.toLowerCase());if(!bytes)fail('NOT_FOUND','Email text part is unavailable');
         total+=bytes.length;if(total>this.settings.maxMessageBytes)fail('OUTPUT_LIMIT','Email text exceeds maxMessageBytes');
         // Let mailparser decode transfer encodings, charsets, flowed text and HTML.
         const parameters=Object.entries(part.parameters||{}).filter(([k,v])=>/^[a-z0-9-]+$/i.test(k)&&!/[\r\n]/.test(v)).map(([k,v])=>`; ${k}=${JSON.stringify(v)}`).join('');
@@ -217,5 +266,5 @@ export function imapConnector(settings:ImapSettings,create:(options:ImapFlowOpti
       fail('MAIL_CONNECTION_FAILED','IMAP request failed; check server, TLS, account access and supported search features');
     }finally{clearTimeout(timer);client.close();}
   }
-  return {status:()=>use(s=>s.status()),search:(q,p)=>use(s=>s.search(q,p)),read:id=>use(s=>s.read(id)),thread:(id,selected)=>use(s=>s.thread(id,selected)),attachments:id=>use(s=>s.attachments(id)),download:(id,a,max)=>use(s=>s.download(id,a,max))};
+  return {sync:checkpoint=>use(s=>s.sync(checkpoint)),status:()=>use(s=>s.status()),search:(q,p)=>use(s=>s.search(q,p)),read:id=>use(s=>s.read(id)),thread:(id,selected)=>use(s=>s.thread(id,selected)),attachments:id=>use(s=>s.attachments(id)),download:(id,a,max)=>use(s=>s.download(id,a,max))};
 }

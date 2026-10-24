@@ -1,3 +1,23 @@
+diff --git a/dist/index.js b/dist/index.js
+index 8f8df72d31e1016a728e98e1f85e0a0115c9527f..8f11123d4ea823e33e4d6b9df68e1c196c6d1034 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -192,7 +192,6 @@ export async function createStore(options) {
+             const filtered = updateOpts?.collections
+                 ? collections.filter(c => updateOpts.collections.includes(c.name))
+                 : collections;
+-            internal.clearCache();
+             let totalIndexed = 0, totalUpdated = 0, totalUnchanged = 0, totalRemoved = 0, totalSkipped = 0;
+             for (const col of filtered) {
+                 const result = await reindexCollection(internal, col.path, col.pattern || "**/*.md", col.name, {
+@@ -207,6 +206,7 @@ export async function createStore(options) {
+                 totalRemoved += result.removed;
+                 totalSkipped += result.skipped;
+             }
++            if (totalIndexed || totalUpdated || totalRemoved) internal.clearCache();
+             return {
+                 collections: filtered.length,
+                 indexed: totalIndexed,
 diff --git a/dist/store.js b/dist/store.js
 index cd6c7cd87d4b912f19ca30d0bcf4adec4046a877..660e0480e09d9b4cd5314976837896a8af0a4733 100644
 --- a/dist/store.js

@@ -3,11 +3,25 @@ export async function main() {
   process.umask(0o077);
   let input='';for await(const data of process.stdin){input+=data;if(input.length>256*1024)throw Error('Search configuration exceeds budget');}
   const request=JSON.parse(input);
-  const {createStore,extractSnippet}=await import(request.sdkUrl);
+  const {createStore,extractSnippet,Maintenance}=await import(request.sdkUrl);
   const store=await createStore({dbPath:request.database,config:{collections:request.collections,models:request.models}});
   try {
     let result;
-    if(request.action==='update')result=await store.update();
+    if(request.action==='update'){
+      const db=store.internal.db;
+      db.exec('CREATE TABLE IF NOT EXISTS source_search_maintenance(key TEXT PRIMARY KEY,value TEXT)');
+      const previous=db.prepare("SELECT value FROM source_search_maintenance WHERE key='projection-signature'").get();
+      if(request.projectionSignature && previous?.value===request.projectionSignature)result={collections:Object.keys(request.collections).length,indexed:0,updated:0,removed:0,skipped:0,reused:true};
+      else {
+        result=await store.update({collections:Object.keys(request.collections)});
+        if(request.projectionSignature && !result.skipped)db.prepare("INSERT OR REPLACE INTO source_search_maintenance VALUES('projection-signature',?)").run(request.projectionSignature);
+      }
+      if(!result.skipped && (result.updated || result.removed || !db.prepare("SELECT 1 FROM source_search_maintenance WHERE key='cleanup-v1'").get())){
+        const maintenance=new Maintenance(store.internal);
+        result.cleanup={vectors:maintenance.cleanupOrphanedVectors(),documents:maintenance.deleteInactiveDocs(),content:maintenance.cleanupOrphanedContent()};
+        db.prepare("INSERT OR REPLACE INTO source_search_maintenance VALUES('cleanup-v1',?)").run(new Date().toISOString());
+      }
+    }
     else if(request.action==='embed'){
       result={docsProcessed:0,chunksEmbedded:0,errors:0};let logged=0;
       for(const collection of Object.keys(request.collections)){

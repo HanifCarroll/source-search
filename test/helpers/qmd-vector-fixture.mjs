@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {createStore} from '@tobilu/qmd';
+import {createStore,Maintenance} from '@tobilu/qmd';
 
 const dir=await mkdtemp(join(tmpdir(),'ss-vector-'));
 const store=await createStore({dbPath:join(dir,'index.sqlite'),config:{collections:{notes:{path:dir},other:{path:dir},large:{path:dir},excluded:{path:dir}}}});
@@ -73,5 +73,12 @@ try {
   assert.deepEqual(large.map(hit=>hit.filepath),['qmd://large/large-target.md','qmd://large/large-body.md']);
   assert.ok(vectorLookups<=1);
   assert.deepEqual(await store.searchVector('invented query',{collection:'missing',limit:3}),[]);
+  const active=db.prepare('SELECT count(*) n FROM documents WHERE active=1').get().n;
+  const maintenance=new Maintenance(store.internal);
+  assert.equal(maintenance.cleanupOrphanedVectors(),1);
+  assert.equal(maintenance.deleteInactiveDocs(),1);
+  assert.equal(maintenance.cleanupOrphanedContent(),1);
+  assert.equal(db.prepare('SELECT count(*) n FROM documents WHERE active=1').get().n,active);
+  assert.deepEqual((await store.searchVector('invented query',{collection:'notes',limit:3})).map(hit=>hit.filepath),hits.map(hit=>hit.filepath));
   console.log(JSON.stringify({semantic:hits.length,hybrid:hybrid.length,vectorLookups}));
 } finally {await store.close();await rm(dir,{recursive:true,force:true});}

@@ -12,6 +12,15 @@ import { hit } from "../../domain/results";
 import { regular } from "../../platform/source-files";
 import { type Ref, type RecordData, type Query, type Page } from "../../domain/contracts";
 
+export function projectionHealth(source:any,mail:boolean,at=Date.now()){
+ const complete=source.state==='ready'||source.state==='refreshing'||!!source.lastCompleteScan;
+ const activity=source.state==='backfilling'&&complete?'refreshing':source.state==='ready'?'idle':source.state;
+ const lastCompletedAt=source.lastSuccessfulSync||source.lastCompleteScan;
+ const ageSeconds=lastCompletedAt?Math.max(0,Math.floor((at-Date.parse(lastCompletedAt))/1000)):undefined;
+ const stale=mail && ageSeconds!==undefined && ageSeconds>3600;
+ const failed=source.state==='error'||!!source.failedFiles;
+ return {...source,state:failed?'error':!complete?source.state:stale?'stale':'ready',activity,initialBackfillComplete:complete,freshness:{lastCheckedAt:source.checkedAt,lastCompletedAt,ageSeconds,stale}};
+}
 export async function libraryStatus(c:Config){
  if(!c.libraryEnabled || !sourceEnabled(c,"library"))return {available:false,state:"not-configured"};
  const modelsPresent = await checkModels(c);
@@ -22,11 +31,11 @@ export async function libraryStatus(c:Config){
     const kind=sourceKind(source,c);
     const stage=kind.endsWith('-archive')?'archives':isMail(source,c)?'mail':kind==='documents'?'documents':'native';
     const failure=states.get('maintenance-'+stage),saved=states.get(source);
-    if(!saved && !failure)return [];
+    if(!saved && !failure)return [{source,state:'queued',records:0,chunks:0}];
     return [{source,...saved,...(failure?.state==='error'?{state:'error',error:failure.error,checkedAt:failure.checkedAt}:{})}];
-  }).map(({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,coverage,error,failures,skipped,pending,discovered})=>({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,coverage,error,failedFiles:failures?.length||0,skippedFiles:skipped?.length||0,pending:Array.isArray(pending)?pending.length:pending,discovered}));
+  }).map(({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,lastSuccessfulSync,syncStrategy,coverage,error,failures,skipped,pending,discovered})=>projectionHealth({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,lastSuccessfulSync,syncStrategy,coverage,error,failedFiles:failures?.length||0,skippedFiles:skipped?.length||0,pending:Array.isArray(pending)?pending.length:pending,discovered},isMail(source,c)));
   let embeddings:any={ready:0,pending:0};const bySource:Record<string,any>={};
-  try{await regular(c.libraryDatabase);const q=new Database(c.libraryDatabase,{create:false,strict:true});q.exec("PRAGMA query_only=ON");try{embeddings=q.query("SELECT count(*) indexedDocuments,sum(EXISTS(SELECT 1 FROM content_vectors v WHERE v.hash=d.hash)) ready,sum(NOT EXISTS(SELECT 1 FROM content_vectors v WHERE v.hash=d.hash)) pending FROM documents d WHERE active=1").get();
+  try{await regular(c.libraryDatabase);const q=new Database(c.libraryDatabase,{create:false,strict:true});q.exec("PRAGMA query_only=ON");try{
     for(const row of q.query("SELECT collection,count(*) indexedDocuments,sum(EXISTS(SELECT 1 FROM content_vectors v WHERE v.hash=d.hash)) ready,sum(NOT EXISTS(SELECT 1 FROM content_vectors v WHERE v.hash=d.hash)) pending FROM documents d WHERE active=1 GROUP BY collection").all() as any[])bySource[row.collection.replace(/^ss-/,"")]=row;
    }finally{q.close();}}catch(e){embeddings={ready:0,pending:null,error:(e as Error).message};}
   if(!embeddings.error)embeddings=sources.reduce((a,s)=>{const e=bySource[s.source]||{};return {indexedDocuments:a.indexedDocuments+(e.indexedDocuments||0),ready:a.ready+(e.ready||0),pending:a.pending+(e.pending||0)};},{indexedDocuments:0,ready:0,pending:0});
@@ -46,7 +55,7 @@ export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>run
  await regular(c.libraryDatabase);const db=libraryDB(c),index=new Database(c.libraryDatabase,{create:false,strict:true});index.exec("PRAGMA query_only=ON");
  const records:RecordData[]=[],warnings=["Derived search text; read returned references for provenance and verify originals before citing. Ranked candidates are not exhaustive."];
  const scopes=status.sources?.filter(s=>q.source==="library"||s.source===q.source)||[];
- if(scopes.some(s=>s.state!=="ready"))warnings.push("Some selected sources are still backfilling or have failures; list_sources reports current coverage.");
+ if(scopes.some(s=>s.state!=="ready"))warnings.push("Some selected sources have incomplete indexing, stale synchronization or failures; list_sources reports coverage and freshness.");
  const pendingEmbeddings=scopes.reduce((total,s)=>total+(s.embeddings.pending||0),0);
  if(pendingEmbeddings)warnings.push(`${pendingEmbeddings} selected library chunks await embeddings; semantic coverage is partial while the background job continues.`);
  try{for(const r of raw.slice(0,100)){

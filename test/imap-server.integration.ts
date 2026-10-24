@@ -66,6 +66,12 @@ try{
   const attachments=await backend.attachments(record.ref.id);assert.equal(attachments[0]?.filename,'sample.pdf');
   assert((await backend.download(record.ref.id,attachments[0]!.id,200000)).toString().includes('attachment data'));
   await assert.rejects(backend.download(record.ref.id,attachments[0]!.id,10),{code:'OUTPUT_LIMIT'});checks.push('native attachment downloads, size limits and unchanged unread flags');
+  const initialSync=await backend.sync();assert.equal(initialSync.inventory?.length,6);
+  const repeatSync=await backend.sync(initialSync.checkpoint);assert.equal(repeatSync.messages.length,0);
+  await admin.append('INBOX',message('incremental arrival','delta only'),[],new Date('2026-10-09T12:00:00Z'));
+  const deltaSync=await backend.sync(repeatSync.checkpoint);assert.deepEqual(deltaSync.messages.map(m=>m.summary.subject),['incremental arrival']);
+  await admin.mailboxOpen('INBOX');const deltaIds=await admin.search({subject:'incremental arrival'},{uid:true});assert(Array.isArray(deltaIds));await admin.messageDelete(deltaIds,{uid:true});
+  const removedSync=await backend.sync(deltaSync.checkpoint);assert.equal(removedSync.inventory?.length,6);assert(removedSync.removed.includes(deltaSync.messages[0]!.summary.message_id));checks.push('incremental sync with no-op, arrival and expunge against Dovecot');
   const starttls=imapConnector({...settings,security:'starttls',port:plainPort});assert.equal((await starttls.search({source:'test-mail',query:'',limit:25})).total,6);checks.push('required STARTTLS and validated private CA');
   const restricted=configSchema.parse({...c,sources:{...c.sources,'test-mail':{...settings,folders:['Sent']}}});
   await assert.rejects(readMail('test-mail',all.items[0]!.ref.id,undefined,restricted));checks.push('folder restrictions apply to saved reads');

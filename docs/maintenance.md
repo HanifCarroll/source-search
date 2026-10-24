@@ -13,7 +13,35 @@ The optional `scripts/qmd-auto-refresh.py --config /absolute/config.json --state
 
 The existing `scripts/embed-library.mjs` launcher remains an alias for the managed embedding command. Both indexing and embedding use the bundled public QMD SDK. Embedding batches are bounded and already completed documents are reused on the next run.
 
-The pinned QMD dependency has a Bun patch for [slow collection-scoped vector lookups](https://github.com/tobi/qmd/issues/952). It uses one filtered nearest-neighbor query in place of repeated full-index scans, preserving cosine scoring and collection restrictions without rebuilding embeddings. `bun install --frozen-lockfile` applies the patch automatically. When upgrading QMD, remove it once the upstream fix passes `test/qmd-vector.test.ts` and a cold hybrid search on a representative index.
+The pinned QMD dependency has a Bun patch for [slow collection-scoped vector lookups](https://github.com/tobi/qmd/issues/952) and unnecessary cache clearing on unchanged updates. It uses one filtered nearest-neighbor query per collection and preserves inference caches on no-op refreshes. `bun install --frozen-lockfile` applies the patch automatically. When upgrading QMD, remove it once upstream behavior passes the vector and incremental tests and the search benchmark.
+
+## Incremental updates
+
+| Sources | Update behavior |
+| --- | --- |
+| JMAP mail | One initial inventory, then `Email/changes` for additions, updates and removals. Expired change history or changed mailbox definitions trigger a new inventory. |
+| IMAP mail | Retain UIDVALIDITY and UID inventories per mailbox. Unchanged HIGHESTMODSEQ/UIDNEXT/count skips message retrieval where available. Other servers list UIDs and fetch only new envelopes and changed folder memberships. UIDVALIDITY changes reset that mailbox. |
+| Gmail through `gog` | Additions history between daily full reconciliations. The supported CLI exposes only additions, so full scans remain necessary for deletions and labels. Older versions without history use paginated reconciliation. |
+| Legacy mailbridge | Paginated reconciliation; unchanged message summaries reuse cached bodies. Native JMAP offers a complete change feed. |
+| Messages, WhatsApp, Muesli calls | Skip unchanged database/WAL snapshots. On change, compare row fingerprints, including joined text and metadata; decode only changed rows. A complete inventory detects edits and deletions, without assuming rows are append-only. |
+| Things and selected ChatGPT, Takeout, LinkedIn, X exports | Skip unchanged selected files. Parse changed exports, then update only changed records and search projections. ZIP/JSON exports do not supply a change feed, so a changed file must be parsed. |
+| Vault Markdown | File-change detection and content hashes; only changed content needs new embeddings. |
+| Documents and attachments | Per-file signatures reuse extraction results, including transcript sidecars and extraction settings. Changed or removed inputs update their projections. |
+| Direct notes, calendar/contact files and bookmarks | Read current files on demand, with bounded reuse of unchanged small text files. They have no separate synchronization job. |
+| Browser history/downloads and native Calendar/Contacts | Query the current local database or native helper on demand. No duplicate background index to synchronize. |
+| Agent history | Search the existing CASS index. CASS owns its incremental ingestion; Source Search does not add another history importer or schedule. |
+
+Mail checkpoints advance only after successfully storing the corresponding records. Interrupted pages replay. Full scans remove cached records only after completing the inventory; deltas remove explicitly identified records. The first run after this update builds native mail checkpoints without changing original references. Gmail uses its additions feed when the configured CLI provides a usable history ID.
+
+Library publication writes changed chunks only. An unchanged projection revision skips the index scan. Index maintenance removes unused vectors, inactive index rows and unreferenced content; active documents and shared content remain. This is cache housekeeping, with no source deletion or embedding rebuild. Database files can reuse freed space; maintenance does not run a blocking `VACUUM` every cycle.
+
+Ranked candidates are cached for 30 minutes beside each QMD index, up to 128 entries and 512 KiB per entry. Repeats and pagination reuse that ranking across gateway restarts. Content/vector revisions, source scopes, model files and dependency changes invalidate the cache. Original-record checks still run on reads, and library pages withhold changed projections. Cache files are private and included when purging managed cache roots.
+
+Coverage reports separate `state`, `activity`, initial backfill completion and freshness. Normal refreshing does not mark a complete source as partial. Mail without a successful sync for an hour is stale; failures and pending embeddings remain visible.
+
+## Search release benchmark
+
+Run `bun run bench --lexical-only` for the portable MCP/cache check used by Linux and macOS CI. Before a search release, also run `bun run bench --models-from /absolute/private/config.json` with installed local models. It creates an isolated corpus of invented documents, checks exact terms and semantic paraphrases, source exclusion, ranking, repeated searches, pagination, restart reuse and invalidation after edits. It prints cold/repeat/page timings and removes its temporary index. The full benchmark performs real inference; it neither searches configured accounts nor downloads models. The large-index vector fixture separately checks collection recall and bounded SQL work.
 
 Build the optional macOS helper with `SOURCE_SEARCH_SIGNING_IDENTITY` and `SOURCE_SEARCH_BUNDLE_ID` set to your certificate and reverse-domain identifier. Configure Calendar and Contacts access in macOS privacy settings. The helper uses a private macOS responsibility API; check compatibility when upgrading macOS.
 

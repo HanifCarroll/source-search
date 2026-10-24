@@ -8,37 +8,55 @@ import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { sourceEnabled, requireMaintenance, type Config } from "../../platform/config";
 import { archiveSignature, checkExportSelection, exportRecords, archiveSources, exportPaths, exportProjectionVersion, type ArchiveSource } from "./originals";
-import { fail, queryKey, numberPosition, cursor, now } from "../../domain/identity";
+import { fail, queryKey, numberPosition, cursor, now, stableJson } from "../../domain/identity";
 import { regular } from "../../platform/source-files";
 import { hit } from "../../domain/results";
 import { type Query, type Page, type RecordData } from "../../domain/contracts";
 
 export async function rebuildArchive(config: Config) {
   requireMaintenance(config);
-  const archives = await Promise.all(archiveSources.filter(s => sourceEnabled(config,s) && exportPaths(config,s).length).map(async source => {const signature=await archiveSignature(config,source),result=await exportRecords(config,source);if(signature!==await archiveSignature(config,source))fail("STALE_RECORD","Original archive changed during rebuild; old index retained");return {source,...result,signature};}));
-  const { generation, info } = archives[0] || {generation:"empty",info:{}};
-  const total = archives.reduce((n, a) => n + a.records.size, 0);
-  const directory = dirname(config.index); await markManagedCache(directory);await privateDirectory(directory);
-  if ((await lstat(directory)).isSymbolicLink()) fail("UNSAFE_PATH", "Index directory cannot be a symbolic link");
-  const path = config.index + "." + randomUUID() + ".sqlite";
-  let db: Database | undefined;
-  try {
-    db = new Database(path, { create: true }); await chmod(path, 0o600);
-    db.exec("CREATE TABLE records(source TEXT,id TEXT,data TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(source,id)); CREATE VIRTUAL TABLE terms USING fts5(source UNINDEXED,id UNINDEXED, body); CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)");
-    const insert = db.query("INSERT INTO records VALUES(?, ?, ?, ?)"), index = db.query("INSERT INTO terms VALUES(?, ?, ?)");
-    db.transaction(() => {
-      for (const a of archives) {
-        for (const r of a.records.values()) { const { body, ...metadata } = r; insert.run(a.source, r.ref.id, JSON.stringify(metadata),body); index.run(a.source, r.ref.id, r.title + "\n" + recordSearchText(r)); }
-        const records=[...a.records.values()], datedRecords=records.filter(r=>r.occurredAt && Number.isFinite(Date.parse(r.occurredAt))).length;
-        db!.query("INSERT INTO meta VALUES(?,?)").run(a.source, JSON.stringify({ generation: a.generation, projectionVersion:exportProjectionVersion(a.source), count: a.records.size, dateCoverage:{datedRecords,undatedRecords:records.length-datedRecords}, recordTypes:[...new Set(records.map(r=>r.type))].sort(), categories:a.info.categories, ...(a.source === "chatgpt-archive" ? {conversations:a.info.conversations,roles:[...new Set(records.map(r=>r.author))].sort(),contentTypes:[...new Set(records.map(r=>r.metadata?.contentType))].sort()} : {}), warnings: a.warnings, signature:a.signature, indexedAt:now() }));
+  const directory=dirname(config.index);await markManagedCache(directory);await privateDirectory(directory);
+  let prior:Record<string,string>={};
+  try{prior=await indexStatus(config);}catch(e){if(!['ENOENT','INDEX_NOT_READY'].includes((e as any).code))throw e;}
+  const reusable=prior.formatVersion==='2',selected=archiveSources.filter(source=>sourceEnabled(config,source)&&exportPaths(config,source).length);
+  const archives:(Awaited<ReturnType<typeof exportRecords>> & {source:ArchiveSource;signature:string})[]=[];
+  for(const source of selected){
+    const signature=await archiveSignature(config,source),saved=JSON.parse(prior[source]||'{}');
+    if(reusable && saved.signature===signature && saved.projectionVersion===exportProjectionVersion(source))continue;
+    const result=await exportRecords(config,source);
+    if(signature!==await archiveSignature(config,source))fail('STALE_RECORD','Original archive changed during rebuild; old index retained');
+    archives.push({source,...result,signature});
+  }
+  if(reusable && !archives.length && archiveSources.every(source=>selected.includes(source)||!prior[source]))return {indexedRecords:Number(prior.count||0),generation:prior.generation,index:config.index,changedRecords:0};
+  const path=reusable?config.index:config.index+'.'+randomUUID()+'.sqlite';
+  let db:Database|undefined;
+  try{
+    db=new Database(path,{create:true});await chmod(path,0o600);db.exec('PRAGMA busy_timeout=10000');
+    if(!reusable)db.exec("CREATE TABLE records(source TEXT,id TEXT,data TEXT NOT NULL,body TEXT NOT NULL,PRIMARY KEY(source,id)); CREATE VIRTUAL TABLE terms USING fts5(source UNINDEXED,id UNINDEXED, body); CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE INDEX records_by_type ON records(source,json_extract(data,'$.type'))");
+    let changedRecords=0;
+    db.transaction(()=>{
+      for(const source of archiveSources.filter(source=>!selected.includes(source))){db!.query('DELETE FROM records WHERE source=?').run(source);db!.query('DELETE FROM terms WHERE source=?').run(source);db!.query('DELETE FROM meta WHERE key=?').run(source);}
+      for(const a of archives){
+        const old=new Map((db!.query('SELECT id,data,body FROM records WHERE source=?').all(a.source) as {id:string;data:string;body:string}[]).map(r=>[r.id,r]));
+        for(const r of a.records.values()){
+          const {body,...metadata}=r,previous=old.get(r.ref.id);old.delete(r.ref.id);
+          if(previous && previous.body===body && stableJson({...JSON.parse(previous.data),observedAt:undefined})===stableJson({...metadata,observedAt:undefined}))continue;
+          db!.query('INSERT OR REPLACE INTO records VALUES(?,?,?,?)').run(a.source,r.ref.id,JSON.stringify(metadata),body);
+          db!.query('DELETE FROM terms WHERE source=? AND id=?').run(a.source,r.ref.id);
+          db!.query('INSERT INTO terms VALUES(?,?,?)').run(a.source,r.ref.id,r.title+'\n'+recordSearchText(r));changedRecords++;
+        }
+        for(const id of old.keys()){db!.query('DELETE FROM records WHERE source=? AND id=?').run(a.source,id);db!.query('DELETE FROM terms WHERE source=? AND id=?').run(a.source,id);changedRecords++;}
+        const records=[...a.records.values()],datedRecords=records.filter(r=>r.occurredAt && Number.isFinite(Date.parse(r.occurredAt))).length;
+        db!.query('INSERT OR REPLACE INTO meta VALUES(?,?)').run(a.source,JSON.stringify({generation:a.generation,projectionVersion:exportProjectionVersion(a.source),count:records.length,dateCoverage:{datedRecords,undatedRecords:records.length-datedRecords},recordTypes:[...new Set(records.map(r=>r.type))].sort(),categories:a.info.categories,...(a.source==='chatgpt-archive'?{conversations:a.info.conversations,roles:[...new Set(records.map(r=>r.author))].sort(),contentTypes:[...new Set(records.map(r=>r.metadata?.contentType))].sort()}:{}),warnings:a.warnings,signature:a.signature,indexedAt:now()}));
       }
-      for (const [k, v] of Object.entries({ formatVersion:"2", generation, indexedAt: now(), exportedAt: info.exportedAt || "", count: String(total) })) db!.query("INSERT INTO meta VALUES(?,?)").run(k, v);
+      const count=(db!.query('SELECT count(*) n FROM records').get() as {n:number}).n;
+      for(const [k,v] of Object.entries({formatVersion:'2',generation:archives[0]?.generation||prior.generation||'empty',indexedAt:now(),exportedAt:archives[0]?.info.exportedAt||prior.exportedAt||'',count:String(count)}))db!.query('INSERT OR REPLACE INTO meta VALUES(?,?)').run(k,v);
     })();
-    db.exec("CREATE INDEX records_by_type ON records(source,json_extract(data,'$.type'))");
-    if (Object.values(db.query("PRAGMA quick_check").get() as object)[0] !== "ok") fail("INDEX_INVALID", "New index failed its SQLite check");
-    db.close(); db = undefined; await rename(path, config.index);
-    return { indexedRecords: total, taskCount: info.taskCount, generation, index: config.index };
-  } finally { db?.close(); await rm(path, { force: true }); }
+    const indexedRecords=(db.query('SELECT count(*) n FROM records').get() as {n:number}).n,generation=(db.query("SELECT value FROM meta WHERE key='generation'").get() as {value:string}).value;
+    if(Object.values(db.query('PRAGMA quick_check').get() as object)[0]!=='ok')fail('INDEX_INVALID','Archive index failed its SQLite check');
+    db.close();db=undefined;if(!reusable)await rename(path,config.index);
+    return {indexedRecords,generation,index:config.index,changedRecords,taskCount:archives[0]?.info.taskCount};
+  }finally{db?.close();if(!reusable)await rm(path,{force:true});}
 }
 export async function indexStatus(config: Config) {
   await regular(config.index); const db = new Database(config.index, { readonly: true });

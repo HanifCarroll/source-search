@@ -9,7 +9,8 @@
     "test": "bun test",
     "check": "tsc --noEmit",
     "demo": "bun scripts/demo.ts",
-    "test:python": "python -m unittest discover -s test -p '*_test.py'"
+    "test:python": "python -m unittest discover -s test -p '*_test.py'",
+    "bench": "bun scripts/benchmark-search.ts"
   },
   "dependencies": {
     "@js-temporal/polyfill": "0.5.1",

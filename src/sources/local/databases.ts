@@ -81,7 +81,7 @@ export async function readDatabase(config:Config,ref:Ref,context:boolean){
  }finally{await snap.close();}
 }
 // One consistent SQLite snapshot for maintenance, without a search/top-N limit.
-export async function allDatabaseRecords(config:Config,source:string){
+export async function allDatabaseRecords(config:Config,source:string,reuse?:(id:string,raw:unknown,project:()=>RecordData)=>RecordData){
  const kind=family(config,source),snap=await createSnapshot(databasePath(config,source));
- try{schema(snap.database,kind);return rows(snap.database,kind,'',[]).map(row=>record(kind,row,source));}finally{await snap.close();}
+ try{schema(snap.database,kind);return rows(snap.database,kind,'',[]).map(row=>reuse?reuse(String(row.pk),row,()=>record(kind,row,source)):record(kind,row,source));}finally{await snap.close();}
 }

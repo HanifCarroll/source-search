@@ -6,13 +6,13 @@ import {imapConnector} from '../src/sources/mail/imap';
 function fixture(stable=true){
   const folders=['INBOX','Sent','Junk','Trash'],seen:any[]=[];
   const rows:Record<string,FetchMessageObject[]>={INBOX:[{seq:1,uid:10,...(stable?{emailId:'email1',threadId:'thread1'}:{}),envelope:{subject:'First',from:[{address:'a@example.test'}],messageId:'header1'},internalDate:new Date('2026-01-01T10:00:00Z'),size:10}],Sent:[],Junk:[],Trash:[]};
-  let validity='11',closed=0,failConnect=false,hang=false;
+  let validity='11',closed=0,failConnect=false,hang=false,modseq:string|undefined;
   const create=(options:any)=>{
     seen.push({options});
     const client:any={capabilities:new Map(stable?[['OBJECTID',true]]:[]),mailbox:false,
       on:()=>{},connect:async()=>{if(hang)return new Promise(()=>{});if(failConnect)throw Object.assign(new Error('sensitive-provider-detail'),{authenticationFailed:true});},close:()=>{closed++;},
       list:async()=>folders.map(path=>({path,flags:new Set(),specialUse:path==='INBOX'?'\\Inbox':'\\'+path})),
-      getMailboxLock:async(path:string,options:any)=>{seen.push({path,options});client.mailbox={path,uidValidity:validity};return {release(){seen.push({released:true});}};},
+      getMailboxLock:async(path:string,options:any)=>{seen.push({path,options});client.mailbox={path,uidValidity:validity,highestModseq:modseq,exists:rows[path]!.length,uidNext:Math.max(0,...rows[path]!.map(r=>r.uid))+1};return {release(){seen.push({released:true});}};},
       search:async(q:SearchObject,options:any)=>{seen.push({query:q,options});return rows[client.mailbox.path]!.filter(r=>(!q.emailId || r.emailId===q.emailId) && (!q.threadId||r.threadId===q.threadId)).map(r=>r.uid);},
       fetchAll:async(ids:number[],q:any,options:any)=>{seen.push({fetch:ids,q,options});return rows[client.mailbox.path]!.filter(r=>ids.includes(r.uid));},
       fetchOne:async(uid:number,q:any,options:any)=>{seen.push({one:uid,q,options});const row=rows[client.mailbox.path]!.find(r=>r.uid===uid);if(!row)return false;return {...row,bodyStructure:{part:'1',type:'text/plain',size:10},...(q.bodyParts?{bodyParts:new Map([['1',Buffer.from('plain body')]])}:{})};},
@@ -21,8 +21,28 @@ function fixture(stable=true){
   };
   process.env.SOURCE_SEARCH_UNIT_IMAP='invented';
   const settings=imapSettings.parse({adapter:'imap',account:'test',email:'a@example.test',host:'imap.example.test',username:'a@example.test',auth:{type:'password',password:{env:'SOURCE_SEARCH_UNIT_IMAP'}}});
-  return {rows,seen,settings,connector:imapConnector(settings,create),create,setValidity:(v:string)=>{validity=v;},setConnectFailure:()=>{failConnect=true;},setHang:()=>{hang=true;},closed:()=>closed};
+  return {rows,seen,settings,connector:imapConnector(settings,create),create,setModseq:(v:string)=>{modseq=v;},setValidity:(v:string)=>{validity=v;},setConnectFailure:()=>{failConnect=true;},setHang:()=>{hang=true;},closed:()=>closed};
 }
+test('IMAP sync skips unchanged CONDSTORE mailboxes and fetches only additions',async()=>{
+  const f=fixture();f.setModseq('1');const initial=await f.connector.sync();expect(initial.messages).toHaveLength(1);
+  f.seen.length=0;const noOp=await f.connector.sync(initial.checkpoint);expect(noOp.messages).toEqual([]);expect(f.seen.some(r=>r.query||r.fetch||r.one)).toBe(false);
+  f.rows.INBOX!.push({...f.rows.INBOX![0]!,uid:11,emailId:'added'});f.setModseq('2');f.seen.length=0;
+  const added=await f.connector.sync(noOp.checkpoint);expect(added.messages).toHaveLength(1);expect(added.messages[0]!.summary.message_id).not.toBe(initial.messages[0]!.summary.message_id);
+  expect(f.seen.filter(r=>r.fetch && r.q.envelope).flatMap(r=>r.fetch).filter((uid:number)=>uid===10)).toHaveLength(0);
+  f.rows.INBOX=f.rows.INBOX!.slice(1);f.setModseq('3');const removed=await f.connector.sync(added.checkpoint);expect(removed.messages).toEqual([]);expect(removed.removed).toEqual([initial.messages[0]!.summary.message_id]);
+});
+test('IMAP without CONDSTORE compares UID inventories but reuses envelopes and bodies',async()=>{
+  const f=fixture(false),initial=await f.connector.sync();f.seen.length=0;
+  expect((await f.connector.sync(initial.checkpoint)).messages).toEqual([]);
+  expect(f.seen.filter(r=>r.query)).toHaveLength(4);expect(f.seen.some(r=>r.fetch||r.one)).toBe(false);
+  f.setValidity('12');const reset=await f.connector.sync(initial.checkpoint);expect(reset.messages).toHaveLength(1);expect(reset.removed).toEqual([initial.messages[0]!.summary.message_id]);
+});
+test('IMAP stable IDs preserve moves and remove records moved to junk',async()=>{
+  const f=fixture(),initial=await f.connector.sync(),id=initial.messages[0]!.summary.message_id;
+  f.rows.Sent=[{...f.rows.INBOX![0]!,uid:20}];f.rows.INBOX=[];
+  const moved=await f.connector.sync(initial.checkpoint);expect(moved.messages[0]!.summary.message_id).toBe(id);expect(moved.removed).toEqual([]);
+  f.rows.Junk=[{...f.rows.Sent![0]!,uid:30}];const excluded=await f.connector.sync(moved.checkpoint);expect(excluded.removed).toEqual([id]);expect(excluded.inventory).toEqual([]);
+});
 test('IMAP stable server IDs deduplicate folders and survive moves',async()=>{
   const f=fixture(),q={source:'test-mail',query:'',limit:10};
   f.rows.Sent=[{...f.rows.INBOX![0]!,uid:20}];

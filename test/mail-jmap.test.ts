@@ -8,12 +8,47 @@ import {readMail as legacyRead} from '../src/sources/mail/legacy';
 import {createSourceAccess} from '../src/application/source-access';
 import {jmapFixture} from './helpers/jmap';
 import {readSecret} from '../src/sources/mail/credentials';
+import {connector} from '../src/sources/mail';
 
 async function fixture(fn:(f:ReturnType<typeof jmapFixture>,config:ReturnType<typeof configSchema.parse>)=>Promise<void>){
   const f=jmapFixture();process.env.SOURCE_SEARCH_TEST_TOKEN='invented-token';
   const c=configSchema.parse({enabledSources:['team-mail'],sources:{'team-mail':{adapter:'jmap',account:'team',email:'team@example.test',sessionUrl:f.url,auth:{type:'bearer',token:{env:'SOURCE_SEARCH_TEST_TOKEN'}}}}});
   try{await fn(f,c);}finally{f.stop();delete process.env.SOURCE_SEARCH_TEST_TOKEN;}
 }
+test('JMAP incrementally applies additions, edits, removals and folder exclusions without relisting',()=>fixture(async(f,c)=>{
+  const backend=connector(c,'team-mail')!,initial=await backend.sync();expect(initial.inventory).toHaveLength(7);
+  f.state.requests=[];expect((await backend.sync(initial.checkpoint)).messages).toEqual([]);expect(f.state.requests.map(r=>r.method)).toEqual(['Mailbox/get','Email/changes']);
+  f.state.emails[0]!.mailboxIds={inbox:false,trash:true} as any;
+  f.state.emails[1]!.bodyValues['1'].value='Updated fixture';
+  f.state.emails.push({...f.state.emails[1]!,id:'arrival'});f.state.emails=f.state.emails.filter(e=>e.id!=='m2');f.state.version='state2';
+  f.state.changes.push({oldState:'state1',newState:'state2',created:['arrival'],updated:['m0','m1'],destroyed:['m2'],hasMoreChanges:false});
+  f.state.requests=[];const next=await backend.sync(initial.checkpoint);
+  expect(next.messages.map(m=>m.summary.message_id)).toEqual(['arrival','m1']);expect(next.removed.sort()).toEqual(['m0','m2']);
+  expect(next.messages[1]!.body_text).toBe('Updated fixture');expect(f.state.requests.some(r=>r.method==='Email/query')).toBe(false);
+  expect(f.state.requests.filter(r=>r.method==='Email/get' && r.args.fetchTextBodyValues).flatMap(r=>r.args.ids)).not.toContain('m0');
+}));
+test('JMAP expired history re-enumerates before pruning and captures the pre-scan email state',()=>fixture(async(f,c)=>{
+  const backend=connector(c,'team-mail')!,initial=await backend.sync();f.state.version='expired-next';f.state.requests=[];
+  const reset=await backend.sync(initial.checkpoint);expect(reset.inventory).toHaveLength(7);expect(reset.checkpoint).toMatchObject({state:'expired-next'});
+  const methods=f.state.requests.map(r=>r.method);expect(methods.indexOf('Email/get')).toBeLessThan(methods.indexOf('Email/query'));
+}));
+test('mail maintenance commits checkpoints only after successful bodies and retries publication',()=>fixture(async(f,c)=>{
+  const {syncMail}=await import('../src/maintenance/library-sync'),{libraryDB,getState,setState}=await import('../src/search/library/store');
+  const {mkdir}=await import('node:fs/promises'),root=await mkdtemp(join(tmpdir(),'ss-jmap-deltas-'));
+  try{
+    await mkdir(join(root,'mail-raw'));c=configSchema.parse({...c,libraryRoot:root,maintenanceEnabled:true,libraryEnabled:true});
+    await syncMail(c,undefined,['team-mail']);
+    const retry=()=>{const db=libraryDB(c,true);setState(db,'team-mail',{...getState(db,'team-mail'),nextScanAt:0});db.close();};
+    const state=()=>{const db=libraryDB(c);try{return getState(db,'team-mail');}finally{db.close();}};
+    f.state.version='state2';f.state.changes.push({oldState:'state1',newState:'state2',created:[],updated:['m1'],destroyed:['m0'],hasMoreChanges:false});
+    f.state.emails[1]!.bodyValues['1'].value='Changed body';delete (f.state.emails[1] as any).bodyValues['1'];
+    retry();await syncMail(c,undefined,['team-mail']);expect(state()).toMatchObject({state:'error',syncCheckpoint:{state:'state1'}});
+    let db=libraryDB(c);expect((db.query('SELECT count(*) n FROM mail').get() as any).n).toBe(7);db.close();
+    f.state.emails[1]!.bodyValues['1']={value:'Changed body',isTruncated:false};retry();await syncMail(c,undefined,['team-mail']);
+    expect(state()).toMatchObject({state:'ready',syncCheckpoint:{state:'state2'},dirty:false});
+    db=libraryDB(c);expect((db.query('SELECT count(*) n FROM mail').get() as any).n).toBe(6);expect(JSON.stringify(db.query('SELECT body FROM chunks').all())).toContain('Changed body');db.close();
+  }finally{await rm(root,{recursive:true,force:true});}
+}));
 test('JMAP discovers accounts, respects server batch limits, orders results and paginates with changing page sizes',()=>fixture(async(f,c)=>{
   const first=await searchMail({source:'team-mail',query:'',limit:5},undefined,undefined,c);
   expect(first.items.map(i=>i.ref.id)).toEqual(['m6','m5','m4','m3','m2']);expect(first.totalMatches).toBe(7);

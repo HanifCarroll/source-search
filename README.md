@@ -182,7 +182,7 @@ The connectors follow [JMAP Mail](https://www.rfc-editor.org/rfc/rfc8621.html) a
 
 To build indexes for enabled exports, set `maintenanceEnabled` in local configuration and run `bun run start rebuild`.
 
-The optional library requires `libraryEnabled`, `maintenanceEnabled`, and `library` in `enabledSources`. Enable each contributing source separately. `documents` also requires the extraction environment described in [document extraction](docs/maintenance.md#document-extraction). For automatic refresh, set up the watcher described in [maintenance](docs/maintenance.md).
+The optional library requires `libraryEnabled`, `maintenanceEnabled`, and `library` in `enabledSources`. Enable each contributing source separately. After the initial inventory, updates reuse unchanged records and embeddings. JMAP and IMAP track provider changes; other sources use file/row diffs or reconciliation according to their capabilities. See [incremental updates](docs/maintenance.md#incremental-updates). `documents` also requires the extraction environment described in [document extraction](docs/maintenance.md#document-extraction). For automatic refresh, set up the watcher described in [maintenance](docs/maintenance.md).
 
 Caches store retrieved text, attachments and previews. Disabling a source stops future access while retaining its cache. To remove cached data, stop maintenance and run `bun run start purge-cache` to preview the cleanup, then add `--apply`. The command handles the default managed cache; custom locations and backups need separate cleanup.
 
