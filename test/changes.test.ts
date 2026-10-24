@@ -72,3 +72,28 @@ test('runtime reports direct-reader coverage honestly, enforces source access an
   for(const item of changes.items)expect((await rt.read_record({ref:item.ref})).record.ref).toEqual(item.ref);
   await expect(createRuntime({...c,enabledSources:[]}).list_changes({feed:'sources',sources:['tasks']})).rejects.toMatchObject({code:'SOURCE_DISABLED'});
 }));
+
+test('direct observations commit inventory and events together, retain failures and reset changing windows',()=>temp(async root=>{
+  const store=recordStore(join(root,'records.sqlite')),selection={notes:'scope'};
+  const entry=(id:string,signature=id)=>({ref:{source:'notes',id,version:signature},signature,input:'stat-'+signature});
+  const state={checkedAt:'2026-10-24T00:00:00Z',strategy:'file-diff',coverage:'Selected files'};
+  await store.observe('notes','scope',[entry('a'),entry('b')],state);
+  const first=await store.changes(selection,undefined,10);expect(first.items.map(e=>e.kind)).toEqual(['reset']);
+  await store.observe('notes','scope',[entry('a','edited'),entry('c')],state);
+  const next=await store.changes(selection,first.cursor,10);
+  expect(next.items.map(e=>[e.kind,e.ref?.id])).toEqual([['updated','a'],['added','c'],['removed','b']]);
+  await store.observationFailure('notes','scope',{code:'OFFLINE',message:'Incomplete inventory'},state.checkedAt);
+  expect((await store.changes(selection,next.cursor,10)).items).toEqual([]);
+  expect((await store.observation('notes','scope'))?.entries).toHaveLength(2);
+  const db=new Database(store.path);db.exec("CREATE TRIGGER fail_observation BEFORE INSERT ON observations WHEN NEW.id='broken' BEGIN SELECT RAISE(ABORT,'fixture failure'); END");db.close();
+  await expect(store.observe('notes','scope',[entry('a','edited again'),entry('broken')],state)).rejects.toThrow('fixture failure');
+  expect((await store.changes(selection,next.cursor,10)).items).toEqual([]);
+  expect((await store.observation('notes','scope'))?.entries.find(e=>e.ref.id==='a')?.signature).toBe('edited');
+  await store.observe('notes','scope',undefined,state);
+  expect((await store.changes(selection,next.cursor,10)).items).toEqual([]);
+  await store.observe('notes','scope',[entry('d')],{...state,generation:'new-window'});
+  expect((await store.changes(selection,next.cursor,10)).items.map(e=>e.kind)).toEqual(['reset']);
+  await expect(store.observe('notes','different',undefined,state)).rejects.toMatchObject({code:'INCOMPLETE_SCAN'});
+  expect((await store.changes({notes:'different'},undefined,10)).coverage[0]!.state).toBe('needs-sync');
+  const check=new Database(store.path,{readonly:true});expect(check.query('PRAGMA user_version').get()).toEqual({user_version:3});check.close();
+}));

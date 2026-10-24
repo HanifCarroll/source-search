@@ -9,9 +9,10 @@ import {regular} from './source-files';
 import {randomUUID} from 'node:crypto';
 import {changeCursor,changePosition} from '../domain/changes';
 import {snapshotCoverage} from '../domain/snapshots';
+import type {Observation,ObservationState} from '../domain/observations';
 import type {Ref} from '../domain/contracts';
 
-const schema=2;
+const schema=3;
 type StateRow={scope:string;data:string};
 type Change={sequence:number;source:string;kind:'reset'|'added'|'updated'|'removed';observedAt:string;ref?:Ref;reason?:string};
 function initChanges(db:Database){
@@ -24,6 +25,11 @@ function initChanges(db:Database){
     addChange(db,row.source,row.scope,{kind:'reset',observedAt:state.checkedAt,reason:'Change tracking started; enumerate the current snapshot'});
   }
   db.exec('PRAGMA user_version=2');
+}
+function initObservations(db:Database){
+  db.exec(`CREATE TABLE observations(source TEXT NOT NULL,id TEXT NOT NULL,data TEXT NOT NULL,PRIMARY KEY(source,id));
+    CREATE TABLE observation_states(source TEXT PRIMARY KEY,scope TEXT NOT NULL,data TEXT NOT NULL);
+    PRAGMA user_version=3;`);
 }
 function addChange(db:Database,source:string,scope:string,event:Omit<Change,'sequence'|'source'>){db.query('INSERT INTO changes(source,scope,data) VALUES(?,?,?)').run(source,scope,JSON.stringify(event));}
 
@@ -54,14 +60,14 @@ export function recordStore(path:string){
               PRIMARY KEY(source,id),FOREIGN KEY(source) REFERENCES snapshots(source) ON DELETE CASCADE);
             CREATE INDEX records_order ON records(source,ordinal);
             PRAGMA user_version=1;`);
-          initChanges(db);
+          initChanges(db);initObservations(db);
         }).immediate();
       }else if(version===0&&!write&&!db.query('SELECT name FROM sqlite_master').all().length){
         // No committed snapshot yet, including an interrupted first creation.
         db.close();return;
-      }else if(version===1&&write){
-        db.transaction(()=>{if((db.query('PRAGMA user_version').get() as {user_version:number}).user_version===1)initChanges(db);}).immediate();
-      }else if(version!==schema&&version!==1)fail('UNSUPPORTED_SCHEMA','Record store needs a compatible Source Search version');
+      }else if((version===1||version===2)&&write){
+        db.transaction(()=>{const v=(db.query('PRAGMA user_version').get() as {user_version:number}).user_version;if(v===1)initChanges(db);if(v<3)initObservations(db);}).immediate();
+      }else if(version!==schema&&version!==1&&version!==2)fail('UNSUPPORTED_SCHEMA','Record store needs a compatible Source Search version');
       return db;
     }catch(e){db.close();throw e;}
   }
@@ -111,6 +117,50 @@ export function recordStore(path:string){
       db.query('UPDATE snapshots SET data=? WHERE source=?').run(JSON.stringify({...JSON.parse(row.data),lastError:error,lastAttemptAt:attemptedAt}),source);
     }).immediate();}finally{db.close();}
   }
+  async function observation(source:string,scope:string){
+    const db=await connect();if(!db)return;
+    try{return db.transaction(()=>{
+      if((db.query('PRAGMA user_version').get() as {user_version:number}).user_version<3)return;
+      const row=db.query('SELECT scope,data FROM observation_states WHERE source=?').get(source) as StateRow|null;
+      if(!row||row.scope!==scope)return;
+      return {state:JSON.parse(row.data) as ObservationState,entries:(db.query('SELECT data FROM observations WHERE source=?').all(source) as {data:string}[]).map(r=>JSON.parse(r.data) as Observation)};
+    })();}finally{db.close();}
+  }
+  // undefined entries is a confirmed unchanged scan. A failed/partial reader
+  // never calls this operation, so it cannot prune the last complete inventory.
+  async function observe(source:string,scope:string,entries:Observation[]|undefined,state:ObservationState){
+    const ids=new Set<string>();
+    for(const e of entries||[]){if(e.ref.source!==source||!e.ref.id||!e.ref.version||!e.signature||ids.has(e.ref.id))fail('INVALID_PROVIDER_RESPONSE','Observation contains duplicate or mismatched identities');ids.add(e.ref.id);}
+    const db=(await connect(true))!;
+    try{return db.transaction(()=>{
+      const old=db.query('SELECT scope,data FROM observation_states WHERE source=?').get(source) as StateRow|null;
+      const previous=old&&old.scope===scope?JSON.parse(old.data) as ObservationState:undefined;
+      const reset=!previous?.initialized||previous.generation!==state.generation;
+      if(entries===undefined&&reset)fail('INCOMPLETE_SCAN','A new observation baseline needs a complete inventory');
+      let added=0,updated=0,removed=0;
+      if(reset){db.query('DELETE FROM observations WHERE source=?').run(source);addChange(db,source,scope,{kind:'reset',observedAt:state.checkedAt,reason:previous?.initialized?'Observed window or index changed; search the current source again':'Change tracking started; search the current source to establish a baseline'});}
+      if(entries){
+        const prior=new Map((db.query('SELECT id,data FROM observations WHERE source=?').all(source) as {id:string;data:string}[]).map(r=>[r.id,JSON.parse(r.data) as Observation]));
+        const upsert=db.query('INSERT INTO observations VALUES(?,?,?) ON CONFLICT(source,id) DO UPDATE SET data=excluded.data WHERE observations.data<>excluded.data');
+        for(const e of entries){const before=prior.get(e.ref.id);prior.delete(e.ref.id);
+          if(!reset&&before?.signature!==e.signature){const kind=before?'updated':'added';if(before)updated++;else added++;addChange(db,source,scope,{kind,observedAt:state.checkedAt,ref:e.ref});}
+          upsert.run(source,e.ref.id,JSON.stringify(e));
+        }
+        for(const [id,e] of prior){removed++;db.query('DELETE FROM observations WHERE source=? AND id=?').run(source,id);addChange(db,source,scope,{kind:'removed',observedAt:state.checkedAt,ref:e.ref});}
+      }
+      const records=entries?.length??previous!.records;
+      db.query('INSERT INTO observation_states VALUES(?,?,?) ON CONFLICT(source) DO UPDATE SET scope=excluded.scope,data=excluded.data').run(source,scope,JSON.stringify({...state,initialized:true,records}));
+      return {reset,added,updated,removed,records};
+    }).immediate();}finally{db.close();}
+  }
+  async function observationFailure(source:string,scope:string,error:{code:string;message:string},attemptedAt:string){
+    const db=(await connect(true))!;
+    try{db.transaction(()=>{
+      const row=db.query('SELECT scope,data FROM observation_states WHERE source=?').get(source) as StateRow|null;
+      const state=row&&row.scope===scope?JSON.parse(row.data):{initialized:false};
+      db.query('INSERT INTO observation_states VALUES(?,?,?) ON CONFLICT(source) DO UPDATE SET scope=excluded.scope,data=excluded.data').run(source,scope,JSON.stringify({...state,lastError:error,lastAttemptAt:attemptedAt}));
+    }).immediate();}finally{db.close();}
+  }
   async function changes(selection:Record<string,string>,token:string|undefined,limit:number){
     const key=hash(stableJson(selection)),db=await connect();
     const empty=()=>{changePosition(token,key,null,0);return {streamId:null,items:[] as Change[],cursor:changeCursor(key,null,0),hasMore:false,coverage:Object.keys(selection).map(source=>({source,state:'needs-sync'}))};};
@@ -124,10 +174,13 @@ export function recordStore(path:string){
       const hasMore=rows.length>limit,items=rows.slice(0,limit).map(r=>({...JSON.parse(r.data),sequence:r.sequence,source:r.source} as Change));
       const coverage=entries.map(([source,scope])=>{
         const row=db.query('SELECT scope,data FROM snapshots WHERE source=?').get(source) as StateRow|null;
-        return row&&row.scope===scope?{source,state:'tracked',coverage:snapshotCoverage(JSON.parse(row.data))}:{source,state:'needs-sync'};
+        if(row&&row.scope===scope)return {source,state:'tracked',coverage:snapshotCoverage(JSON.parse(row.data))};
+        const observation=(db.query('PRAGMA user_version').get() as {user_version:number}).user_version>=3?db.query('SELECT scope,data FROM observation_states WHERE source=?').get(source) as StateRow|null:null;
+        if(observation&&observation.scope===scope){const data=JSON.parse(observation.data) as ObservationState;return {source,state:data.initialized?'tracked':'needs-sync',...data};}
+        return {source,state:'needs-sync'};
       });
       return {streamId:identity,items,cursor:changeCursor(key,identity,hasMore?items.at(-1)!.sequence:high),hasMore,coverage};
     })();}finally{db.close();}
   }
-  return {path,read,write,failure,changes};
+  return {path,read,write,failure,changes,observation,observe,observationFailure};
 }
