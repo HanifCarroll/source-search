@@ -12,6 +12,8 @@ import {compactRecord, annotateDuplicates, progress} from "../domain/presentatio
 import {errorData, now} from "../domain/identity";
 import {boundedMap} from './concurrency';
 import {contextTools} from './context';
+import {memoryTools} from './memory';
+import {changeTools} from './changes';
 export {boundedMap} from './concurrency';
 
 export function createRuntime(config: Config, execute?: Run) {
@@ -87,5 +89,5 @@ export function createRuntime(config: Config, execute?: Run) {
     const output={...result,...(preview ? {preview} : {})};assertPacket(output);return output;
   }
   const context=contextTools(config,{read:ref=>access.read(ref),search:async query=>(await search_sources({queries:[query]})).results[0]!});
-  return { list_sources, search_sources, read_record, ...context };
+  return { list_sources, search_sources, read_record, ...context, ...memoryTools(config,ref=>access.read(ref)), ...changeTools(config) };
 }

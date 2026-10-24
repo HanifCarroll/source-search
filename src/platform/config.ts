@@ -1,7 +1,7 @@
 import {connectionIdentity} from './auth-settings';
 import {createHash} from "node:crypto";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import {sourceKind,isMail,adapterKinds,connectedKinds} from "../domain/source-catalog";
 import {sourcesSchema,accountSchema,timeZoneSchema,type MarkdownSettings} from "./source-settings";
@@ -17,6 +17,7 @@ const executable=(name:string)=>Bun.which(name) || join(home,".config/source-sea
 export const configSchema = z.object({
   sources: sourcesSchema,
   contextEntities: contextEntitiesSchema,
+  memoryRoot: path.default(join(home,'.local/share/source-search/memory')),
   timeZone: timeZoneSchema.default("UTC"),
   enabledSources: z.array(sourceId).default([]),
   maintenanceEnabled: z.boolean().default(false),
@@ -66,6 +67,9 @@ export const configSchema = z.object({
   cassBinary: path.default(executable("cass")),
   cassData: path.default(join(home, ".local/share/cass"))
 }).strict().superRefine((c,ctx)=>{
+  const contains=(a:string,b:string)=>{const r=relative(resolve(a),resolve(b));return !r||r!=='..'&&!r.startsWith('..'+sep)&&!isAbsolute(r);};
+  const caches=[state,c.index,c.libraryRoot,c.libraryDatabase,c.qmdDatabase,c.previews,...Object.values(c.sources).flatMap(s=>s.adapter==='vault'&&s.database?[s.database]:[])];
+  if(caches.some(p=>contains(p,c.memoryRoot)||contains(c.memoryRoot,p)))ctx.addIssue({code:'custom',path:['memoryRoot'],message:'Durable memory must be separate from cache paths'});
   for(const id of c.enabledSources)if(!c.sources[id] && !adapterKinds.includes(sourceKind(id) as typeof adapterKinds[number]))ctx.addIssue({code:'custom',path:['enabledSources'],message:'Unknown source: '+id});
 }).transform(config=>({...config,voiceNotes:config.voiceNotes || config.journals}));
 export type Config = z.infer<typeof configSchema>;
@@ -128,6 +132,18 @@ export function sourceScope(config:Config,source:string):string {
   if(kind==='things-archive' && effective.thingsDatabase)value.database=effective.thingsDatabase;
   if(source!==kind && definition && !['markdown'].includes(kind))Object.assign(value,{adapter:kind,definition});
   return createHash("sha256").update(JSON.stringify(value)||"unconfigured").digest("hex");
+}
+
+// Memory citations also bind direct-reader locations. Keep this separate from
+// historical reference versions, whose existing format must remain readable.
+export function evidenceScope(config:Config,source:string):string {
+  const c=sourceConfig(config,source),kind=sourceKind(source,config);
+  const direct=kind==='markdown'?markdownSettings(config,source)
+    :kind==='vault'?{roots:c.qmdRoots,database:c.qmdDatabase}
+    :kind==='agent-history'?{data:c.cassData,binary:c.cassBinary}
+    :['calendar','contacts'].includes(kind)?{helper:c.pimHelper,launcher:c.pimLauncher}
+    :kind.startsWith('chrome-')?{profiles:c.chromeProfiles,ids:c.chromeProfileIds}:undefined;
+  return createHash('sha256').update(JSON.stringify({scope:sourceScope(config,source),definition:connectionIdentity(c.sources[source]),direct})).digest('hex');
 }
 
 // Per-instance settings resolve at the boundary; old flat settings remain defaults.

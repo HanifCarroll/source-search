@@ -8,14 +8,14 @@ import {sourceConfig,type Config} from "./config";
 export const managedCacheRoot = () => join(homedir(), ".cache/source-search");
 const marker = ".source-search-cache";
 const owner = "source-search disposable cache v1\n";
-export async function privateDirectory(path:string) {
+export async function privateDirectory(path:string,create=true) {
   // Check existing ancestors before mkdir can follow a link.
   for(let current=resolve(path);;current=dirname(current)){
     try{const s=await lstat(current);const systemAlias = process.platform==="darwin" && ["/var","/tmp"].includes(current) && await realpath(current)==="/private"+current;if(!systemAlias && (s.isSymbolicLink() || !s.isDirectory()))fail("UNSAFE_PATH","Cache ancestors must be ordinary directories");}
     catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}
     if(dirname(current)===current)break;
   }
-  await mkdir(path,{recursive:true,mode:0o700});
+  if(create)await mkdir(path,{recursive:true,mode:0o700});
   const s=await lstat(path);
   if(s.isSymbolicLink() || !s.isDirectory() || (s.mode & 0o077)!==0)fail("UNSAFE_PATH","Cache directory must be an ordinary private directory (0700)");
 }
@@ -44,7 +44,7 @@ export async function purgeCache(c:Config,apply=false) {
     ...(s.adapter==='tasks'&&s.connector.type==='microsoft-todo'&&s.connector.oauth?[s.connector.oauth.cache]:[]),
     ...(s.adapter==='tasks'&&s.connector.type==='apple-reminders'?[s.connector.helper||c.pimHelper,s.connector.launcher||c.pimLauncher]:[]),
   ]);
-  const originals=[c.journals,c.things,c.thingsDatabase,c.messages,c.whatsapp,c.muesli,c.voiceNotes,c.callNotes,c.cassData,...c.chromeProfiles,...c.chatgpt,...c.takeout,...c.linkedin,...c.twitter,...c.documentRoots,...Object.values(c.qmdRoots),...c.qmdModels,...Object.values(c.searchModels||{}),...selected];
+  const originals=[c.memoryRoot,c.journals,c.things,c.thingsDatabase,c.messages,c.whatsapp,c.muesli,c.voiceNotes,c.callNotes,c.cassData,...c.chromeProfiles,...c.chatgpt,...c.takeout,...c.linkedin,...c.twitter,...c.documentRoots,...Object.values(c.qmdRoots),...c.qmdModels,...Object.values(c.searchModels||{}),...selected];
   if(originals.some(p=>p && overlaps(root,p)))fail("UNSAFE_PATH","A configured original or model is inside the cache directory; move it before purging");
   const custom=[c.index,c.libraryRoot,c.libraryDatabase,c.qmdDatabase,c.previews,...Object.entries(c.sources).filter(([,s])=>s.adapter==='vault').map(([id])=>sourceConfig(c,id).qmdDatabase)].filter(p=>!overlaps(root,p));
   if(custom.length)fail("CUSTOM_CACHE_PATHS","Custom cache paths require manual cleanup; purge refuses to claim complete deletion");
