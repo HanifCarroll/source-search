@@ -44,10 +44,10 @@ Search/read also accept JSON on stdin. Run `bun run start mcp-config` to print a
 | Sources | Configuration |
 | --- | --- |
 | Markdown folders (`markdown`) | Named folders, file patterns, date fields, timezone and note/journal/transcript labels |
-| Things exports (`things-archive`) | `database`: an exported Things 3 `main.sqlite`; the older `root` JSONL/project export also works |
+| Task apps (`tasks`) | `connector`: Things database/export, Todoist, TickTick, or an app-neutral JSON file; run `sync-tasks` |
 | `chatgpt-archive`, `takeout-archive`, `linkedin-archive`, `twitter-archive` | `paths`: selected export files; enable maintenance and run `rebuild` |
 | Messages (`messages`), WhatsApp (`whatsapp`) and Muesli (`muesli`) | `database`: a local application database and existing OS permissions |
-| Chromium metadata (`chrome-history`, `chrome-bookmarks`, `chrome-downloads`) | `profiles`: stable IDs and profile directories; works with compatible Chromium stores; downloads are metadata only |
+| Browser metadata (`browser-history`, `browser-bookmarks`, `browser-downloads`) | `profiles`: stable IDs and Chrome, Edge, Brave or other compatible Chromium profile directories; downloads are metadata only |
 | Named Gmail accounts (`gmail`) | A compatible `gog` executable and configured account routing |
 | Named JMAP accounts (`jmap`) | Session URL and bearer token or username/password; Fastmail and other JMAP Mail servers |
 | Named IMAP accounts (`imap`) | Server, username, password/app password or OAuth token; TLS or required STARTTLS |
@@ -85,7 +85,7 @@ A source ID is your name for an instance; `adapter` selects its integration. Eve
 }
 ```
 
-Use lowercase source IDs with letters, digits and hyphens. Keep IDs stable: saved references and library collections use them. Defining a source does not enable it; add its ID to `enabledSources`. `list_sources` reports configured instances and generates `all-mail`, `all-notes`, `all-journals` and `historical-exports` groups from them.
+Use lowercase source IDs with letters, digits and hyphens. Keep IDs stable: saved references and library collections use them. Defining a source does not enable it; add its ID to `enabledSources`. `list_sources` reports each instance's category and generates `all-mail`, `all-notes`, `all-journals`, `all-tasks`, `all-calendars`, `all-contacts`, `all-browser-history`, `all-bookmarks` and `historical-exports` groups. Categories let callers choose what to search independently of the app providing it.
 
 Markdown sources default to ordinary notes, `**/*.md`, the `date` frontmatter field, and exclusions for `.git` and `node_modules`. Set `exclude` to your own glob list, `dateFromFilename` to read a leading `YYYY-MM-DD`, and `content` to `journal` or `transcript` when appropriate. Transcripts can set `reviewed: true`; `journal: true` includes a transcribed journal in `all-journals`. Attribution is unspecified unless you set `author`. For daily date-named journals, use `pattern: "**/????-??-??.md"`, `dateFromFilename: true`, `dateFields: []`, and `content: "journal"`.
 
@@ -99,20 +99,49 @@ These source definitions can be added under `sources`, with their IDs also added
 
 ```json
 {
-  "tasks": {"adapter": "things-archive", "database": "/exports/Things/main.sqlite"},
+  "tasks": {"adapter": "tasks", "connector": {"type": "things", "database": "/exports/Things/main.sqlite"}},
   "schedule": {"adapter": "ical", "paths": ["/exports/calendar.ics"], "timeZone": "Europe/Berlin"},
   "people": {"adapter": "vcard", "paths": ["/exports/contacts.vcf"]},
   "browser": {
-    "adapter": "chrome-history",
+    "adapter": "browser-history",
     "profiles": [{"id": "work", "path": "/absolute/path/to/browser/Profile 1"}]
   },
   "past-chats": {"adapter": "chatgpt-archive", "paths": ["/exports/chatgpt.zip"]}
 }
 ```
 
-Things can [export its SQLite database](https://culturedcode.com/things/support/articles/2982272/). Select `main.sqlite` from that export. Tasks, projects, areas, headings, tags and checklists become searchable after `rebuild`. The reader does not require Things to be installed. Calendar and contact exports can come from any application that produces iCalendar or vCard. Floating calendar times use the source timezone, then the global timezone. Contact cards without UIDs use content-based identity; edits to those cards require a new reference.
+Things can [export its SQLite database](https://culturedcode.com/things/support/articles/2982272/). Select `main.sqlite` from that export. Tasks, projects, areas, headings, tags and checklists become searchable after `sync-tasks`; the older JSONL/project export uses `connector.root`. The reader does not require Things to be installed. Existing `things-archive` configurations continue using `rebuild` and keep their references. Calendar and contact exports can come from any application that produces iCalendar or vCard. Floating calendar times use the source timezone, then the global timezone. Contact cards without UIDs use content-based identity; edits to those cards require a new reference.
 
-Keep browser profile IDs stable when reordering or adding profiles. To retain old numeric browser references when migrating a flat `chromeProfiles` list, set `legacyProfileIds` to its original order, for example `["work", "personal"]`, and keep that list unchanged.
+Keep browser profile IDs stable when reordering or adding profiles. Existing `chrome-*` adapter names remain supported. To retain old numeric browser references when migrating a flat `chromeProfiles` list, set `legacyProfileIds` to its original order, for example `["work", "personal"]`, and keep that list unchanged. These readers support Chromium formats; Firefox and Safari need their own readers.
+
+### Task apps
+
+Use one source per account or selected set of task files. For example:
+
+```json
+{
+  "maintenanceEnabled": true,
+  "enabledSources": ["work-tasks", "home-tasks"],
+  "sources": {
+    "work-tasks": {"adapter": "tasks", "connector": {
+      "type": "todoist", "account": "work",
+      "token": {"file": "/absolute/private/path/todoist-token"}
+    }},
+    "home-tasks": {"adapter": "tasks", "connector": {
+      "type": "ticktick", "account": "home", "projects": ["YOUR_PROJECT_ID"],
+      "token": {"file": "/absolute/private/path/ticktick-token"}
+    }}
+  }
+}
+```
+
+Put an existing API token in each private file (`0600`). [Todoist's API](https://developer.todoist.com/api/v1/) accepts its personal API token; [TickTick's API](https://developer.ticktick.com/docs/index.html#/openapi) supports personal tokens or OAuth with `tasks:read`. TickTick project IDs come from its project URL or the API's **Get User Project** response. `account` is your stable local identifier for that account; change it when switching accounts. Source Search uses read endpoints and sends no task commands.
+
+Run `bun run start sync-tasks` (or `sync-tasks work-tasks`), then search `all-tasks`. A library refresh also synchronizes enabled task sources. Task keyword search needs neither the library nor models; add the library for semantic/hybrid discovery.
+
+Todoist loads active tasks, descriptions, subtasks, project/section names, dates, labels and comments, then follows its incremental change feed. Completed and deleted tasks leave that active index. TickTick reads the selected project snapshots, including checklists, and compares records before updating projections. Its complete historical archive and comments are not imported. Task date filters use creation dates when the provider supplies them; due dates remain searchable text and metadata. `sources` reports coverage and the last successful sync; failed passes retain the previous snapshot. Original reads check the provider again and reject changed references.
+
+For another app, use `{"adapter":"tasks","connector":{"type":"json","paths":["/absolute/path/tasks.json"]}}`. The file format is `{"version":1,"tasks":[{"id":"stable-id","title":"Plan the observatory","status":"open"}]}`. Optional fields are `description`, `project: {"id":"p","name":"Observatory"}`, `parentId`, `section`, `labels`, `priority`, `createdAt`, `completedAt`, `due`, `deadline`, `recurrence`, `comments`, and `checklist: [{"title":"Compare lenses","completed":false}]`. Timestamps include an offset; status is `open`, `completed` or `canceled`. IDs must be unique within the source and remain stable across exports. Each source is bounded to 20,000 records and 32 MiB; oversized or incomplete responses fail without pruning the previous snapshot.
 
 ## Managed search indexes
 

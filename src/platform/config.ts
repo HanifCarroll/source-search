@@ -97,6 +97,11 @@ export function sourceScope(config:Config,source:string):string {
     messages:["messages"],whatsapp:["whatsapp"],calls:["muesli"],documents:["documentRoots","takeout","mailAccounts","enabledSources"]
   };
   const kind=sourceKind(source,config),definition=config.sources[source];
+  if(definition?.adapter==='tasks'){
+    const connector=definition.connector;
+    const connection='token' in connector?(({token,...identity})=>identity)(connector):connector;
+    return createHash('sha256').update(JSON.stringify({adapter:kind,connection})).digest('hex');
+  }
   if(isMail(source,config)){
     const account=mailAccount(config,source);
     if(definition?.adapter==='jmap' || definition?.adapter==='imap'){

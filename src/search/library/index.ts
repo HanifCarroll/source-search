@@ -29,7 +29,7 @@ export async function libraryStatus(c:Config){
   const states=new Map((db.query("SELECT source,data FROM states").all() as any[]).map(r=>[r.source,JSON.parse(r.data)]));
   const sources=configuredSourceIds(c).filter(source=>sourceEnabled(c,source) && isProjected(source,c)).flatMap(source=>{
     const kind=sourceKind(source,c);
-    const stage=kind.endsWith('-archive')?'archives':isMail(source,c)?'mail':kind==='documents'?'documents':'native';
+    const stage=kind.endsWith('-archive')?'archives':isMail(source,c)?'mail':kind==='documents'?'documents':kind==='tasks'?'tasks':'native';
     const failure=states.get('maintenance-'+stage),saved=states.get(source);
     if(!saved && !failure)return [{source,state:'queued',records:0,chunks:0}];
     return [{source,...saved,...(failure?.state==='error'?{state:'error',error:failure.error,checkedAt:failure.checkedAt}:{})}];

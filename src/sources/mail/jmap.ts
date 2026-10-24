@@ -3,7 +3,7 @@ import {fail,hash,stableJson} from '../../domain/identity';
 import {words} from '../../domain/query';
 import type {Query} from '../../domain/contracts';
 import type {JmapSettings} from '../../platform/source-settings';
-import {readSecret} from './credentials';
+import {readSecret} from '../../platform/credentials';
 import type {Folder,MailConnector,MailContinuation,MailDetail,MailSummary,MailSyncPage} from './types';
 
 const CORE='urn:ietf:params:jmap:core', MAIL='urn:ietf:params:jmap:mail';

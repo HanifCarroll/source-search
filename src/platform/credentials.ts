@@ -1,7 +1,7 @@
 import {open} from 'node:fs/promises';
 import {constants} from 'node:fs';
-import type {Secret} from '../../platform/source-settings';
-import {fail} from '../../domain/identity';
+import type {Secret} from './source-settings';
+import {fail} from '../domain/identity';
 
 export async function readSecret(secret:Secret):Promise<string> {
   let value:string;
@@ -24,5 +24,5 @@ export async function readSecret(secret:Secret):Promise<string> {
     value=value.trim();
     if(!value || value.length>65536 || /[\r\n\0]/.test(value))fail('CREDENTIAL_UNAVAILABLE','Credential must contain a single nonempty value');
     return value;
-  }catch {return fail('CREDENTIAL_UNAVAILABLE','Could not load mail credentials; check the configured environment variable, file or command');}
+  }catch {return fail('CREDENTIAL_UNAVAILABLE','Could not load credentials; check the configured environment variable, file or command');}
 }

@@ -8,6 +8,13 @@
       "adapter": "markdown",
       "root": "/absolute/path/to/notes"
     },
+    "tasks": {
+      "adapter": "tasks",
+      "connector": {
+        "type": "json",
+        "paths": ["/absolute/path/to/tasks.json"]
+      }
+    },
     "work-mail": {
       "adapter": "gmail",
       "account": "work",

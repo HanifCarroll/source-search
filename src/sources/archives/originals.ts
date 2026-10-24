@@ -5,7 +5,7 @@ import { lstat } from "node:fs/promises";
 import { basename } from "node:path";
 import {sourceConfig,type Config} from "../../platform/config";
 import {sourceKind} from "../../domain/source-catalog";
-import { thingsRecords } from "../local/journals-and-tasks";
+import { thingsRecords } from "../tasks/things";
 import { sourceFiles } from "../local/notes";
 import { loadSafeZipArchive,DEFAULT_MAX_ARCHIVE_BYTES } from "../../vendor/takeout/zip";
 import { classifyTakeoutEntry, parseTakeoutEntry } from "../../vendor/takeout/parsers";
@@ -156,7 +156,7 @@ export async function exportRecords(config: Config, source: ArchiveSource, only?
 }
 export async function readExport(config: Config, ref: Ref) {
   config=sourceConfig(config,ref.source);
-  if (ref.source === "things-archive") { const { readThings } = await import("../local/journals-and-tasks"); return readThings(config, ref); }
+  if (ref.source === "things-archive") { const { readThings } = await import("../tasks/things"); return readThings(config, ref); }
   const r = (await exportOriginals(config,ref)).records.get(ref.id);
   if (!r) fail("RECORD_NOT_FOUND", "Record is absent from the selected current export");
   assertVersion(ref, r.ref.version!); return r;

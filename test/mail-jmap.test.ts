@@ -7,7 +7,7 @@ import {searchMail,readMail,mailContext,mailStatus} from '../src/sources/mail';
 import {readMail as legacyRead} from '../src/sources/mail/legacy';
 import {createSourceAccess} from '../src/application/source-access';
 import {jmapFixture} from './helpers/jmap';
-import {readSecret} from '../src/sources/mail/credentials';
+import {readSecret} from '../src/platform/credentials';
 import {connector} from '../src/sources/mail';
 
 async function fixture(fn:(f:ReturnType<typeof jmapFixture>,config:ReturnType<typeof configSchema.parse>)=>Promise<void>){

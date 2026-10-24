@@ -1,3 +1,5 @@
+import {thingsRecords} from '../sources/tasks/things';
+import {taskStatus,searchTasks,readTask} from '../sources/tasks';
 import {bindFocus} from '../domain/content';
 import {filePimStatus,searchFilePim,readFilePim} from '../sources/local/pim-files';
 import {sourceKind,isMail} from '../domain/source-catalog';
@@ -10,7 +12,7 @@ import { requireSource, configuredSourceIds, mailAccount, markdownSettings, sour
 import { libraryStatus, searchLibrary, readLibrary, readDocument } from '../search/library/index';
 import { qmdStatus, searchQmd, readQmd } from '../search/qmd/vault';
 import { cassStatus, searchCass, readCass } from '../sources/agent-history/index';
-import { isDailyJournal, journalPaths, searchJournals, journalRecord, thingsRecords } from '../sources/local/journals-and-tasks';
+import { isDailyJournal, journalPaths, searchJournals, journalRecord } from '../sources/local/journals';
 import { databaseStatus, searchDatabase, readDatabase } from '../sources/local/databases';
 import { notesStatus, searchNotes, readNote } from '../sources/local/notes';
 import { pimStatus, searchPim, readPim } from '../sources/local/pim';
@@ -117,6 +119,7 @@ export function createSourceAccess(config: Config, execute: Run = run, bound = f
   for(const id of configuredSourceIds(config)){
     const kind=sourceKind(id,config);
     if(isMail(id,config))adapters[id]=mail(id);
+    else if(kind==='tasks')adapters[id]={status:()=>taskStatus(config,id),search:q=>searchTasks(config,q),read:recordOnly(ref=>readTask(config,ref))};
     else if(kind==='markdown')adapters[id]=isDailyJournal(config,id)?{status:async()=>({available:true,dailyNotes:(await journalPaths(markdownSettings(config,id).root,markdownSettings(config,id).exclude)).paths.length,filters:['from','to'],coverage:'Daily Markdown journals'}),search:q=>searchJournals(config,q),read:recordOnly(ref=>journalRecord(config,ref))}:notes(id);
     else if(kind==='muesli' || kind==='whatsapp')adapters[id]=database(id);
     else if(kind==='ical'||kind==='vcard')adapters[id]={status:()=>filePimStatus(config,id),search:q=>searchFilePim(config,q),read:recordOnly(ref=>readFilePim(config,ref))};

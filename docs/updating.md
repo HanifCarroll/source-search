@@ -45,6 +45,8 @@ Keep configured cache and model paths stable. Maintenance updates changed projec
 
 The incremental-maintenance update needs no configuration changes or embedding rebuild. Its first pass establishes mail checkpoints, native row fingerprints and search revisions; subsequent passes reuse them. Existing mail caches remain available while that first inventory completes. Back up the index and library before the first pass, which also removes obsolete derived embeddings. See [incremental updates](maintenance.md#incremental-updates) for each connector's reconciliation behavior.
 
+The shared task adapter and category groups need no migration of existing sources. Keep `things-archive` and its ID to retain existing references; use `tasks` for new Things, Todoist, TickTick or JSON sources. Existing `chrome-*` names continue working; `browser-*` names describe the same Chromium formats for new configurations. The vector-search performance patch needs only the locked dependency install, without rebuilding embeddings or changing models.
+
 If `gmailBinary` points to a wrapper with a command allowlist, include the read-only `gmail history` command (`gmail.history` in `gog --enable-commands`). Without it, Gmail uses full reconciliation instead of its additions feed. Keep the wrapper's existing account routing and no-send setting.
 
 Before adopting this release from an older private installation, configure the source paths previously supplied by defaults, mail account routing, `enabledSources`, and `maintenanceEnabled`. Existing derived records may need migration or regeneration because this release binds them to their source configuration.

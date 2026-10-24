@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {isAbsolute} from 'node:path';
-import {adapterKinds, groupIds, sourceKind} from '../domain/source-catalog';
+import {adapterKinds, groupIds, sourceKind, sourceCategory} from '../domain/source-catalog';
 import {sourceId} from '../domain/contracts';
 
 const path = z.string().refine(isAbsolute, 'Source paths must be absolute');
@@ -71,9 +71,20 @@ const markdown = z.object({
 const files = z.array(path).min(1).max(20);
 const profile = z.object({id:sourceId,path}).strict();
 const single = ['library','documents'] as const;
+export const taskSettings = z.object({
+  ...common, adapter:z.literal('tasks'),
+  connector:z.discriminatedUnion('type',[
+    z.object({type:z.literal('things'),database:path.optional(),root:path.optional()}).strict().refine(s=>!!s.database!==!!s.root,'Select a Things database or export folder'),
+    z.object({type:z.literal('todoist'),account:z.string().min(1).max(200),token:secretSchema}).strict(),
+    z.object({type:z.literal('ticktick'),account:z.string().min(1).max(200),token:secretSchema,projects:z.array(z.string().min(1).max(200)).min(1).max(100)}).strict(),
+    z.object({type:z.literal('json'),paths:files}).strict(),
+  ]),
+}).strict();
+export type TaskSettings=z.infer<typeof taskSettings>;
 export const sourceSettings = z.discriminatedUnion('adapter', [
   z.object({...common, adapter:z.literal('gmail'), ...accountSchema.shape}).strict(),
   z.object({...common, adapter:z.literal('fastmail'), ...accountSchema.shape}).strict(),
+  taskSettings,
   jmapSettings,
   imapSettings,
   markdown,
@@ -82,7 +93,7 @@ export const sourceSettings = z.discriminatedUnion('adapter', [
   z.object({...common, adapter:z.literal('messages'), database:path.optional()}).strict(),
   z.object({...common, adapter:z.literal('things-archive'), root:path.optional(), database:path.optional()}).strict(),
   ...(['chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive'] as const).map(adapter=>z.object({...common,adapter:z.literal(adapter),paths:files.optional()}).strict()),
-  ...(['chrome-history','chrome-bookmarks','chrome-downloads'] as const).map(adapter=>z.object({...common,adapter:z.literal(adapter),profiles:z.array(profile).min(1).max(20).refine(p=>new Set(p.map(v=>v.id)).size===p.length,'Profile IDs must be unique').optional(),legacyProfileIds:z.array(sourceId).max(20).optional()}).strict()),
+  ...(['browser-history','browser-bookmarks','browser-downloads','chrome-history','chrome-bookmarks','chrome-downloads'] as const).map(adapter=>z.object({...common,adapter:z.literal(adapter),profiles:z.array(profile).min(1).max(20).refine(p=>new Set(p.map(v=>v.id)).size===p.length,'Profile IDs must be unique').optional(),legacyProfileIds:z.array(sourceId).max(20).optional()}).strict()),
   ...(['calendar','contacts'] as const).map(adapter=>z.object({...common,adapter:z.literal(adapter),helper:path.optional(),launcher:path.optional()}).strict()),
   z.object({...common,adapter:z.literal('ical'),paths:files,timeZone:timeZoneSchema.optional()}).strict(),
   z.object({...common,adapter:z.literal('vcard'),paths:files}).strict(),
@@ -99,7 +110,7 @@ export const sourcesSchema = z.record(sourceId, sourceSettings).default({}).supe
       ctx.addIssue({code:'custom', path:[id], message:'Source ID conflicts with a source group'});
     if(single.includes(setting.adapter as typeof single[number]) && id !== setting.adapter)
       ctx.addIssue({code:'custom', path:[id], message:'This integration uses its standard source ID; label can customize its display name'});
-    if(adapterKinds.includes(id as typeof adapterKinds[number]) && id !== setting.adapter)
+    if(adapterKinds.includes(id as typeof adapterKinds[number]) && !['tasks','browser-history','browser-bookmarks','browser-downloads'].includes(id) && id !== setting.adapter)
       ctx.addIssue({code:'custom', path:[id], message:'Source ID is reserved for another integration'});
   }
 });
@@ -107,6 +118,11 @@ export function sourceGroups(config:{sources:Record<string,SourceSettings>; enab
   const names = [...new Set([...Object.keys(config.sources), ...config.enabledSources])];
   const notes = names.filter(id => sourceKind(id, config) === 'markdown');
   return {
+    'all-tasks':names.filter(id=>sourceCategory(id,config)==='tasks'),
+    'all-browser-history':names.filter(id=>sourceCategory(id,config)==='browser-history'),
+    'all-bookmarks':names.filter(id=>sourceCategory(id,config)==='browser-bookmarks'),
+    'all-calendars':names.filter(id=>sourceCategory(id,config)==='calendars'),
+    'all-contacts':names.filter(id=>sourceCategory(id,config)==='contacts'),
     'all-mail':names.filter(id => ['gmail','fastmail','jmap','imap'].includes(sourceKind(id, config))),
     'all-notes':notes,
     'all-journals':notes.filter(id => {

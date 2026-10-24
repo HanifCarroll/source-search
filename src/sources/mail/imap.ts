@@ -5,7 +5,7 @@ import {fail,hash,stableJson} from '../../domain/identity';
 import {parseMimeMessage} from '../../formats/mime';
 import type {Query} from '../../domain/contracts';
 import type {ImapSettings} from '../../platform/source-settings';
-import {readSecret} from './credentials';
+import {readSecret} from '../../platform/credentials';
 import type {Folder,MailConnector,MailContinuation,MailDetail,MailSummary,MailSyncPage} from './types';
 
 const refSchema=z.union([

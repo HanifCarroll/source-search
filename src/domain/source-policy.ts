@@ -2,7 +2,7 @@ import {sourceKind,type SourceCatalog} from './source-catalog';
 import type { Query } from './contracts';
 
 export function isProjected(source: string, catalog:SourceCatalog={}) {
-  return ["gmail","fastmail","jmap","imap","muesli","whatsapp","messages","things-archive","chatgpt-archive","takeout-archive","linkedin-archive","twitter-archive","documents"].includes(sourceKind(source,catalog));
+  return ["tasks","gmail","fastmail","jmap","imap","muesli","whatsapp","messages","things-archive","chatgpt-archive","takeout-archive","linkedin-archive","twitter-archive","documents"].includes(sourceKind(source,catalog));
 }
 export function usesLibrary(q: Pick<Query, 'source' | 'mode'>, catalog:SourceCatalog={}) {
   return q.source === 'library' || q.source === 'documents' ||

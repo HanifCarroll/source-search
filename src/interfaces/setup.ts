@@ -83,7 +83,7 @@ export async function setup(args:string[]) {
    settings.timeZone=await ask('Timezone',settings.timeZone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC');
    settings.sources={...settings.sources};settings.enabledSources=[...(settings.enabledSources||[])];
    while(true){
-    const adapter=await ask('Integration (markdown, imap, jmap, ical, vcard, things-archive, chrome-history, vault, agent-history, chatgpt-archive; blank to finish)');if(!adapter)break;
+    const adapter=await ask('Integration (markdown, imap, jmap, tasks, ical, vcard, browser-history, vault, agent-history, chatgpt-archive; blank to finish)');if(!adapter)break;
     const id=await ask('Source ID (keep it stable for saved references)',adapter==='markdown'?'notes':adapter);
     if(settings.sources[id])fail('SOURCE_EXISTS','That source ID already exists; edit its settings directly or choose another ID.');
     const definition:any={adapter};
@@ -99,13 +99,22 @@ export async function setup(args:string[]) {
      }else{definition.sessionUrl=await ask('JMAP session URL');definition.auth={type:'bearer',token:{file:await path('File containing the API token')}};}
     }else if(adapter==='ical'||adapter==='vcard'||['chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive'].includes(adapter))definition.paths=[await path('Export file')];
     else if(['messages','whatsapp','muesli','things-archive'].includes(adapter))definition.database=await path('SQLite database or exported main.sqlite');
-    else if(adapter.startsWith('chrome-'))definition.profiles=[{id:await ask('Stable profile ID','default'),path:await path('Chromium profile folder')}];
+    else if(adapter==='tasks'){
+     const type=await ask('Task app (things, todoist, ticktick, json)');
+     if(type==='things')definition.connector={type,database:await path('Things main.sqlite')};
+     else if(type==='json')definition.connector={type,paths:[await path('Task JSON file')]};
+     else if(type==='todoist'||type==='ticktick'){
+      definition.connector={type,account:await ask('Stable account name',id),token:{file:await path('File containing the API token')}};
+      if(type==='ticktick')definition.connector.projects=(await ask('Project IDs, separated by commas')).split(',').map(s=>s.trim()).filter(Boolean);
+     }else fail('INVALID_CONFIG','Unknown task connector');
+    }
+    else if(adapter.startsWith('chrome-')||adapter.startsWith('browser-'))definition.profiles=[{id:await ask('Stable profile ID','default'),path:await path('Chromium profile folder')}];
     else if(adapter==='agent-history'){definition.data=await path('CASS data folder');definition.binary=await path('CASS executable');}
     else if(!['calendar','contacts','library','documents'].includes(adapter))fail('INVALID_CONFIG','Unknown integration');
     configSchema.parse({...settings,sources:{...settings.sources,[id]:definition},enabledSources:[...settings.enabledSources,id]});
     settings.sources[id]=definition;settings.enabledSources.push(id);
    }
-   if(Object.values(settings.sources).some((s:any)=>s.adapter==='vault')||settings.enabledSources.includes('library')){
+   if(Object.values(settings.sources).some((s:any)=>['vault','tasks'].includes(s.adapter))||settings.enabledSources.includes('library')){
     settings.maintenanceEnabled=(await ask('Enable explicit index maintenance? (yes/no)',settings.maintenanceEnabled?'yes':'no'))==='yes';
     settings.libraryEnabled=settings.enabledSources.includes('library');
    }

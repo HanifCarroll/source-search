@@ -11,8 +11,9 @@ src/
   formats/           HTML, MIME, calendar and YAML format adapters
   sources/
     mail/            Shared mail records, JMAP/IMAP connectors, legacy CLI adapters
+    tasks/           Shared task records, Things, Todoist, TickTick and JSON readers
     messages/        Messages queries, attributed-body decoding and timestamps
-    local/           Journals, tasks, local databases, PIM, browser metadata
+    local/           Journals, local databases, PIM, browser metadata
     archives/        Export indexing, original reads, per-export interpretation
     agent-history/   CASS search and original conversation reads
   search/
@@ -76,6 +77,14 @@ The ZIP adapter keeps strict archive checks enabled. It validates redundant opti
 
 ## Mail connectors
 
-`mail/index.ts` owns record formatting, source opt-in and continuation. JMAP and IMAP implement the same small search/read/thread/attachment interface in `mail/types.ts`. JMAP uses bounded HTTP requests and validates protocol responses; IMAP uses ImapFlow for connections, mailbox locks, UID search and MIME part fetching. `credentials.ts` resolves private credentials at connection time. `legacy.ts` retains the existing Gmail and mailbridge commands.
+`mail/index.ts` owns record formatting, source opt-in and continuation. JMAP and IMAP implement the same small search/read/thread/attachment interface in `mail/types.ts`. JMAP uses bounded HTTP requests and validates protocol responses; IMAP uses ImapFlow for connections, mailbox locks, UID search and MIME part fetching. `platform/credentials.ts` resolves private credentials for mail and task providers at connection time. `legacy.ts` retains the existing Gmail and mailbridge commands.
 
 Identity is separate from transport. JMAP retains provider email IDs. IMAP uses account-wide server IDs when available, otherwise mailbox path plus UIDVALIDITY and UID. Cache scopes bind mail to its configured account, endpoint and folder selection. Provider errors cannot become successful empty scans that would prune the library. The Dovecot integration test runs independently of the protocol fixtures and is included in Linux CI.
+
+## Task connectors and categories
+
+`tasks/model.ts` defines a task and a small provider interface: synchronize a snapshot/checkpoint and read a current original. Todoist and TickTick own only transport interpretation and provider coverage. Things retains its existing record bodies and versions. The shared task adapter owns native search, pagination and original version checks; `maintenance/tasks.ts` publishes snapshots and updates the library through its normal changed-record path. Adding another task app does not add a new search route or group. JSON files use the same record model.
+
+Records and checkpoints commit together after a complete provider pass. Per-source locks serialize writers and recover after process failure. Credentials are resolved at request time and never stored in checkpoints. New task references bind the provider, selected files/projects and account identity, excluding credential references so token rotation preserves saved references. Existing Things archive references retain their original versions. Failed syncs retain records and report their stale status.
+
+Categories describe user-facing data; adapters describe formats and transports. `all-calendars` can combine native macOS events with iCalendar files, `all-contacts` can combine native contacts with vCards, and browser categories span Chromium-compatible profiles. An adapter alias does not claim support for a different storage format. Source IDs remain the stable identity and access boundary.

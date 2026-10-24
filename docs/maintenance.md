@@ -13,7 +13,7 @@ The optional `scripts/qmd-auto-refresh.py --config /absolute/config.json --state
 
 The existing `scripts/embed-library.mjs` launcher remains an alias for the managed embedding command. Both indexing and embedding use the bundled public QMD SDK. Embedding batches are bounded and already completed documents are reused on the next run.
 
-The pinned QMD dependency has a Bun patch for [slow collection-scoped vector lookups](https://github.com/tobi/qmd/issues/952) and unnecessary cache clearing on unchanged updates. It uses one filtered nearest-neighbor query per collection and preserves inference caches on no-op refreshes. `bun install --frozen-lockfile` applies the patch automatically. When upgrading QMD, remove it once upstream behavior passes the vector and incremental tests and the search benchmark.
+The pinned QMD dependency has a Bun patch for [slow collection-scoped vector lookups](https://github.com/tobi/qmd/issues/952) and unnecessary cache clearing on unchanged updates. It shares nearest-neighbor work across selected collections and retrieves chunk metadata through its primary key. An unfiltered lookup is accepted only when its entire candidate window belongs to the selected sources; otherwise the query is repeated with an exact source filter. Crowded or tied chunk boundaries fall back to per-collection retrieval. Models, candidate counts and ranking stay unchanged. No-op refreshes preserve inference caches. `bun install --frozen-lockfile` applies the patch automatically. When upgrading QMD, remove it once upstream behavior passes the vector and incremental tests and the search benchmark.
 
 ## Incremental updates
 
@@ -23,6 +23,9 @@ The pinned QMD dependency has a Bun patch for [slow collection-scoped vector loo
 | IMAP mail | Retain UIDVALIDITY and UID inventories per mailbox. Unchanged HIGHESTMODSEQ/UIDNEXT/count skips message retrieval where available. Other servers list UIDs and fetch only new envelopes and changed folder memberships. UIDVALIDITY changes reset that mailbox. |
 | Gmail through `gog` | Additions history between daily full reconciliations. The supported CLI exposes only additions, so full scans remain necessary for deletions and labels. Older versions without history use paginated reconciliation. |
 | Legacy mailbridge | Paginated reconciliation; unchanged message summaries reuse cached bodies. Native JMAP offers a complete change feed. |
+| Todoist tasks | Initial active snapshot followed by a delta, then sync-token changes for tasks, projects, sections and task comments. Completion/deletion removes tasks from the active index. |
+| TickTick tasks | Complete snapshots of selected projects, followed by record/projection diffs. No change token is exposed by these endpoints. |
+| Generic task files and Things task connector | Read the selected snapshots and publish changed records only. Existing `things-archive` sources retain their export index behavior. |
 | Messages, WhatsApp, Muesli calls | Skip unchanged database/WAL snapshots. On change, compare row fingerprints, including joined text and metadata; decode only changed rows. A complete inventory detects edits and deletions, without assuming rows are append-only. |
 | Things and selected ChatGPT, Takeout, LinkedIn, X exports | Skip unchanged selected files. Parse changed exports, then update only changed records and search projections. ZIP/JSON exports do not supply a change feed, so a changed file must be parsed. |
 | Vault Markdown | File-change detection and content hashes; only changed content needs new embeddings. |
