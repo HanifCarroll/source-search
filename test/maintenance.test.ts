@@ -1,5 +1,5 @@
 import {test,expect} from 'bun:test';
-import {mkdtemp,rm,writeFile,readFile,access} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile,access} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {configSchema} from '../src/platform/config';

@@ -1,6 +1,7 @@
 import {createSnapshot,requireColumns} from '../../platform/sqlite';
 import {hash,versioned,fail,now} from '../../domain/identity';
 import type {RecordData} from '../../domain/contracts';
+import {taskDueDate} from '../../domain/task-fields';
 // Read a selected Things 3 database export, including projects, headings and areas.
 export async function thingsDatabase(path:string) {
  const snap=await createSnapshot(path),db=snap.database;
@@ -25,11 +26,13 @@ export async function thingsDatabase(path:string) {
   const records=new Map<string,RecordData>();
   for(const r of [...rows,...[...areas.values()].map(a=>({...a,type:3}))]){
    const type=['task','project','heading','area'][Number(r.type)];if(!type)fail('UNSUPPORTED_SCHEMA','Unknown Things record type');
-   const status=['open','', 'canceled','completed'][Number(r.status??0)];if(!status)fail('UNSUPPORTED_SCHEMA','Unknown Things task status');
+   const status=(['open','', 'canceled','completed'] as const)[Number(r.status??0)];if(!status)fail('UNSUPPORTED_SCHEMA','Unknown Things task status');
    const project=tasks.get(r.project)||tasks.get(tasks.get(r.heading)?.project),area=areas.get(r.area)||areas.get(project?.area);
    const title=r.title||'(Untitled '+type+')';
    const body=[title,`Historical ${type}; status: ${status}; in Trash: ${!!Number(r.trashed)}`,project&&`Project: ${project.title}`,area&&`Area: ${area.title}`,tags.get(r.uuid)?.length&&`Tags: ${tags.get(r.uuid)!.join(', ')}`,day(r.startDate)&&`Start: ${day(r.startDate)}`,day(r.deadline)&&`Deadline: ${day(r.deadline)}`,r.notes,...(checklist.get(r.uuid)||[])].filter(Boolean).join('\n\n');
    const record=versioned({ref:{source:'things-archive',id:String(r.uuid)},title,body,type:'historical-'+type,occurredAt:date(r.creationDate),observedAt:now(),locator:path+'#'+r.uuid,metadata:{historical:true,dateKind:'created',status,trashed:!!Number(r.trashed),project:project?.title,area:area?.title,modifiedAt:date(r.userModificationDate)}});
+   // Derived query fields do not change the established original-reference hash.
+   if(type==='task')record.task={status,trashed:!!Number(r.trashed),...taskDueDate(day(r.deadline)??(r.deadline?String(r.deadline):undefined)),...(project?{project:{id:String(project.uuid),name:project.title}}:{})};
    if(records.has(record.ref.id))fail('INVALID_ARCHIVE','Duplicate Things UUID');records.set(record.ref.id,record);
   }
   return {records,generation:hash(JSON.stringify([...records.values()].map(r=>r.ref))),info:{taskCount:rows.filter(r=>Number(r.type)===0).length,exportedAt:snap.sourceDatabaseModifiedAt||now(),createdDateRange:undefined,archiveEditedAt:undefined}};

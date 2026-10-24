@@ -1,6 +1,6 @@
 # Updating an installation
 
-Task snapshots now use a shared private SQLite store. Stop the refresh process before updating, then run `bun run start sync-sources` (or restart the existing refresher). The first sync imports each selected task source's old JSON snapshot and checkpoint before contacting its provider. It verifies the imported records and removes the replaced JSON cache; a failed provider request retains the imported snapshot. Source IDs, original versions and saved references stay unchanged. Search can still read an unmigrated JSON snapshot without writing anything. Other source caches and original files are unchanged.
+Task snapshots now use a shared private SQLite store. Stop the refresh process before updating, then run `bun run start sync-sources` (or restart the existing refresher). The first sync imports each selected task source's old JSON snapshot and checkpoint before contacting its provider. It verifies the imported records and removes the replaced JSON cache; a failed provider request retains the imported snapshot. Source IDs, original versions and saved references stay unchanged. Search can still read an unmigrated JSON snapshot without writing anything. Other source caches and original files are unchanged. Reconnect MCP clients to load the new task-filter input schema. When rolling back to code that predates this store, re-sync task sources to regenerate that version's disposable JSON snapshots.
 
 Keep the application checkout on the public repository's `main` branch. Store personal settings outside Git, normally at `~/.config/source-search/config.json`. Source files, credentials, models, databases, and caches also belong outside the checkout.
 
@@ -43,7 +43,7 @@ Finally, run `bun run start sources` to check the enabled sources. This performs
 
 ## Existing indexes and rollback
 
-The maintenance separation keeps existing cache paths, checkpoints and references. `sync-sources` now also accepts tasks; `sync-tasks` remains available. Both commands save source snapshots without writing library projections. Run `index --library` when you want to update the combined library; `--update-only` only indexes already-published projections. No cache migration or embedding rebuild is needed for this change. Restart the existing optional refresh job to load its independent source-sync worker. That worker also works with the library off; installations without configured models perform keyword indexing only.
+Source synchronization remains separate from optional library maintenance. `sync-sources` now also accepts tasks; `sync-tasks` remains available. Both commands save source snapshots without writing library projections. Run `index --library` when you want to update the combined library; `--update-only` only indexes already-published projections. The task cache migration described above needs no embedding rebuild. Restart the existing optional refresh job to load its independent source-sync worker. That worker also works with the library off; installations without configured models perform keyword indexing only.
 
 Keep configured cache and model paths stable. Maintenance updates changed projections incrementally; lexical search may be available while their embeddings catch up.
 

@@ -7,6 +7,7 @@ import {sourceScope,requireSource,type Config} from '../../platform/config';
 import {textFile} from '../../platform/source-files';
 import {fail} from '../../domain/identity';
 import type {Query,Ref} from '../../domain/contracts';
+import {taskPage} from '../../domain/task-query';
 import {taskSchema,taskRecord,type TaskProvider,type TaskSnapshot} from './model';
 import {taskHttp} from './http';
 import {todoistProvider} from './todoist';
@@ -42,7 +43,7 @@ export function taskProvider(c:Config,source:string):TaskProvider {
       // Reuse the Things reader; its existing things-archive route and saved
       // references are unchanged. New task sources also bind their scope below.
       return {records:[...snapshot.records.values()].map(r=>({...r,adapter:'tasks',ref:{...r.ref,source}})),strategy:'snapshot-row-diff',
-        coverage:'Selected Things database or export, including the statuses present in that snapshot',warnings:[]};
+        sourceSnapshotAt:snapshot.info.exportedAt,coverage:'Selected Things database or export. Statuses are historical, not current assignments.',warnings:[]};
     }
     if(connector.type!=='json')return fail('SOURCE_NOT_CONFIGURED','Unknown task connector');
     const records:TaskSnapshot['records']=[],ids=new Set<string>();let bytes=0;
@@ -60,9 +61,13 @@ export function taskProvider(c:Config,source:string):TaskProvider {
   return bind({sync,async read(id){const r=(await sync()).records.find(r=>r.ref.id===id);if(!r)fail('RECORD_NOT_FOUND','Task is absent from the selected files');return r;}});
 }
 
-export type {SourceCache as TaskCache} from '../sync/cache';
-export const taskCachePath=(c:Config,source:string)=>snapshotStore(c,source,'task-snapshots').path;
 export const taskCache=(c:Config,source:string)=>snapshotStore(c,source,'task-snapshots').read();
 export const taskStatus=(c:Config,source:string)=>snapshotStore(c,source,'task-snapshots').status();
-export const searchTasks=(c:Config,q:Query)=>snapshotStore(c,q.source,'task-snapshots').search(q);
+export async function searchTasks(c:Config,q:Query){
+  const store=snapshotStore(c,q.source,'task-snapshots');
+  if(!q.task&&q.sort!=='due')return store.search(q);
+  const saved=await store.read();if(!saved)fail('NEEDS_SYNC','Run source-search sync-sources before searching this source');
+  return taskPage(saved.records,q,{kind:saved.sourceSnapshotAt?'historical-archive':'synchronized-snapshot',asOf:saved.sourceSnapshotAt||saved.checkedAt,syncedAt:saved.checkedAt,description:saved.coverage,lastAttemptAt:saved.lastAttemptAt,lastError:saved.lastError},
+    [...saved.warnings,...(saved.lastError?['Using the last successful snapshot; latest sync failed: '+saved.lastError.code]:[])]);
+}
 export const readTask=(c:Config,ref:Ref)=>snapshotStore(c,ref.source,'task-snapshots').original(ref,taskProvider(c,ref.source));

@@ -23,6 +23,7 @@ test('Apple Reminders maps open/completed tasks and date-only due dates; rejects
  let rows:any[]=[reminder(),footer(1)];const calls:string[][]=[];
  const provider=appleRemindersProvider('apple',['home'],async args=>{calls.push(args);return rows;});
  const first=await provider.sync();expect(first.records[0]!.body).toContain('Due: 2026-11-02');expect(first.records[0]!.body).toContain('Compare aperture');expect(calls[0]).toContain('["home"]');
+ expect(first.records[0]!.task).toMatchObject({status:'open',dueDate:'2026-11-02',project:{id:'home',name:'Home'}});
  expect((await provider.read(first.records[0]!.ref.id)).ref.version).toBe(first.records[0]!.ref.version);
  rows=[{...reminder(),completed:true,completedAt:'2026-10-21T10:00:00Z'},footer(1)];expect((await provider.sync()).records[0]!.body).toContain('Status: completed');
  for(const bad of [[reminder()],[reminder(),footer(2)],[reminder(),{...footer(1),complete:false}],[{...reminder(),list:{id:'work',name:'Unselected'}},footer(1)]]){
@@ -58,6 +59,7 @@ test('Microsoft follows empty pages, maps steps, merges partial deltas, complete
   return page([{id:'task-a','@removed':{reason:'deleted'}}],'three');
  });
  const first=await provider.sync(),saved=JSON.stringify(first.checkpoint),record=first.records[0]!;
+ expect(record.task).toMatchObject({status:'open',dueDate:'2026-11-02',project:{id:'home',name:'Home'}});
  expect(record.body).toContain('Compare apertures');expect(record.body).toContain('[ ] Measure the aperture');expect(record.body).toContain('Pacific Standard Time');expect(record.body).toContain('https://example.test/plan');
  expect(calls.some(p=>p.includes('/work/'))).toBe(false);
  phase=1;const second=await provider.sync(first.checkpoint);expect(second.records[0]!.ref.id).toBe(record.ref.id);expect(second.records[0]!.body).toContain('Status: completed');expect(second.records[0]!.body).toContain('[x] Measure');expect(JSON.stringify(first.checkpoint)).toBe(saved);

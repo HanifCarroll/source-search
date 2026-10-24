@@ -125,9 +125,25 @@ Put an existing API token in each private file (`0600`). [Todoist's API](https:/
 
 Run `bun run start sync-tasks` (or `sync-tasks work-tasks`), then search `all-tasks`. A library refresh also synchronizes enabled task sources. Task keyword search needs neither the library nor models; add the library for semantic/hybrid discovery.
 
-Todoist loads active tasks, descriptions, subtasks, project/section names, dates, labels and comments, then follows its incremental change feed. Completed and deleted tasks leave that active index. TickTick reads the selected project snapshots, including checklists, and compares records before updating projections. Its complete historical archive and comments are not imported. Task date filters use creation dates when the provider supplies them; due dates remain searchable text and metadata. `sources` reports coverage and the last successful sync; failed passes retain the previous snapshot. Original reads check the provider again and reject changed references.
+Todoist loads active tasks, descriptions, subtasks, project/section names, dates, labels and comments, then follows its incremental change feed. Completed and deleted tasks leave that active index. TickTick reads the selected project snapshots, including checklists, and compares records before updating projections. Its complete historical archive and comments are not imported. `from`/`to` filter creation timestamps when the provider supplies them; `task.dueFrom`/`task.dueBefore` filter due dates. `sources` reports coverage and the last successful sync; failed passes retain the previous snapshot. Original reads check the provider again and reject changed references.
 
 For another app, use `{"adapter":"tasks","connector":{"type":"json","paths":["/absolute/path/tasks.json"]}}`. The file format is `{"version":1,"tasks":[{"id":"stable-id","title":"Plan the observatory","status":"open"}]}`. Optional fields are `description`, `project: {"id":"p","name":"Observatory"}`, `parentId`, `section`, `labels`, `priority`, `createdAt`, `completedAt`, `due`, `deadline`, `recurrence`, `comments`, and `checklist: [{"title":"Compare lenses","completed":false}]`. Timestamps include an offset; status is `open`, `completed` or `canceled`. IDs must be unique within the source and remain stable across exports. Each source is bounded to 20,000 records and 32 MiB; oversized or incomplete responses fail without pruning the previous snapshot.
+
+### Task queries
+
+Use the existing search tool to list tasks with exact filters. For example, open tasks due from October 26 through November 1, 2026:
+
+```json
+{"queries":[{"source":"all-tasks","query":"","task":{"status":"open","dueFrom":"2026-10-26","dueBefore":"2026-11-02"},"sort":"due","limit":25}]}
+```
+
+Use dates for the requested week. `dueFrom` includes its date; `dueBefore` excludes its date. Dates are calendar dates as reported by each provider, including the date component of a timestamp; they are not converted to the machine's timezone. Date-only tasks stay on that day. Original reads retain time/zone details where supplied. Things uses **Deadline**, never its **When/start date**. Other apps use their `due` field; a separate Todoist `deadline` remains in the original record.
+
+`task.status` accepts `open`, `completed` or `canceled`. Add `projectId` or `projectName` inside `task` for exact matching; project IDs are scoped to a source, and names are case-sensitive. Names shared by multiple projects match all of them. Calendar lists in Reminders, Microsoft To Do and Google Tasks act as task projects. `task:{}` lists all non-trashed tasks, excluding project/heading records. Combine these filters with text, creation dates or sections. Omit `mode`, or use `lexical`; semantic/hybrid discovery does not accept exact task filters.
+
+Due order puts undated tasks last and uses stable IDs to break ties. Follow `nextCursor` using that result's source ID and the same filters. Changing only `limit` is allowed. An unchanged sync preserves continuation; a changed snapshot requires restarting the query.
+
+`totalMatches` counts matches in that source's selected snapshot, before pagination. `coverage` gives its timestamp, provider limits and any failed latest sync. The count is not a claim about the entire account or missing history: Todoist's snapshot contains active tasks; an old Things export has historical statuses. Tasks without a due date do not match a due-date range. Unsupported date values produce a warning; unclassified legacy task records suppress the total until a successful refresh. These queries work without models or the combined library, including against existing `things-archive` sources.
 
 ## Native Apple calendars and contacts
 

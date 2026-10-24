@@ -1,6 +1,7 @@
 import {z} from 'zod';
 import {versioned,now,fail} from '../../domain/identity';
 import type {RecordData} from '../../domain/contracts';
+import {taskFields} from '../../domain/task-fields';
 
 const id=z.string().min(1).max(500);
 const timestamp=z.iso.datetime({offset:true});
@@ -20,8 +21,9 @@ export function taskRecord(source:string,provider:string,task:Task,locator:strin
     task.labels.length&&`Labels: ${task.labels.join(', ')}`,task.priority&&`Priority: ${task.priority}`,
     task.due&&`Due: ${task.due}`,task.deadline&&`Deadline: ${task.deadline}`,task.recurrence&&`Repeats: ${task.recurrence}`,
     task.description,...task.checklist.map(i=>`[${i.completed?'x':' '}] ${i.title}`),...task.comments.map(t=>'Comment: '+t)].filter(Boolean).join('\n\n');
-  return versioned({adapter:'tasks',ref:{source,id:task.id},title:task.title,body,type:'task',locator,observedAt:now(),
+  const record=versioned({adapter:'tasks',ref:{source,id:task.id},title:task.title,body,type:'task',locator,observedAt:now(),
     occurredAt:task.createdAt,metadata:{provider,task,dateKind:'created'}});
+  return {...record,task:taskFields(record)};
 }
 export function checkedTask(value:unknown){const parsed=taskSchema.safeParse(value);if(!parsed.success)fail('INVALID_PROVIDER_RESPONSE','Task data does not match the supported format');return parsed.data;}
 export type {SourceSnapshot as TaskSnapshot,SourceProvider as TaskProvider} from '../sync/model';

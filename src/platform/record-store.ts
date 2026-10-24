@@ -27,12 +27,20 @@ export function recordStore(path:string){
       const version=(db.query('PRAGMA user_version').get() as {user_version:number}).user_version;
       if(version===0&&write){
         db.transaction(()=>{
-          db.exec(`CREATE TABLE IF NOT EXISTS snapshots(source TEXT PRIMARY KEY,scope TEXT NOT NULL,data TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS records(source TEXT NOT NULL,id TEXT NOT NULL,ordinal INTEGER NOT NULL,signature TEXT NOT NULL,data TEXT NOT NULL,
+          // Another process may have initialized the store while we acquired
+          // the writer lock. Never adopt an unrelated existing database.
+          const current=(db.query('PRAGMA user_version').get() as {user_version:number}).user_version;
+          if(current===schema)return;
+          if(current!==0||db.query('SELECT name FROM sqlite_master').all().length)fail('UNSUPPORTED_SCHEMA','Record store path contains an incompatible database');
+          db.exec(`CREATE TABLE snapshots(source TEXT PRIMARY KEY,scope TEXT NOT NULL,data TEXT NOT NULL);
+            CREATE TABLE records(source TEXT NOT NULL,id TEXT NOT NULL,ordinal INTEGER NOT NULL,signature TEXT NOT NULL,data TEXT NOT NULL,
               PRIMARY KEY(source,id),FOREIGN KEY(source) REFERENCES snapshots(source) ON DELETE CASCADE);
-            CREATE INDEX IF NOT EXISTS records_order ON records(source,ordinal);
+            CREATE INDEX records_order ON records(source,ordinal);
             PRAGMA user_version=1;`);
         }).immediate();
+      }else if(version===0&&!write&&!db.query('SELECT name FROM sqlite_master').all().length){
+        // No committed snapshot yet, including an interrupted first creation.
+        db.close();return;
       }else if(version!==schema)fail('UNSUPPORTED_SCHEMA','Record store needs a compatible Source Search version');
       return db;
     }catch(e){db.close();throw e;}

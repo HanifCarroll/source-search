@@ -79,6 +79,8 @@ bun run start read '{"ref":{"source":"notes","id":"returned ID","version":"retur
 
 For **each selected source**, confirm that `sources` reports `ready`, search for text known to exist, then read the exact `ref` returned in a hit. Use that source's supported filters; calendar searches need a date window. Inspect the JSON results and coverage warnings as well as the command's exit status.
 
+Tasks also support [exact lists and counts](docs/connectors.md#task-queries), such as open tasks due this week or tasks in a particular project. Results identify the snapshot date and its coverage.
+
 If a source needs sync or rebuild, run its command from step 3. For missing paths or authentication, correct the configuration or complete sign-in and retry. Keep any unresolved source visible in the setup result, with the specific next action.
 
 ### 5. Connect the agent

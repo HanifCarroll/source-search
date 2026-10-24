@@ -17,6 +17,7 @@ export function sortRecords(records: RecordData[], q: Query) {
     if (!q.sort)
         return records;
     return [...records].sort((a, b) => {
+        if(q.sort==='due')return (!a.task?.dueDate||!b.task?.dueDate ? Number(!a.task?.dueDate)-Number(!b.task?.dueDate) : a.task.dueDate.localeCompare(b.task.dueDate)) || a.ref.id.localeCompare(b.ref.id);
         if (q.sort === "relevance")
             return words(q.query).reduce((n, w) => n + Number(words(b.title).some(t => t.startsWith(w))) - Number(words(a.title).some(t => t.startsWith(w))), 0) || a.ref.id.localeCompare(b.ref.id);
         if (!a.occurredAt || !b.occurredAt)
@@ -26,9 +27,10 @@ export function sortRecords(records: RecordData[], q: Query) {
 }
 export function validateOptions(q: Query,catalog:SourceCatalog={}) {
     const source = sourceKind(q.source,catalog), mail=isMail(q.source,catalog);
-    if(source==='tasks'&&q.conversation)fail('UNSUPPORTED_FILTER','Tasks have no conversation filter');
+    if((q.task||q.sort==='due')&&!['tasks','things-archive'].includes(source))fail('UNSUPPORTED_FILTER','Task filters and due sorting require a task source');
+    if(['tasks','things-archive'].includes(source)&&q.conversation)fail('UNSUPPORTED_FILTER','Tasks have no conversation filter');
     if(usesLibrary(q,catalog)){
-        if(q.from || q.to || q.conversation || q.match || q.sections || q.types || q.roles || q.contentTypes || q.selectedBranch!==undefined || q.folders || q.excludeSpamTrash!==undefined || q.sort && q.sort!=="relevance")fail("UNSUPPORTED_FILTER","Hybrid library discovery supports mode and relevance only; use the native source without mode for exact filters");
+        if(q.task || q.from || q.to || q.conversation || q.match || q.sections || q.types || q.roles || q.contentTypes || q.selectedBranch!==undefined || q.folders || q.excludeSpamTrash!==undefined || q.sort && q.sort!=="relevance")fail("UNSUPPORTED_FILTER","Hybrid library discovery supports mode and relevance only; use the native source without mode for exact filters");
         if(mail && /(?:^|\s)(?:from|to|in|label|has|after|before|newer_than):/.test(q.query))fail("UNSUPPORTED_FILTER","Use native mail search without mode for Gmail query operators");
         return;
     }

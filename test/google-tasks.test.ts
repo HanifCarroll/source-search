@@ -21,6 +21,7 @@ test('Google Tasks includes completed/hidden/assigned items, follows pagination 
     return {nextPageToken:'next'};
   });
   const first=await provider.sync();expect(first.records).toHaveLength(1);expect(first.records[0]!.body).toContain('Status: completed');expect(first.records[0]!.body).toContain('Due: 2026-11-02');
+  expect(first.records[0]!.task).toMatchObject({status:'completed',dueDate:'2026-11-02',project:{id:'list-a',name:'Research'}});
   expect((await provider.read(first.records[0]!.ref.id)).title).toBe('Invented telescope');
   phase=1;expect((await provider.sync(first.checkpoint)).records).toEqual([]);expect(seen.some(p=>p.includes('updatedMin='))).toBe(true);
   expect((first.checkpoint as any).lists[0].items).toHaveLength(1);

@@ -1,6 +1,6 @@
 import {connectedStatus,searchConnected,readConnected} from '../sources/connected';
 import {browserStatus,searchBrowser,readBrowser} from '../sources/browser';
-import {thingsRecords} from '../sources/tasks/things';
+import {thingsRecords,searchThingsTasks} from '../sources/tasks/things';
 import {taskStatus,searchTasks,readTask} from '../sources/tasks';
 import {bindFocus} from '../domain/content';
 import {filePimStatus,searchFilePim,readFilePim} from '../sources/local/pim-files';
@@ -107,7 +107,7 @@ export function createSourceAccess(config: Config, execute: Run = run, bound = f
         catch(e){index={available:false,error:errorData(e),action:'Run source-search rebuild'};}
         return {available:true,taskCount:originals.info.taskCount,dateRange:originals.info.createdDateRange,snapshotAt:originals.info.exportedAt,editedAt:originals.info.archiveEditedAt,index,filters:['from','to'],querySyntax:'literal full-text terms, all must match',coverage:'Edited historical archive; date filters use task creation time'};
       },
-      search:q=>searchArchive(config,q),read:recordOnly(ref=>readExport(config,ref)),
+      search:q=>q.task||q.sort==='due'?searchThingsTasks(config,q):searchArchive(config,q),read:recordOnly(ref=>readExport(config,ref)),
     },
     vault:{status:async()=>({...await qmdStatus(config),pagination:true}),search:q=>searchQmd(config,q),read:recordOnly(ref=>readQmd(config,ref))},
     'agent-history':{status:async()=>({...await cassStatus(config),pagination:true}),search:q=>searchCass(config,q),read:recordOnly((ref,context)=>readCass(config,ref,context))},

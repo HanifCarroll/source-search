@@ -1,6 +1,6 @@
 import {publishSnapshots} from '../src/maintenance/library-sync';
 import {test,expect} from 'bun:test';
-import {mkdtemp,writeFile,readFile,rm,mkdir} from 'node:fs/promises';
+import {mkdtemp,writeFile,rm,mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {configSchema,sourceScope} from '../src/platform/config';
@@ -23,6 +23,7 @@ test('Todoist full snapshot, follow-up delta, edits, completion and deletion use
  const calls:any[]=[];
  const p=todoistProvider('work',async(path,body)=>{calls.push({path,body});return responses.shift();});
  const first=await p.sync();expect(calls.map(c=>c.body.sync_token)).toEqual(['*','initial']);
+ expect(first.records[0]!.task).toMatchObject({status:'open',dueDate:'2026-11-01',project:{id:'project',name:'Observatory'}});
  expect(first.records).toHaveLength(1);expect(first.records[0]!.body).toContain('Updated telescope notes');
  for(const text of ['Procurement','Observatory','optics','2026-11-01','2026-12-01','Check the aperture'])expect(first.records[0]!.body).toContain(text);
  const second=await p.sync(first.checkpoint);expect(second.records[0]!.body).toContain('Renamed project');expect(second.records[0]!.ref.version).not.toBe(first.records[0]!.ref.version);
@@ -50,6 +51,7 @@ test('TickTick maps selected project snapshots, subtasks and checklists without 
   return {project:{id,name:'Project '+id},columns:[{id:'column',name:'Next'}],tasks:[{id:'task-'+id,projectId:id,title:'Invented task',content:'Description',desc:'Checklist description',status:0,columnId:'column',parentId:'parent',priority:5,dueDate:'2026-11-01T09:00:00+0000',tags:['home'],items:[{title:'First step',status:1},{title:'Second step',status:0}]}]};
  });
  const s=await p.sync();expect(calls).toEqual(['/project/p1/data','/project/p2/data']);expect(s.records).toHaveLength(2);
+ expect(s.records[0]!.task).toMatchObject({status:'open',dueDate:'2026-11-01',project:{id:'p1'}});
  for(const text of ['Parent task: parent','[x] First step','[ ] Second step','Next','home','Description'])expect(s.records[0]!.body).toContain(text);
  expect(s.records[0]!.occurredAt).toBeUndefined();expect(s.coverage).toContain('completed-task history');
  await expect(ticktickProvider('bad',['p1'],async()=>({project:{id:'p2',name:'Wrong'},tasks:[]})).sync()).rejects.toMatchObject({code:'INVALID_PROVIDER_RESPONSE'});

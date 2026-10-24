@@ -1,6 +1,6 @@
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
-import {mkdtemp,writeFile,rm,access,stat} from 'node:fs/promises';
+import {mkdtemp,writeFile,rm,access,stat,chmod} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
 import {recordStore} from '../src/platform/record-store';
@@ -16,6 +16,14 @@ import type {SourceCache} from '../src/domain/snapshots';
 async function temporary(fn:(root:string)=>Promise<void>){const root=await mkdtemp(join(tmpdir(),'ss-record-store-'));try{await fn(root);}finally{await rm(root,{recursive:true,force:true});}}
 const record=(source:string,id:string,title=id)=>versioned({ref:{source,id},title,body:title,type:'task',locator:'fixture:'+id,observedAt:'2026-10-01T00:00:00Z'});
 const saved=(source='tasks',ids=['a','b']):SourceCache=>({version:1,scope:'scope-'+source,records:ids.map(id=>record(source,id)),checkpoint:{next:'one'},checkedAt:'2026-10-01T00:00:00Z',coverage:'Invented tasks',strategy:'fixture',warnings:[]});
+
+test('interrupted first creation can resume, while unrelated databases are left untouched',()=>temporary(async root=>{
+ const store=recordStore(join(root,'records.sqlite'));await writeFile(store.path,'',{mode:0o600});
+ expect(await store.read('tasks','scope-tasks')).toBeUndefined();await store.write('tasks',saved());expect((await store.read('tasks','scope-tasks'))!.records).toHaveLength(2);
+ const other=recordStore(join(root,'other.sqlite')),db=new Database(other.path);db.exec('CREATE TABLE unrelated(value TEXT); INSERT INTO unrelated VALUES (\'keep\')');db.close();await chmod(other.path,0o600);
+ await expect(other.write('tasks',saved())).rejects.toMatchObject({code:'UNSUPPORTED_SCHEMA'});
+ const check=new Database(other.path,{readonly:true});try{expect(check.query('SELECT * FROM unrelated').all()).toEqual([{value:'keep'}]);expect(check.query('PRAGMA user_version').get()).toEqual({user_version:0});}finally{check.close();}
+}));
 
 test('shared store replaces records and checkpoint atomically, including a disk-write failure',()=>temporary(async root=>{
  const store=recordStore(join(root,'records.sqlite')),before=saved();await store.write('tasks',before);
