@@ -37,6 +37,23 @@ test('public QMD SDK indexes and reads literal names, retains old normalized ref
   const data=JSON.parse((response.content as any[])[0].text);expect(data.results[0].status).toBe('ok');expect(data.results[0].items[0].ref.source).toBe('research');
  }finally{await client.close();}
 
+ // Closing stdin should release the persistent search child without a forced
+ // transport kill or waiting for the worker's five-minute idle timeout.
+ const child=Bun.spawn([process.execPath,join(import.meta.dir,'../src/mcp.ts')],{env:{...process.env,SOURCE_SEARCH_CONFIG_FILE:path},stdin:'pipe',stdout:'pipe',stderr:'pipe'});
+ try{
+  const reader=child.stdout.getReader(),decoder=new TextDecoder();let buffer='';
+  async function response(id:number):Promise<any>{
+   while(true){const at=buffer.indexOf('\n');if(at>=0){const value=JSON.parse(buffer.slice(0,at));buffer=buffer.slice(at+1);if(value.id===id)return value;continue;}
+    const part=await reader.read();if(part.done)throw Error('MCP ended before its reply');buffer+=decoder.decode(part.value,{stream:true});}
+  }
+  const send=(message:unknown)=>child.stdin.write(JSON.stringify(message)+'\n');
+  send({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'shutdown-test',version:'1'}}});await response(1);
+  send({jsonrpc:'2.0',method:'notifications/initialized'});
+  send({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'search_sources',arguments:{queries:[{source:'research',query:'telescope',mode:'lexical'}]}}});
+  expect((await response(2)).result.isError).not.toBe(true);reader.releaseLock();child.stdin.end();
+  expect(await Promise.race([child.exited,Bun.sleep(2000).then(()=>'still running')])).toBe(0);
+ }finally{child.kill();}
+
 }));
 
 test('library keyword index runs with no vault, global QMD executable or models',()=>temporary(async dir=>{

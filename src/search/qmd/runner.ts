@@ -49,7 +49,7 @@ export async function runSdk(c:Config,request:Omit<Partial<QmdRequest>,'index'> 
   catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
  }
  const modelStamps=await Promise.all(Object.values(models||{}).map(async p=>{const s=await stat(p).catch(e=>{if(e.code!=='ENOENT')throw e;return undefined;});return [p,s?.size,s?.mtimeMs,s?.ctimeMs];}));
- const codeStamps=await Promise.all(['src/search/qmd/reranker.ts','src/search/qmd/mlx_ranker.py','src/search/qmd/pipeline.ts','src/search/qmd/text-ranker.ts','src/search/qmd/onnx_ranker.py','scripts/acceleration-requirements.txt'].map(async p=>{const s=await lstat(join(packageRoot,p));return [p,s.size,s.mtimeMs];}));
+ const codeStamps=await Promise.all(['src/search/qmd/reranker.ts','src/search/qmd/mlx_ranker.py','src/search/qmd/pipeline.ts','src/search/qmd/text-ranker.ts','src/search/qmd/onnx_ranker.py','scripts/acceleration-requirements.txt','scripts/ranking-requirements.txt'].map(async p=>{const s=await lstat(join(packageRoot,p));return [p,s.size,s.mtimeMs];}));
  const rankerStamps=c.searchRanker?await Promise.all([c.searchRanker.file,'config.json','tokenizer.json'].map(async p=>{const s=await stat(join(c.searchRanker!.directory,p)).catch(e=>{if(e.code!=='ENOENT')throw e;return undefined;});return [p,s?.size,s?.mtimeMs,s?.ctimeMs];})):undefined;
  const lock=await lstat(join(packageRoot,'bun.lock'));
  const scopes=configuredSourceIds(c).filter(s=>sourceEnabled(c,s)).map(s=>[s,sourceScope(c,s)]);

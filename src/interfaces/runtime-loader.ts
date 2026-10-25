@@ -11,7 +11,7 @@ export function runtimeLoader(entry = join(import.meta.dir, "../application/api.
     const outputDirectories:string[]=[];
     process.once("exit", () => {for(const directory of outputDirectories)rmSync(directory, { recursive: true, force: true });});
     let loading: Promise<typeof import("../application/api")> | undefined;
-    return async function load() {
+    const load=async function load() {
         if (loading)
             return loading;
         loading = (async () => {
@@ -59,4 +59,8 @@ export function runtimeLoader(entry = join(import.meta.dir, "../application/api.
         })().finally(() => loading = undefined);
         return loading;
     };
+    return Object.assign(load,{dispose:async()=>{
+        await loading?.catch(()=>{});
+        module?.dispose?.();module=undefined;revision='';
+    }});
 }
