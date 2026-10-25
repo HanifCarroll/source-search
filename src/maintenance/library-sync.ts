@@ -14,7 +14,7 @@ import type { Database } from "bun:sqlite";
 import { loadConfig, sourceEnabled, requireMaintenance, configuredSourceIds, mailAccount, sourceScope, type Config } from "../platform/config";
 import { run, type Run, type MailSource } from "../sources/mail/index";
 import { now, errorData, fail } from "../domain/identity";
-import { libraryDB, getState, setState, publish } from "../search/library/store";
+import { libraryDB, getState, setState, publish, searchProjectionVersion } from "../search/library/store";
 
 // Only consume committed snapshots. Publication failure cannot roll back a
 // provider checkpoint, and a failed sync keeps its previous searchable records.
@@ -41,7 +41,7 @@ async function publishCachedMail(c:Config,db:Database,source:string){
  setMailState(db,source,state);
  const freshness={state:state.state,error:state.error,checkedAt:state.checkedAt,lastCompleteScan:state.lastCompleteScan,
   lastSuccessfulSync:state.lastSuccessfulSync,syncStrategy:state.syncStrategy,coverage:state.coverage};
- if(state.dirty || !projection.publishedAt){
+ if(state.dirty || !projection.publishedAt || projection.searchVersion!==searchProjectionVersion){
   const records=(db.query('SELECT data FROM mail WHERE source=? ORDER BY id').all(source) as {data:string}[]).map(r=>JSON.parse(r.data));
   await publish(c,source,records,{mail:source,accountSignature:sourceScope(c,source)},freshness);
   setMailState(db,source,{...state,dirty:false});

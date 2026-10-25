@@ -60,8 +60,8 @@ test("ranked projection search uses collection scope, withholds stale index text
  const root=await mkdtemp(join(tmpdir(),"ss-library-")),c={...defaultConfig(),libraryRoot:root,libraryEnabled:true,libraryDatabase:join(root,"qmd.sqlite"),qmdModels:[join(root,"embed"),join(root,"expand"),join(root,"rerank")]};
  try{
   for(const path of c.qmdModels)await writeFile(path,"synthetic marker");
-  await publish(c,"whatsapp",[rec("1","Synthetic idea")],{}, {state:"ready"});let d=libraryDB(c);const row=d.query("SELECT * FROM chunks").get() as any;d.close();
-  const db=new Database(c.libraryDatabase);db.exec("CREATE TABLE documents(collection,path,hash,active);CREATE TABLE content_vectors(hash)");db.query("INSERT INTO documents VALUES(?,?,?,1)").run("ss-whatsapp",row.id+".md",row.hash);db.query("INSERT INTO content_vectors VALUES(?)").run(row.hash);db.close();
+  await publish(c,"whatsapp",[rec("1","Synthetic idea")],{}, {state:"ready"});let d=libraryDB(c);const row=d.query("SELECT c.*,s.hash AS searchHash FROM chunks c JOIN chunk_search s ON s.id=c.id").get() as any;d.close();
+  const db=new Database(c.libraryDatabase);db.exec("CREATE TABLE documents(collection,path,hash,active);CREATE TABLE content_vectors(hash)");db.query("INSERT INTO documents VALUES(?,?,?,1)").run("ss-whatsapp",row.id+".md",row.searchHash);db.query("INSERT INTO content_vectors VALUES(?)").run(row.searchHash);db.close();
   let args:QmdRequest|undefined;const execute=async(a:QmdRequest)=>{args=a;return [{file:"qmd://ss-whatsapp/"+row.id+".md",score:1,snippet:"Synthetic idea"}];};
   const q=querySchema.parse({source:"whatsapp",query:"thought",mode:"hybrid"});const page=await searchLibrary(c,q,execute);
   expect(args).toEqual({index:"library",mode:"hybrid",query:"thought",collection:"ss-whatsapp"});expect(page.items[0]!.ref.source).toBe("library");expect(page.retrieval!.effectiveMode).toBe("hybrid");

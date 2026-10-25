@@ -8,7 +8,7 @@ const text=z.string().optional();
 const freshness={state:text,error,checkedAt:text,lastSuccessfulSync:text,lastCompleteScan:text,syncStrategy:text,coverage:text};
 export const projectionStateSchema=z.object({
   ...freshness,records:count,textRecords:count,chunks:count,publishedAt:text,projectionRevision:text,
-  projectionVersion:count,projectionFormat:count,scope:text,signature:text,fileStamp:text,consumedRevision:text,
+  projectionVersion:count,projectionFormat:count,searchVersion:count,scope:text,signature:text,fileStamp:text,consumedRevision:text,
   guard:z.record(z.string(),z.unknown()).optional(),
   incremental:z.object({decoded:z.number().int(),reused:z.number().int(),removed:z.number().int()}).optional(),
   pending:z.union([z.number(),z.array(z.unknown())]).optional(),discovered:count,

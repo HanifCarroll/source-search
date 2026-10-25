@@ -68,6 +68,7 @@ export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>run
  if(scopes.some(s=>s.state!=="ready"))warnings.push("Some selected sources have incomplete indexing, stale synchronization or failures; list_sources reports coverage and freshness.");
  const pendingEmbeddings=scopes.reduce((total,s)=>total+(s.embeddings.pending||0),0);
  if(pendingEmbeddings)warnings.push(`${pendingEmbeddings} selected library chunks await embeddings; semantic coverage is partial while the background job continues.`);
+ const hasSearchManifest=!!db.query("SELECT 1 FROM sqlite_master WHERE name='chunk_search'").get();
  try{for(const r of raw.slice(0,100)){
   const m=/^qmd:\/\/ss-([a-z][a-z0-9-]*)\/([a-f0-9]{64})\.md$/.exec(r.file);
   if(!m || !sourceEnabled(c,m[1]!) || !isProjected(m[1]!,c) || q.source!=="library" && m[1]!==q.source)continue;
@@ -75,7 +76,10 @@ export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>run
   const indexedHash=index.documentHash("ss-"+m[1],m[2]+".md");
   if(row && JSON.parse(row.guard).scope!==sourceScope(c,row.source))continue;
   if(row && JSON.parse(row.guard).mail && JSON.parse(row.guard).accountSignature!==sourceScope(c,row.source))continue;
-  if(!row || row.hash!==indexedHash){warnings.push("A changed/deleted projection is waiting for QMD refresh; its stale hit was withheld.");continue;}
+  const searchHash=hasSearchManifest?(db.query('SELECT hash FROM chunk_search WHERE id=?').get(row?.id||'') as {hash:string}|null)?.hash:undefined;
+  // During an index-format upgrade the previous canonical projection still
+  // describes these exact originals. Keep it usable until the clean index lands.
+  if(!row || indexedHash!==row.hash && indexedHash!==searchHash){warnings.push("A changed/deleted projection is waiting for QMD refresh; its stale hit was withheld.");continue;}
   if(row.source==="documents"){
     try { for(const original of JSON.parse(row.refs) as Ref[])await readDocument(c,original); }
     catch { warnings.push("A document whose original is disabled, removed or changed was withheld.");continue; }

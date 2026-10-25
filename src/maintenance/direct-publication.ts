@@ -7,7 +7,7 @@ import {sourceDefinition,sourceKind} from '../domain/source-catalog';
 import {errorData,fail,now} from '../domain/identity';
 import {configuredSourceIds,evidenceScope,requireMaintenance,sourceEnabled,sourceScope,type Config} from '../platform/config';
 import {recordStore} from '../platform/record-store';
-import {libraryDB,getState,setState,publish} from '../search/library/store';
+import {libraryDB,getState,setState,publish,searchProjectionVersion} from '../search/library/store';
 import {archiveConfig} from './archives';
 import {withSourceLock} from './source-lock';
 
@@ -44,7 +44,7 @@ export async function publishDirect(c:Config){
         const freshness={state:state.lastError?'error':'ready',error:state.lastError||null,
           checkedAt:state.lastAttemptAt||state.checkedAt,lastSuccessfulSync:state.checkedAt,
           syncStrategy:state.strategy,coverage:state.coverage};
-        if(previous.consumedRevision===projection.revision&&previous.scope===projection.scope&&previous.projectionVersion===projection.version){
+        if(previous.consumedRevision===projection.revision&&previous.scope===projection.scope&&previous.projectionVersion===projection.version&&previous.searchVersion===searchProjectionVersion){
           setState(db,source,{...previous,...freshness,incremental:projection.incremental});
           return;
         }

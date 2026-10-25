@@ -8,6 +8,7 @@ export function cacheDB(c:Config, write=false) {
  if(write){const st=lstatSync(c.libraryRoot);if(!st.isDirectory() || st.isSymbolicLink() || st.mode & 0o077)throw Error("Library root must be private (0700)");try{const f=lstatSync(path);if(!f.isFile() || f.isSymbolicLink())throw Error("Unsafe library file");}catch(e){if((e as NodeJS.ErrnoException).code!=="ENOENT")throw e;}}
  const db=new Database(path,{create:write,strict:true});if(write)chmodSync(path,0o600);
  if(write){db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=10000; CREATE TABLE IF NOT EXISTS chunks(id TEXT PRIMARY KEY,source TEXT,title TEXT,body TEXT,hash TEXT,refs TEXT,guard TEXT); CREATE TABLE IF NOT EXISTS states(source TEXT PRIMARY KEY,data TEXT); CREATE TABLE IF NOT EXISTS mail_states(source TEXT PRIMARY KEY,data TEXT); CREATE TABLE IF NOT EXISTS mail(source TEXT,id TEXT,data TEXT,summary TEXT,seen TEXT,PRIMARY KEY(source,id));");}
+ if(write)db.exec('CREATE TABLE IF NOT EXISTS chunk_search(id TEXT PRIMARY KEY,hash TEXT NOT NULL,spans TEXT NOT NULL)');
  else db.exec("PRAGMA query_only=ON; PRAGMA busy_timeout=10000");
  return db;
 }
