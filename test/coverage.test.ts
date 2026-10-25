@@ -78,6 +78,6 @@ test('archive parser version changes republish library text when source bytes ar
  try{
   await writeFile(c.takeout[0]!,await createZip([{path:'Takeout/Calendar/Fixture.ics',text:'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:fixture\r\nDTSTART:20240101T000000Z\r\nSUMMARY:Violet fixture\r\nEND:VEVENT\r\nEND:VCALENDAR'}]));
   await syncLibrary(c);let db=libraryDB(c,true);const current=getState(db,'takeout-archive');db.exec("UPDATE chunks SET body='Old projection' WHERE source='takeout-archive'");setState(db,'takeout-archive',{...current,projectionVersion:2});db.close();
-  await syncLibrary(c);db=libraryDB(c);try{expect(getState(db,'takeout-archive').projectionVersion).toBe(3);expect(JSON.stringify(db.query('SELECT body FROM chunks').all())).toContain('Violet fixture');}finally{db.close();}
+  await syncLibrary(c);db=libraryDB(c);try{expect(getState(db,'takeout-archive').projectionVersion).toBe(4);expect(JSON.stringify(db.query('SELECT body FROM chunks').all())).toContain('Violet fixture');}finally{db.close();}
  }finally{await rm(root,{recursive:true,force:true});}
 });

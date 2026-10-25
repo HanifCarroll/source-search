@@ -2,6 +2,7 @@ import {parseCalendarComponent,calendarDate} from "../../formats/calendar";
 import {parseMimeMessage} from "../../formats/mime";
 import {stripHtml,readableHtml} from "../../formats/html";
 import { createHash } from "node:crypto";
+import {parseDocument, DomUtils} from 'htmlparser2';
 import type { Participant, SourceItemDraft } from "../source-types";
 import type {
   ArchiveOnlyTakeoutCapture,
@@ -270,15 +271,21 @@ function parseHeaders(text: string, path: string): Record<string, string[]> {
 
 function parseYouTubeHistoryHtml(bytes: Uint8Array, context: TakeoutEntryContext): SourceItemDraft[] {
   const html = decodeUtf8(bytes, context.entry.path);
-  const blocks = [...html.matchAll(/<div\b[^>]*class=["'][^"']*content-cell[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi)].map((match) => match[1] ?? "");
+  const document = parseDocument(html, {withStartIndices:true, withEndIndices:true});
+  const cells = DomUtils.findAll(node => node.name === 'div' &&
+    (node.attribs.class || '').split(/\s+/).includes('content-cell'), document.children);
+  // Source slices preserve original HTML and existing revision hashes. DOM
+  // serialization would rewrite entities/attributes in otherwise unchanged exports.
+  const blocks = cells.map(cell => ({cell, html:cell.children.length
+    ? html.slice(cell.children[0]!.startIndex!, cell.children.at(-1)!.endIndex! + 1) : ''}));
   if (blocks.length === 0) throw new Error(`Malformed YouTube history HTML ${context.entry.path}: no content cells found.`);
   const isSearch = context.entry.path.toLowerCase().endsWith("search-history.html");
   const counts = new Map<string, number>();
-  return blocks.flatMap((block, index) => {
+  return blocks.flatMap(({cell, html:block}, index) => {
     const text = stripHtml(block).replace(/\s+/g, " ").trim();
-    const links = [...block.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)].map((match) => ({
-      url: decodeHtmlEntities(match[1] ?? ""),
-      text: stripHtml(match[2] ?? "").replace(/\s+/g, " ").trim(),
+    const links = DomUtils.findAll(node => node.name === 'a' && node.attribs.href !== undefined, cell.children).map(link => ({
+      url: link.attribs.href!,
+      text: stripHtml(link.children.length ? html.slice(link.children[0]!.startIndex!, link.children.at(-1)!.endIndex! + 1) : '').replace(/\s+/g, ' ').trim(),
     }));
     const selected = links.find((link) => isSearch ? /\/results\?/i.test(link.url) : /(?:youtube\.com\/watch|youtu\.be\/)/i.test(link.url));
     if (!selected) return [];

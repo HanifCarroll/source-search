@@ -19,7 +19,7 @@ import { type Ref, type RecordData } from "../../domain/contracts";
 
 export const archiveSources = ["things-archive", "chatgpt-archive", "takeout-archive", "linkedin-archive", "twitter-archive"] as const;
 export type ArchiveSource = typeof archiveSources[number];
-export const exportProjectionVersion=(source:ArchiveSource)=>source === "linkedin-archive" ? 6 : source === "twitter-archive" ? 3 : source === "takeout-archive" ? 3 : 1;
+export const exportProjectionVersion=(source:ArchiveSource)=>source === "linkedin-archive" ? 6 : source === "twitter-archive" ? 3 : source === "takeout-archive" ? 4 : 1;
 export function exportPaths(config:Config,source:ArchiveSource) {
   config=sourceConfig(config,source);
   return source === "things-archive" ? [config.thingsDatabase||config.things] : source === "chatgpt-archive" ? config.chatgpt : source === "linkedin-archive" ? config.linkedin : source === "twitter-archive" ? config.twitter : config.takeout;

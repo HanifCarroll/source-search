@@ -1,3 +1,5 @@
+import {z} from 'zod';
+import {hitSchema,searchSchema,contextSchema,healthSchema,onboardingSchema} from './schemas';
 import { homedir } from "node:os";
 import { isAbsolute, normalize, sep, join } from "node:path";
 
@@ -128,66 +130,10 @@ function invalidResponse(operation: string, field: string): CassProviderError {
   );
 }
 
-function requiredString(value: unknown, operation: string, field: string, maxChars = 4_096): string {
-  if (typeof value !== "string" || value.length === 0 || value.length > maxChars || value.includes("\0")) {
-    throw invalidResponse(operation, field);
-  }
-  return value;
-}
-
-function optionalString(value: unknown, operation: string, field: string, maxChars = 4_096): string | null {
-  if (value === undefined || value === null || value === "") return null;
-  return requiredString(value, operation, field, maxChars);
-}
-
-function optionalBoolean(value: unknown, operation: string, field: string): boolean | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== "boolean") throw invalidResponse(operation, field);
-  return value;
-}
-
-function requiredBoolean(value: unknown, operation: string, field: string): boolean {
-  if (typeof value !== "boolean") throw invalidResponse(operation, field);
-  return value;
-}
-
-function optionalInteger(value: unknown, operation: string, field: string): number | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== "number" || !Number.isSafeInteger(value)) throw invalidResponse(operation, field);
-  return value;
-}
-
-function optionalFiniteNumber(value: unknown, operation: string, field: string): number | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value !== "number" || !Number.isFinite(value)) throw invalidResponse(operation, field);
-  return value;
-}
-
-function optionalCreatedAt(
-  value: unknown,
-  operation: string,
-  field: string,
-): string | number | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value === "string" && value.length <= 128 && !value.includes("\0")) return value;
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  throw invalidResponse(operation, field);
-}
-
-function optionalObject(value: unknown, operation: string, field: string): JsonObject {
-  if (value === undefined || value === null) return {};
-  if (!isObject(value)) throw invalidResponse(operation, field);
-  return value;
-}
-
-function stringList(value: unknown, operation: string, field: string, maxItems = 128): string[] {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || value.length > maxItems) throw invalidResponse(operation, field);
-  return value.map((item, index) => requiredString(item, operation, `${field}[${index}]`, 512));
-}
-
-function notices(value: unknown, operation: string, field: string): string[] {
-  return stringList(value, operation, field, 32).map((notice) => notice.slice(0, 512));
+function parseResponse<T>(schema:z.ZodType<T>, raw:unknown, operation:string):T {
+  const result=schema.safeParse(raw);
+  if(!result.success)throw invalidResponse(operation,result.error.issues[0]?.path.join('.') || 'root');
+  return result.data;
 }
 
 function unique(values: readonly string[]): string[] {
@@ -279,240 +225,78 @@ function buildViewArgs(provenance: {
   return args;
 }
 
-function parseHit(raw: unknown, provider: CassProvider, operation = "search"): CassSearchHit {
-  if (!isObject(raw)) throw invalidResponse(operation, "hits[]");
-  const sourcePath = requiredString(raw.source_path, operation, "hits[].source_path", 4_096);
-  if (!isAbsolute(sourcePath)) throw invalidResponse(operation, "hits[].source_path must be absolute");
-  const lineNumber = optionalInteger(raw.line_number, operation, "hits[].line_number");
-  if (lineNumber !== null && lineNumber < 1) throw invalidResponse(operation, "hits[].line_number");
-  const agent = requiredString(raw.agent, operation, "hits[].agent", 128);
-  const sourceId = requiredString(raw.source_id, operation, "hits[].source_id", 256);
-  // Named imports can be local; the native origin and fixed --source=local search establish locality.
-  const originKind = requiredString(raw.origin_kind, operation, "hits[].origin_kind", 64);
-  if (originKind !== "local") {
-    throw new CassProviderError(
-      "remote_source_rejected",
-      operation,
-      "CASS returned a non-local hit; Context only accepts local CASS provenance.",
-    );
+function parseHit(value: unknown, provider: CassProvider, operation = "search"): CassSearchHit {
+  const raw = parseResponse(hitSchema,value,operation);
+  if (raw.origin_kind !== "local") {
+    throw new CassProviderError("remote_source_rejected",operation,
+      "CASS returned a non-local hit; Context only accepts local CASS provenance.");
   }
-  const originHost = optionalString(raw.origin_host, operation, "hits[].origin_host", 256);
-  const workspace = optionalString(raw.workspace, operation, "hits[].workspace", 4_096);
-  const workspaceOriginal = optionalString(raw.workspace_original, operation, "hits[].workspace_original", 4_096);
-  const createdAt = optionalCreatedAt(raw.created_at, operation, "hits[].created_at");
-  const matchType = optionalString(raw.match_type, operation, "hits[].match_type", 64);
-
   const provenance: CassHitProvenance = {
-    sourcePath,
-    lineNumber,
-    agent,
-    sourceId,
-    originKind,
-    originHost,
-    workspace,
-    workspaceOriginal,
-    createdAt,
-    matchType,
-    viewArgs: buildViewArgs({ sourcePath, sourceId, lineNumber, dataDir: provider.dataDir }),
+    sourcePath:raw.source_path,lineNumber:raw.line_number,agent:raw.agent,sourceId:raw.source_id,
+    originKind:raw.origin_kind,originHost:raw.origin_host,workspace:raw.workspace,
+    workspaceOriginal:raw.workspace_original,createdAt:raw.created_at,matchType:raw.match_type,
+    viewArgs:buildViewArgs({sourcePath:raw.source_path,sourceId:raw.source_id,lineNumber:raw.line_number,dataDir:provider.dataDir}),
   };
+  return {title:truncate(raw.title,provider.maxTitleChars),snippet:truncate(raw.snippet,provider.maxSnippetChars),score:raw.score,provenance};
+}
 
+function parseSearch(value:unknown,provider:CassProvider,context:{limit:number;offset:number;query:string}):CassSearchResult {
+  const raw=parseResponse(searchSchema(provider.maxQueryChars),value,'search');
+  const hits=raw.hits.slice(0,context.limit).map(hit=>parseHit(hit,provider));
   return {
-    title: truncate(optionalString(raw.title, operation, "hits[].title", 4_096), provider.maxTitleChars),
-    // Deliberately ignore `content`: search asks CASS for bounded snippets and
-    // full session text remains owned by CASS for a later view/export call.
-    snippet: truncate(optionalString(raw.snippet, operation, "hits[].snippet", 100_000), provider.maxSnippetChars),
-    score: optionalFiniteNumber(raw.score, operation, "hits[].score"),
-    provenance,
+    query:raw.query ?? context.query,hits,count:hits.length,totalMatches:raw.total_matches ?? hits.length,
+    limit:Math.min(raw.limit ?? context.limit,context.limit),offset:raw.offset ?? context.offset,
+    nextCursor:raw._meta.next_cursor,hitsClamped:(raw.hits_clamped ?? false)||raw.hits.length>context.limit,
+    budget:{elapsedMs:raw.budget.elapsed_ms,budgetMs:raw.budget.budget_ms,timedOut:raw.budget.timed_out ?? false},
+    meta:{searchMode:raw._meta.search_mode,requestedSearchMode:raw._meta.requested_search_mode,
+      fallbackTier:raw._meta.fallback_tier,fallbackReason:raw._meta.fallback_reason,semanticRefinement:raw._meta.semantic_refinement},
+    warnings:raw._warning === null ? [] : [raw._warning],
   };
 }
 
-function parseSearch(
-  raw: unknown,
-  provider: CassProvider,
-  context: { limit: number; offset: number; query: string },
-): CassSearchResult {
-  const operation = "search";
-  if (!isObject(raw)) throw invalidResponse(operation, "root");
-  const hitsValue = raw.hits;
-  if (!Array.isArray(hitsValue)) throw invalidResponse(operation, "hits");
-  const requestLimit = context.limit;
-  const parsedHits = hitsValue.slice(0, requestLimit).map((hit) => parseHit(hit, provider));
-  const rawQuery = optionalString(raw.query, operation, "query", provider.maxQueryChars);
-  const totalMatches = optionalInteger(raw.total_matches, operation, "total_matches") ?? parsedHits.length;
-  const count = parsedHits.length;
-  if (totalMatches < 0) throw invalidResponse(operation, "total_matches");
-  const responseLimit = optionalInteger(raw.limit, operation, "limit");
-  const responseOffset = optionalInteger(raw.offset, operation, "offset");
-  if (responseLimit !== null && responseLimit < 0) throw invalidResponse(operation, "limit");
-  if (responseOffset !== null && responseOffset < 0) throw invalidResponse(operation, "offset");
-  const limit = Math.min(responseLimit ?? requestLimit, requestLimit);
-  const offset = responseOffset ?? context.offset;
-  const rawBudget = optionalObject(raw.budget, operation, "budget");
-  const rawMeta = optionalObject(raw._meta, operation, "_meta");
-  const warnings = notices(
-    raw._warning === undefined || raw._warning === null ? undefined : [raw._warning],
-    operation,
-    "_warning",
-  );
+function parseContext(value:unknown,provider:CassProvider,hit:CassSearchHit):CassContextResult {
+  const raw=parseResponse(contextSchema,value,'view');
+  if(normalize(raw.path)!==normalize(hit.provenance.sourcePath))throw invalidResponse('view','path does not match the selected search result');
+  return {hit,path:raw.path,targetLine:raw.target_line,context:raw.context,totalLines:raw.total_lines,
+    sourceExists:raw.source_exists,archiveOnly:raw.archive_only,
+    lines:raw.lines.map(line=>({...line,content:truncate(line.content,provider.maxSnippetChars)!}))};
+}
 
+function parseHealth(value: unknown): CassHealthReport {
+  const raw=parseResponse(healthSchema,value,'health');
+  const {index,database,rebuild}=raw;
+  const stalled=rebuild.stalled===true || raw.status==='stalled';
+  const rebuilding=rebuild.active===true || raw.status==='rebuilding' || stalled;
+  const incompatible=index.engine_incompatible===true;
+  const initialized=raw.initialized ?? (database.exists===true && index.exists===true ? true : null);
+  // A refresh can leave the last completed lexical index usable. Preserve
+  // these CASS-specific readiness rules separately from response validation.
+  const readableDuringRefresh=rebuilding && initialized===true && database.exists===true && database.opened===true
+    && index.exists===true && index.engine_incompatible===false && index.documents!==null && index.documents>0
+    && index.hollow!==true && index.partial!==true && index.checkpoint.completed===true
+    && raw.errors.every(error=>['index stale','index rebuild in progress'].includes(error)||error.startsWith('index rebuild stalled'));
   return {
-    query: rawQuery ?? context.query,
-    hits: parsedHits,
-    count,
-    totalMatches,
-    limit,
-    offset,
-    nextCursor: optionalString(rawMeta.next_cursor, operation, "_meta.next_cursor", 4_096),
-    hitsClamped: (optionalBoolean(raw.hits_clamped, operation, "hits_clamped") ?? false) || hitsValue.length > requestLimit,
-    budget: {
-      elapsedMs: optionalInteger(rawBudget.elapsed_ms, operation, "budget.elapsed_ms"),
-      budgetMs: optionalInteger(rawBudget.budget_ms, operation, "budget.budget_ms"),
-      timedOut: optionalBoolean(rawBudget.timed_out, operation, "budget.timed_out") ?? false,
-    },
-    meta: {
-      searchMode: optionalString(rawMeta.search_mode, operation, "_meta.search_mode", 64),
-      requestedSearchMode: optionalString(rawMeta.requested_search_mode, operation, "_meta.requested_search_mode", 64),
-      fallbackTier: optionalString(rawMeta.fallback_tier, operation, "_meta.fallback_tier", 64),
-      fallbackReason: optionalString(rawMeta.fallback_reason, operation, "_meta.fallback_reason", 512),
-      semanticRefinement: optionalBoolean(rawMeta.semantic_refinement, operation, "_meta.semantic_refinement"),
-    },
-    warnings,
+    checkedAt:new Date().toISOString(),status:raw.status,healthy:raw.healthy,initialized,healthLevel:raw.health_level,
+    explanation:raw.explanation ?? index.reason,recommendedAction:raw.recommended_action ?? index.recommended_action,
+    dataDir:raw.data_dir,readyForSearch:readableDuringRefresh || (raw.healthy && initialized===true && !rebuilding && !incompatible && database.opened!==false && database.exists!==false && index.exists!==false),
+    rebuilding,stalled,incompatible,warnings:raw.warnings,errors:raw.errors,
+    index:{exists:index.exists,status:index.status,fresh:index.fresh,stale:index.stale,reason:index.reason,
+      databaseFingerprint:index.fingerprint.current_db_fingerprint,checkpointFingerprint:index.fingerprint.checkpoint_fingerprint,documents:index.documents},
+    database:{exists:database.exists,opened:database.opened,conversations:database.conversations,messages:database.messages},
   };
 }
 
-function parseContext(raw: unknown, provider: CassProvider, hit: CassSearchHit): CassContextResult {
-  const operation = "view";
-  if (!isObject(raw)) throw invalidResponse(operation, "root");
-  if (!Array.isArray(raw.lines)) throw invalidResponse(operation, "lines");
-  const targetLine = optionalInteger(raw.target_line, operation, "target_line");
-  const context = optionalInteger(raw.context, operation, "context");
-  const totalLines = optionalInteger(raw.total_lines, operation, "total_lines");
-  const path = requiredString(raw.path, operation, "path", 4_096);
-  if (context === null || context < 0 || totalLines === null || totalLines < 0) {
-    throw invalidResponse(operation, "context or total_lines");
-  }
-  if (normalize(path) !== normalize(hit.provenance.sourcePath)) {
-    throw invalidResponse(operation, "path does not match the selected search result");
-  }
-  return {
-    hit,
-    path,
-    targetLine,
-    context,
-    lines: raw.lines.map((value, index) => {
-      if (!isObject(value)) throw invalidResponse(operation, `lines[${index}]`);
-      const line = optionalInteger(value.line, operation, `lines[${index}].line`);
-      if (line === null || line < 1) throw invalidResponse(operation, `lines[${index}].line`);
-      return {
-        line,
-        content: truncate(
-          requiredString(value.content, operation, `lines[${index}].content`, 100_000),
-          provider.maxSnippetChars,
-        )!,
-        highlighted: requiredBoolean(value.highlighted, operation, `lines[${index}].highlighted`),
-      };
-    }),
-    totalLines,
-    sourceExists: requiredBoolean(raw.source_exists, operation, "source_exists"),
-    archiveOnly: requiredBoolean(raw.archive_only, operation, "archive_only"),
-  };
-}
-
-function parseHealth(raw: unknown): CassHealthReport {
-  const operation = "health";
-  if (!isObject(raw)) throw invalidResponse(operation, "root");
-  const state = optionalObject(raw.state, operation, "state");
-  const index = optionalObject(raw.index ?? state.index, operation, "index");
-  const fingerprint = optionalObject(index.fingerprint, operation, "index.fingerprint");
-  const database = optionalObject(raw.database ?? raw.db ?? state.database, operation, "database");
-  const rebuild = optionalObject(raw.rebuild ?? state.rebuild, operation, "rebuild");
-  // CASS flags report-only semantic phases as stalled after its no-progress window; committed lexical assets are unchanged.
-  const stalled = optionalBoolean(rebuild.stalled, operation, "rebuild.stalled") === true || raw.status === "stalled";
-  const rebuilding = optionalBoolean(rebuild.active, operation, "rebuild.active") === true || raw.status === "rebuilding" || stalled;
-  const incompatible = optionalBoolean(index.engine_incompatible, operation, "index.engine_incompatible") === true;
-  const healthy = requiredBoolean(raw.healthy, operation, "healthy");
-  const initialized = optionalBoolean(raw.initialized, operation, "initialized") ?? (database.exists === true && index.exists === true ? true : null);
-  // Active refresh is not an initial build: only admit previously completed, usable lexical assets.
-  const readableDuringRefresh = rebuilding && initialized === true && database.exists === true && database.opened === true
-    && index.exists === true && index.engine_incompatible === false && typeof index.documents === "number" && index.documents > 0
-    && index.hollow !== true && index.partial !== true && optionalObject(index.checkpoint, operation, "index.checkpoint").completed === true
-    && notices(raw.errors, operation, "errors").every(error => ["index stale", "index rebuild in progress"].includes(error) || error.startsWith("index rebuild stalled"));
-
-  return {
-    checkedAt: new Date().toISOString(),
-    status: optionalString(raw.status, operation, "status", 128),
-    healthy,
-    initialized,
-    healthLevel: optionalString(raw.health_level, operation, "health_level", 128),
-    explanation: optionalString(raw.explanation ?? index.reason, operation, "explanation", 1_000),
-    recommendedAction: optionalString(raw.recommended_action ?? index.recommended_action, operation, "recommended_action", 1_000),
-    dataDir: optionalString(raw.data_dir, operation, "data_dir", 4_096),
-    readyForSearch: readableDuringRefresh || (healthy && initialized === true && !rebuilding && !incompatible && database.opened !== false && database.exists !== false && index.exists !== false),
-    rebuilding, stalled, incompatible,
-    warnings: notices(raw.warnings, operation, "warnings"),
-    errors: notices(raw.errors, operation, "errors"),
-    index: {
-      exists: optionalBoolean(index.exists, operation, "index.exists"),
-      status: optionalString(index.status, operation, "index.status", 128),
-      fresh: optionalBoolean(index.fresh, operation, "index.fresh"),
-      stale: optionalBoolean(index.stale, operation, "index.stale"),
-      reason: optionalString(index.reason, operation, "index.reason", 1_000),
-      databaseFingerprint: optionalString(fingerprint.current_db_fingerprint, operation, "index.fingerprint.current_db_fingerprint", 256),
-      checkpointFingerprint: optionalString(fingerprint.checkpoint_fingerprint, operation, "index.fingerprint.checkpoint_fingerprint", 256),
-      documents: optionalInteger(index.documents, operation, "index.documents"),
-    },
-    database: {
-      exists: optionalBoolean(database.exists, operation, "database.exists"),
-      opened: optionalBoolean(database.opened, operation, "database.opened"),
-      conversations: optionalInteger(database.conversations, operation, "database.conversations"),
-      messages: optionalInteger(database.messages, operation, "database.messages"),
-    },
-  };
-}
-
-function parseOnboarding(raw: unknown, provider: CassProvider): CassOnboardingReport {
-  const operation = "onboarding";
-  if (!isObject(raw)) throw invalidResponse(operation, "root");
-  if (!Array.isArray(raw.providers) || raw.providers.length > 128) {
-    throw invalidResponse(operation, "providers");
-  }
-
-  const providers: CassOnboardingProvider[] = raw.providers.map((value, index) => {
-    if (!isObject(value)) throw invalidResponse(operation, `providers[${index}]`);
-    return {
-      name: requiredString(value.name, operation, `providers[${index}].name`, 128),
-      readiness: optionalString(value.readiness, operation, `providers[${index}].readiness`, 128),
-      estimatedSessions: optionalInteger(value.estimated_sessions, operation, `providers[${index}].estimated_sessions`),
-    };
-  });
-  const exactPathReported = containsPathRepresentation(raw, provider.archivedSessionsPath);
-  const codexProviderDiscovered = providers.some((item) => item.name.toLowerCase() === "codex");
-  const warning = exactPathReported
-    ? null
-    : `CASS onboarding did not represent ${displayPath(provider.archivedSessionsPath)} in its discovery output; Codex archive coverage is unverified.`;
-
-  return {
-    checkedAt: new Date().toISOString(),
-    dataDir: optionalString(raw.data_dir, operation, "data_dir", 4_096),
-    providers,
-    excludedProviders: stringList(raw.excluded_providers, operation, "excluded_providers"),
-    estimatedIndexSessions: optionalInteger(raw.estimated_index_sessions, operation, "estimated_index_sessions"),
-    indexedConversationCount: optionalInteger(raw.indexed_conversation_count, operation, "indexed_conversation_count"),
-    semanticReady: optionalBoolean(raw.semantic_ready, operation, "semantic_ready"),
-    mutationFree: optionalBoolean(raw.mutation_free, operation, "mutation_free"),
-    recommendedAction: optionalString(raw.recommended_action, operation, "recommended_action", 256),
-    archivedSessions: {
-      archivedSessionsPath: provider.archivedSessionsPath,
-      status: exactPathReported ? "represented" : "not-represented",
-      exactPathReported,
-      codexProviderDiscovered,
-      warning,
-    },
-    warnings: unique([
-      ...notices(raw.warnings, operation, "warnings"),
-      ...(warning === null ? [] : [warning]),
-    ]),
-  };
+function parseOnboarding(value:unknown,provider:CassProvider):CassOnboardingReport {
+  const raw=parseResponse(onboardingSchema,value,'onboarding');
+  const providers:CassOnboardingProvider[]=raw.providers.map(p=>({name:p.name,readiness:p.readiness,estimatedSessions:p.estimated_sessions}));
+  const exactPathReported=containsPathRepresentation(value,provider.archivedSessionsPath);
+  const codexProviderDiscovered=providers.some(p=>p.name.toLowerCase()==='codex');
+  const warning=exactPathReported ? null : `CASS onboarding did not represent ${displayPath(provider.archivedSessionsPath)} in its discovery output; Codex archive coverage is unverified.`;
+  return {checkedAt:new Date().toISOString(),dataDir:raw.data_dir,providers,excludedProviders:raw.excluded_providers,
+    estimatedIndexSessions:raw.estimated_index_sessions,indexedConversationCount:raw.indexed_conversation_count,
+    semanticReady:raw.semantic_ready,mutationFree:raw.mutation_free,recommendedAction:raw.recommended_action,
+    archivedSessions:{archivedSessionsPath:provider.archivedSessionsPath,status:exactPathReported?'represented':'not-represented',exactPathReported,codexProviderDiscovered,warning},
+    warnings:unique([...raw.warnings,...(warning===null?[]:[warning])])};
 }
 
 export class CassProvider {

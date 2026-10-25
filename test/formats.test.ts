@@ -100,3 +100,21 @@ test('optional ZIP64 footers without legacy sentinel fields remain strict and pr
  const zip=await parseSafeZipArchive(bytes);expect(new TextDecoder().decode(await zip.readEntry(zip.entries[0]!))).toBe('Optional ZIP64 footer');expect(zip.archiveSha256).toBe(createHash('sha256').update(bytes).digest('hex'));
  for(const offset of [end+10,end+12,end+16,footer+16,footer+64]){const bad=bytes.slice();bad[offset]^=1;await expect(parseSafeZipArchive(bad)).rejects.toThrow();}
 });
+
+import {parseTakeoutEntry} from '../src/vendor/takeout/parsers';
+test('Takeout HTML preserves flat revisions and dates after nested content',async()=>{
+  const context={archiveSha256:'a'.repeat(64),archiveBytes:1000,importedAt:new Date('2024-01-02T00:00:00Z'),sourceAccountId:'fixture',entrySha256:'b'.repeat(64),
+    entry:{path:'Takeout/YouTube/history/watch-history.html',entryId:'fixture',isDirectory:false,compressedSize:100,uncompressedSize:100,compressionMethod:0 as const,crc32:0,flags:0,externalAttributes:0,localHeaderOffset:0,compressedSha256:'c'.repeat(64)}};
+  const link='<a href="https://www.youtube.com/watch?v=fixture&amp;list=sample">Fixture &amp; video</a>';
+  const parse=(inside:string)=>parseTakeoutEntry({kind:'youtube-html',entry:context.entry},new TextEncoder().encode('<div class="content-cell">'+inside+'</div>'),context);
+  const flat=await parse('Watched '+link+'<br>Jan 1, 2024, 12:00:00 AM UTC');
+  const nested=await parse('Watched <div>'+link+'</div><br>Jan 1, 2024, 12:00:00 AM UTC');
+  expect(flat.items).toHaveLength(1);expect(nested.items).toHaveLength(1);
+  expect(flat.items[0]!.revisionId).toBe('1df954f41f141c1997df395a46321015e06fefa80ce22d387b294851ae8e0263');
+  expect(new Date(nested.items[0]!.occurredAt!).toISOString()).toBe('2024-01-01T00:00:00.000Z');
+  expect(nested.items[0]!.sourceItemId).toBe(flat.items[0]!.sourceItemId);
+  expect(nested.items[0]!.title).toBe('Fixture & video');
+  expect(nested.items[0]!.contentText).toContain('watch?v=fixture&list=sample');
+  // HTML source stays verbatim, including entity spelling, rather than DOM serialization.
+  expect(JSON.stringify(flat.items[0]!.rawCapture!.raw)).toContain('amp;list');
+});
