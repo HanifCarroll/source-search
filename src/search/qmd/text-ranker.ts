@@ -12,9 +12,11 @@ export function createTextRanker(settings:NonNullable<Config['searchRanker']>){
   });
   const rank:Rank=async(query,documents)=>{
     if(!documents.length)return [];
-    const result=scores.parse(await worker.request({query,documents:documents.map(d=>d.text)}));
-    if(result.length!==documents.length)throw Error('Ranker returned an incomplete score list');
-    return documents.map((document,i)=>({file:document.file,score:result[i]!}));
+    const unique=[...new Set(documents.map(d=>d.text))];
+    const result=scores.parse(await worker.request({query,documents:unique}));
+    if(result.length!==unique.length)throw Error('Ranker returned an incomplete score list');
+    const byText=new Map(unique.map((text,i)=>[text,result[i]!]));
+    return documents.map(document=>({file:document.file,score:byText.get(document.text)!}));
   };
   return {rank,close:()=>worker.close()};
 }

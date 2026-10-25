@@ -8,7 +8,7 @@ process.umask(0o077);
 import { loadConfig,requireSource } from "../platform/config";
 import { createRuntime } from "../application/runtime";
 import { rebuildConfiguredArchives } from "../maintenance/archives";
-import {setup,doctor,mcpConfig,downloadModels} from "./setup";
+import {setup,doctor,mcpConfig,downloadModels,downloadRanker} from "./setup";
 import {indexSources} from "../maintenance/search-index";
 import { errorData,fail } from "../domain/identity";
 import {taskProvider} from '../sources/tasks';
@@ -24,6 +24,7 @@ try {
   else if(command === "mcp-config") {console.log(JSON.stringify(mcpConfig(config),null,2));process.exit(0);}
   else if(command === "index") result=await indexSources(config,process.argv.slice(3));
   else if(command === "models" && argument === "download") result=await downloadModels(config);
+  else if(command === "models" && argument === "download-ranker") result=await downloadRanker(process.argv.slice(4));
   else if (command === "sources") result = await runtime.list_sources();
   else if (command === "search") result = await runtime.search_sources(JSON.parse(argument || await Bun.stdin.text()));
   else if (command === "read") result = await runtime.read_record(JSON.parse(argument || await Bun.stdin.text()));

@@ -51,7 +51,11 @@ export async function hybridSearch(store:Store,request:Request,primitives:Primit
       if(score>lexicalScore){lexical=chunk;lexicalScore=score;}
     }
     const match=semantic.get(candidate.file);
-    const vector=match?chunks.findLast(chunk=>chunk.pos<=match.pos&&match.pos<chunk.pos+chunk.text.length):undefined;
+    // Embedding chunks use token-aware boundaries; the ranking chunks use
+    // character boundaries. Start at the actual vector hit, otherwise the
+    // containing ranking chunk can end before the matching evidence begins.
+    const matched=match&&match.pos>=0&&match.pos<candidate.body.length?primitives.chunkDocument(candidate.body.slice(match.pos))[0]:undefined;
+    const vector=matched?{text:matched.text,pos:match!.pos}:undefined;
     const selected=vector?[vector,...(lexicalScore>0&&lexical.pos!==vector.pos?[lexical]:[])]:[lexical];
     for(const passage of selected){
       const file=JSON.stringify([index,passage.pos]);

@@ -61,6 +61,18 @@ The original query always participates. Each variant list accepts up to three st
 
 The MCP process reuses loaded models between searches and releases idle workers after five minutes. Code, configuration, model and index replacement reload them. The CLI exits after its command. Cancellation stops active inference; a later request starts a fresh worker. Persistent result caches remain separate from loaded models, so measure first-process, new-query and repeated-query latency separately.
 
+For a smaller multilingual ranker, create a Python 3.12+ environment and install the optional requirements:
+
+```sh
+python3 -m venv ~/.local/share/source-search/ranking-env
+~/.local/share/source-search/ranking-env/bin/pip install -r scripts/ranking-requirements.txt
+bun run start models download-ranker --python "$HOME/.local/share/source-search/ranking-env/bin/python"
+```
+
+The explicit installer downloads a pinned [multilingual MiniLM model](https://huggingface.co/cross-encoder/mmarco-mMiniLMv2-L12-H384-v1), checks its hashes, tests inference on invented text and saves `searchRanker` in private configuration. It selects the upstream ARM64 or x86 quantized ONNX file where supported. No account data is used during setup; subsequent inference runs offline. Keep the existing embedding model and Qwen model for semantic retrieval and deep searches. Verify your hardware with `bun run bench --models-from /absolute/private/config.json`. Removing `searchRanker` restores Qwen for ordinary hybrid queries too.
+
+For another compatible one-score cross-encoder, set `searchRanker` directly with `engine: "onnx"`, absolute `python` and model `directory`, a relative ONNX `file`, and `maxTokens` (default 512). The directory also needs `config.json` and `tokenizer.json`. Requalify relevance before changing models. The adapter windows long passages, retaining every token, and maps duplicate text back to every candidate reference.
+
 ## Incremental updates
 
 | Sources | Update behavior |

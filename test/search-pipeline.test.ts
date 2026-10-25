@@ -14,8 +14,8 @@ function fixture(){
     rerank:async(_query:string,docs:{file:string;text:string}[])=>{ranked.push(docs.map(d=>d.text));return docs.map(doc=>({file:doc.file,score:doc.text.includes('mirrors')?.9:.2}));},
   };
   const weights:number[][]=[];
-  const primitives={formatQueryForEmbedding:(q:string)=>q,chunkDocument:(_body:string)=>[{pos:0,text:body.slice(0,500)},{pos:500,text:body.slice(500)}],reciprocalRankFusion:(lists:any[][],w:number[])=>{weights.push(w);return lists[0]!;}};
-  return {store:{internal},primitives,queries,ranked,weights,get expanded(){return expanded;}};
+  const primitives={formatQueryForEmbedding:(q:string)=>q,chunkDocument:(text:string)=>[{pos:0,text:text.slice(0,500)},...(text.length>500?[{pos:500,text:text.slice(500)}]:[])],reciprocalRankFusion:(lists:any[][],w:number[])=>{weights.push(w);return lists[0]!;}};
+  return {store:{internal},primitives,queries,ranked,weights,body,get expanded(){return expanded;}};
 }
 test('supplied variants keep original retrieval weights and semantic passages through ranking',async()=>{
   const f=fixture(),plan={lexical:['optics','cobalt'],semantic:['mirrors collect light']};
@@ -30,6 +30,12 @@ test('plain searches and deep searches share retrieval and differ only in reques
   const normal=fixture();await hybridSearch(normal.store,{query:'cobalt',collections:['selected']},normal.primitives);expect(normal.expanded).toBe(0);
   const deep=fixture();await hybridSearch(deep.store,{query:'cobalt',collections:['selected'],depth:'deep'},deep.primitives);expect(deep.expanded).toBe(1);expect(deep.queries).toContain('lex:optics');
   const supplied=fixture();await hybridSearch(supplied.store,{query:'cobalt',collections:['selected'],depth:'deep',plan:{lexical:['optics'],semantic:[]}},supplied.primitives);expect(supplied.expanded).toBe(0);
+});
+test('a vector boundary inside a ranking chunk retains the evidence after that chunk ends',async()=>{
+  const f=fixture();
+  f.store.internal.searchVec=async()=>[{filepath:'qmd://selected/one.md',title:'Invented optics',body:f.body,score:.8,chunkPos:350}];
+  const hits=await hybridSearch(f.store,{query:'cobalt',collections:['selected']},f.primitives);
+  expect(hits[0]!.bestChunkPos).toBe(350);expect(hits[0]!.bestChunk).toContain('mirrors');
 });
 test('missing or malformed ranking and embedding results never silently reduce recall',async()=>{
   const f=fixture();

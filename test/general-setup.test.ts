@@ -130,3 +130,11 @@ test('setup preserves existing settings, generates portable MCP configuration, a
  expect(JSON.parse(await readFile(path,'utf8')).sources).toEqual(raw.sources);
  const before=await readFile(path,'utf8'),conflict=Bun.spawn([process.execPath,'src/cli.ts','setup','--notes',join(dir,'Different')],{cwd:join(import.meta.dir,'..'),env:{...process.env,SOURCE_SEARCH_CONFIG_FILE:path},stdin:'ignore',stdout:'pipe',stderr:'pipe'});expect(await conflict.exited).toBe(1);expect(await readFile(path,'utf8')).toBe(before);
 }));
+
+test('ranker installation validates its environment before changing private settings',()=>temporary(async dir=>{
+ const path=join(dir,'config.json'),original=JSON.stringify({timeZone:'Asia/Tokyo'});await writeFile(path,original);
+ for(const args of [[],['--python','relative/python'],['--python','/nonexistent-ranking-environment/python']]){
+  const child=Bun.spawn([process.execPath,'src/cli.ts','models','download-ranker',...args],{cwd:join(import.meta.dir,'..'),env:{...process.env,SOURCE_SEARCH_CONFIG_FILE:path},stdin:'ignore',stdout:'pipe',stderr:'pipe'});
+  expect(await child.exited).toBe(1);expect(await readFile(path,'utf8')).toBe(original);
+ }
+}));

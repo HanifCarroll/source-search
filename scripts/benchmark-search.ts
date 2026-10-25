@@ -9,6 +9,7 @@ import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {configSchema,loadConfig} from '../src/platform/config';
 import {runSdk,searchModels,disposeSearchWorkers} from '../src/search/qmd/runner';
 import {packageRoot} from '../src/platform/package-root';
+import type {Query} from '../src/domain/contracts';
 
 process.umask(0o077);
 const lexicalOnly=process.argv.includes('--lexical-only'),at=process.argv.indexOf('--models-from');
@@ -23,8 +24,8 @@ async function connect(){
   await next.connect(new StdioClientTransport({command:process.execPath,args:[join(packageRoot,'src/mcp.ts')],cwd:root,env:{...Object.fromEntries(Object.entries(process.env).filter((v):v is [string,string]=>v[1]!==undefined)),SOURCE_SEARCH_CONFIG_FILE:configPath},stderr:'pipe'}));
   return next;
 }
-async function search(query:string,mode:string,limit=3,cursor?:string){
-  const started=performance.now(),raw=await client!.callTool({name:'search_sources',arguments:{queries:[{source:'vault',query,mode,limit,...(cursor?{cursor}:{})}]}},undefined,{timeout:120000});
+async function search(query:string,mode:string,limit=3,cursor?:string,options:Pick<Query,'plan'|'depth'>={}){
+  const started=performance.now(),raw=await client!.callTool({name:'search_sources',arguments:{queries:[{source:'vault',query,mode,limit,...options,...(cursor?{cursor}:{})}]}},undefined,{timeout:120000});
   assert(!raw.isError,JSON.stringify(raw));
   const block=(raw.content as {type:string;text:string}[]).find(b=>b.type==='text');assert(block);
   const data=JSON.parse(block.text),page=data.results[0];assert.notEqual(page.status,'error',JSON.stringify(page.error));
@@ -46,14 +47,25 @@ try{
   await runSdk(c,{index:'vault',action:'update'});if(models)await runSdk(c,{index:'vault',action:'embed'});
   // Same index, narrower source selection, via an actual bundled MCP gateway.
   const scoped={...c,qmdRoots:{notes}};await writeFile(configPath,JSON.stringify(scoped),{mode:0o600});client=await connect();
-  const cases=[{query:'cobaltimeter',mode:'lexical',expected:'exact'},...(!lexicalOnly?[{query:'locked out of my account',mode:'semantic',expected:'recovery'},{query:'rescheduling the company event',mode:'hybrid',expected:'event'}]:[])];
+  const cases:({query:string;mode:string;expected:string}&Pick<Query,'plan'|'depth'>)[]=[{query:'cobaltimeter',mode:'lexical',expected:'exact'},...(!lexicalOnly?[
+    {query:'locked out of my account',mode:'semantic',expected:'recovery'},
+    {query:'rescheduling the company event',mode:'hybrid',expected:'event'},
+    {query:'¿Cómo puedo recuperar el acceso a mi cuenta?',mode:'hybrid',expected:'recovery',plan:{lexical:['password reset'],semantic:['recover a locked account']}},
+    {query:'Who can help when I forget my password?',mode:'hybrid',expected:'recovery',depth:'deep' as const},
+  ]:[])];
   for(const c of cases){
-    const cold=await search(c.query,c.mode),rank=cold.page.items.findIndex((i:any)=>i.ref.id===`qmd://notes/${c.expected}.md`)+1;
+    const options={plan:c.plan,depth:c.depth},cold=await search(c.query,c.mode,3,undefined,options),rank=cold.page.items.findIndex((i:any)=>i.ref.id===`qmd://notes/${c.expected}.md`)+1;
     assert(rank>0 && rank<=3,`Relevant ${c.expected} missing from top three for ${c.mode}`);
-    const warm=await search(c.query,c.mode);assert.deepEqual(warm.page.items.map((i:any)=>[i.ref,i.rank]),cold.page.items.map((i:any)=>[i.ref,i.rank]));
+    const warm=await search(c.query,c.mode,3,undefined,options);assert.deepEqual(warm.page.items.map((i:any)=>[i.ref,i.rank]),cold.page.items.map((i:any)=>[i.ref,i.rank]));
+    if(c.mode==='hybrid'){
+      const item=cold.page.items[rank-1];assert(item.focus,'Hybrid search omitted the selected passage');
+      const read=await client!.callTool({name:'read_record',arguments:{ref:item.ref,focus:item.focus}});
+      assert(!read.isError,JSON.stringify(read));const result=JSON.parse((read.content as any[])[0].text);
+      assert.equal(result.record.ref.version,item.ref.version);assert(result.record.body.includes(c.expected==='event'?'December':'password'));
+    }
     assert(cold.ms<(lexicalOnly?15000:90000),`${c.mode} cold search took ${cold.ms} ms, exceeding the release budget`);assert(warm.ms<3000,`${c.mode} repeated search took ${warm.ms} ms (cold: ${cold.ms} ms), exceeding the cache budget`);
     let pageMs:number|undefined;
-    if(cold.page.nextCursor){const next=await search(c.query,c.mode,2,cold.page.nextCursor);pageMs=next.ms;assert(next.ms<3000,'Pagination reran expensive retrieval');assert(!next.page.items.some((n:any)=>cold.page.items.some((p:any)=>p.ref.id===n.ref.id)));}
+    if(cold.page.nextCursor){const next=await search(c.query,c.mode,2,cold.page.nextCursor,options);pageMs=next.ms;assert(next.ms<3000,'Pagination reran expensive retrieval');assert(!next.page.items.some((n:any)=>cold.page.items.some((p:any)=>p.ref.id===n.ref.id)));}
     checks.push({query:c.query,mode:c.mode,coldMs:cold.ms,repeatMs:warm.ms,...(pageMs!==undefined?{pageMs}:{}),expectedRank:rank});
   }
   await client.close();client=await connect();

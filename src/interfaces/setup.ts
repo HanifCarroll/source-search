@@ -3,7 +3,7 @@ import {constants} from 'node:fs';
 import {dirname,join,resolve} from 'node:path';
 import {homedir,tmpdir} from 'node:os';
 import {createInterface} from 'node:readline/promises';
-import {configPath,configSchema,sourceConfig,type Config} from '../platform/config';
+import {configPath,configSchema,searchRankerSchema,sourceConfig,type Config} from '../platform/config';
 import {packageRoot} from '../platform/package-root';
 import {createRuntime} from '../application/runtime';
 import {sourceKind,connectedKinds} from '../domain/source-catalog';
@@ -49,6 +49,10 @@ export async function doctor(c:Config) {
  }
  if(kinds.has('vault')||kinds.has('library')){
   checks.push({name:'Semantic search models',available:!!searchModels(c)&&await modelsPresent(c),action:'Run bun src/cli.ts models download, then index --embed. Keyword search needs no models.'});
+  if(c.searchRanker){
+   await check('Ranking Python environment',c.searchRanker.python,'Install scripts/ranking-requirements.txt in the configured environment.');
+   for(const file of [c.searchRanker.file,'config.json','tokenizer.json'])await check('Ranking '+file,join(c.searchRanker.directory,file),'Run models download-ranker with the configured Python environment.',false);
+  }
   if(process.platform==='darwin'){
    const available=(await Promise.all(['/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib','/usr/local/opt/sqlite/lib/libsqlite3.dylib'].map(p=>access(p,constants.R_OK).then(()=>true,()=>false)))).some(Boolean);
    checks.push({name:'SQLite vector extension support',available,action:'Install Homebrew SQLite (brew install sqlite) for semantic and hybrid search on macOS. Keyword search works without it.'});
@@ -69,6 +73,19 @@ export async function downloadModels(c:Config) {
   const root=join(cache,'qmd/models'),files=await readdir(root),installed=Object.fromEntries(Object.entries(models).map(([kind,uri])=>{const matches=files.filter(f=>f.endsWith(uri.split('/').at(-1)!));if(matches.length!==1)fail('MODEL_DOWNLOAD_FAILED','Could not identify the downloaded '+kind+' model');return [kind,join(root,matches[0])];}));
   return {...await saveSettings({...await readSettings(),searchModels:installed}),models:installed};
  }finally{await rm(temporary,{recursive:true,force:true});}
+}
+export async function downloadRanker(args:string[]) {
+ const at=args.indexOf('--python'),python=at<0?undefined:args[at+1];
+ if(!python)fail('INVALID_CONFIG','Use models download-ranker --python /absolute/environment/bin/python after installing scripts/ranking-requirements.txt.');
+ searchRankerSchema.shape.python.parse(python);
+ const child=Bun.spawn([python,join(packageRoot,'scripts/download-ranker.py')],{stdin:'ignore',stdout:'pipe',stderr:'inherit'});
+ const timeout=setTimeout(()=>child.kill(),30*60*1000);
+ try{
+  const output=await new Response(child.stdout).text();
+  if(await child.exited)fail('MODEL_DOWNLOAD_FAILED','Ranking model setup failed. Check the Python dependencies and retry; settings were not changed.');
+  const searchRanker=searchRankerSchema.parse(JSON.parse(output));
+  return {...await saveSettings({...await readSettings(),searchRanker}),searchRanker};
+ }finally{clearTimeout(timeout);}
 }
 export async function setup(args:string[]) {
  const settings=await readSettings(),rl=createInterface({input:process.stdin,output:process.stderr});

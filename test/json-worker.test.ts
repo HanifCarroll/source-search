@@ -31,3 +31,20 @@ test('output and time budgets fail explicitly and permit a fresh worker',async()
     expect((await worker.request({value:1}) as any).value).toBe(1);
   }finally{worker.close();}
 });
+test('terminating an owner stops every loaded model worker',async()=>{
+  const ownerCode=`import {JsonWorker} from ${JSON.stringify(import.meta.dir+'/../src/platform/json-worker.ts')};
+    const workers=[0,1].map(()=>new JsonWorker([process.execPath,'-e',${JSON.stringify(program)}]));
+    console.log(JSON.stringify(await Promise.all(workers.map(w=>w.request({value:'ready'})))));
+    await Promise.all(workers.map(w=>w.request({delay:10000}))).catch(()=>{});`;
+  const owner=Bun.spawn([process.execPath,'-e',ownerCode],{stdin:'ignore',stdout:'pipe',stderr:'pipe'});
+  let pids:number[]=[];
+  try{
+    const reader=owner.stdout.getReader(),decoder=new TextDecoder();let line='';
+    while(!line.includes('\n')){const part=await reader.read();if(part.done)throw Error('Owner exited before starting its workers');line+=decoder.decode(part.value);}
+    pids=JSON.parse(line.trim()).map((r:any)=>r.pid);reader.releaseLock();
+    owner.kill();await owner.exited;
+    const exists=(pid:number)=>{try{process.kill(pid,0);return true;}catch{return false;}};
+    for(let attempt=0;attempt<20&&pids.some(exists);attempt++)await Bun.sleep(25);
+    expect(pids).toHaveLength(2);expect(pids.some(exists)).toBe(false);
+  }finally{owner.kill();for(const pid of pids)try{process.kill(pid);}catch{}}
+});

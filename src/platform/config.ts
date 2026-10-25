@@ -14,6 +14,10 @@ const home = homedir();
 const path = z.string().refine(isAbsolute, "Source paths must be absolute");
 const state = join(home, ".cache/source-search");
 const executable=(name:string)=>Bun.which(name) || join(home,".config/source-search/unconfigured/bin",name);
+export const searchRankerSchema=z.object({engine:z.literal('onnx'),python:path,directory:path,
+  file:z.string().regex(/^[a-zA-Z0-9_./-]+\.onnx$/).refine(p=>!p.startsWith('/')&&!p.split('/').includes('..'),'Use a model-relative ONNX filename').default('onnx/model.onnx'),
+  maxTokens:z.number().int().min(128).max(8192).default(512),threads:z.number().int().min(1).max(16).default(4),batchSize:z.number().int().min(1).max(16).default(4),
+}).strict();
 export const configSchema = z.object({
   sources: sourcesSchema,
   contextEntities: contextEntitiesSchema,
@@ -59,10 +63,7 @@ export const configSchema = z.object({
   qmdModels: z.array(path).default([]),
   searchModels: z.object({embed:path,rerank:path,generate:path}).strict().optional(),
   searchAcceleration: z.object({rerank:z.literal('mlx'),python:path,cache:path.default(join(state,'mlx-models'))}).strict().optional(),
-  searchRanker:z.object({engine:z.literal('onnx'),python:path,directory:path,
-    file:z.string().regex(/^[a-zA-Z0-9_./-]+\.onnx$/).refine(p=>!p.startsWith('/')&&!p.split('/').includes('..'),'Use a model-relative ONNX filename').default('onnx/model_quantized.onnx'),
-    maxTokens:z.number().int().min(128).max(8192).default(512),threads:z.number().int().min(1).max(16).default(4),batchSize:z.number().int().min(1).max(16).default(4),
-  }).strict().optional(),
+  searchRanker:searchRankerSchema.optional(),
   qmdRoots: z.record(z.string().regex(/^[a-zA-Z0-9_-]+$/), path).default({}),
   libraryEnabled: z.boolean().default(false),
   libraryRoot: path.default(join(state, "library")),

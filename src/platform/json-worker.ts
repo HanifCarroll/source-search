@@ -3,6 +3,10 @@ import {z} from 'zod';
 const envelope=z.object({id:z.number().int().positive(),result:z.unknown().optional(),error:z.string().optional()});
 type Child=ReturnType<typeof Bun.spawn< 'pipe','pipe','pipe'>>;
 type Options={idleMs?:number;timeoutMs?:number;maxBytes?:number;env?:Record<string,string|undefined>};
+const owned=new Set<JsonWorker>();
+const closeOwned=()=>{for(const worker of owned)worker.close();};
+const terminate=()=>{closeOwned();process.exit(143);};
+const interrupt=()=>{closeOwned();process.exit(130);};
 
 // A single serialized JSON-lines worker. The owner chooses its command and
 // lifetime; callers get bounded requests, cancellation and restart after failure.
@@ -15,11 +19,9 @@ export class JsonWorker {
   private idle?:ReturnType<typeof setTimeout>;
   private stderr='';
   private disposed=false;
-  private readonly exit=()=>this.stop(new Error('Worker owner exited'));
-  private readonly terminate=()=>{this.exit();process.exit(143);};
-  private readonly interrupt=()=>{this.exit();process.exit(130);};
   constructor(private command:string[],private options:Options={}){
-    process.once('exit',this.exit);process.once('SIGTERM',this.terminate);process.once('SIGINT',this.interrupt);
+    if(!owned.size){process.once('exit',closeOwned);process.once('SIGTERM',terminate);process.once('SIGINT',interrupt);}
+    owned.add(this);
   }
   private stop(error:Error){
     clearTimeout(this.idle);this.idle=undefined;
@@ -29,7 +31,8 @@ export class JsonWorker {
   }
   close(){
     this.disposed=true;this.stop(new Error('Worker closed'));
-    process.removeListener('exit',this.exit);process.removeListener('SIGTERM',this.terminate);process.removeListener('SIGINT',this.interrupt);
+    owned.delete(this);
+    if(!owned.size){process.removeListener('exit',closeOwned);process.removeListener('SIGTERM',terminate);process.removeListener('SIGINT',interrupt);}
   }
   private start(){
     if(this.child)return this.child;

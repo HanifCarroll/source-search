@@ -37,9 +37,12 @@ class Ranker:
         from tokenizers import Tokenizer
         self.np = np
         directory = Path(settings['directory']).resolve()
-        model = (directory / settings['file']).resolve()
-        if not model.is_relative_to(directory):
-            raise ValueError('ONNX file must be inside its model directory')
+        filename = Path(settings['file'])
+        if filename.is_absolute() or '..' in filename.parts:
+            raise ValueError('Use a model-relative ONNX filename')
+        # Hugging Face snapshots link their files to a shared immutable blob
+        # cache. Keep those supported links; validate the requested path itself.
+        model = directory / filename
         config = json.loads((directory / 'config.json').read_text())
         self.pad_id = config['pad_token_id']
         self.max_tokens = settings['maxTokens']
