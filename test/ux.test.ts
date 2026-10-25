@@ -129,6 +129,33 @@ test("loader reloads an embedded Node worker when only its source changes", asyn
     await writeFile(worker,'export const revision=2;');
     expect(JSON.stringify(await (await load()).invoke('list_sources',{}))).toContain('revision=2');
 });
+test("Things freshness follows its own archive when another archive is rebuilt", async () => {
+    const root = await folder(), things = join(root, 'things'), zip = join(root, 'takeout.zip');
+    await mkdir(things);
+    const task = { uuid: 'fixture', title: 'Invented task', notes: '', status: 'completed', trashed: false, start: 'anytime', dates: { createdAt: '2024-01-01T00:00:00Z' }, tags: [] };
+    await writeFile(join(things, 'tasks.jsonl'), JSON.stringify(task) + '\n');
+    await writeFile(join(things, 'context.json'), '{"TMTask":[]}');
+    await writeFile(join(things, 'snapshot-info.json'), '{"taskCount":1,"exportedAt":"2024-01-01T00:00:00Z"}');
+    const c = { ...defaultConfig(), things, takeout: [zip], index: join(root, 'index.sqlite'), enabledSources: ['things-archive', 'takeout-archive'] };
+    const updateTakeout = async (summary: string) => writeFile(zip, await createZip([{ path: 'Takeout/Calendar/Fixture.ics', text: `BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:fixture\r\nDTSTART:20240101T000000Z\r\nSUMMARY:${summary}\r\nEND:VEVENT\r\nEND:VCALENDAR` }]));
+    const runtime = createRuntime(c);
+    const status = async () => (await runtime.list_sources()).sources.find(s => s.source === 'things-archive')!;
+
+    await updateTakeout('First fixture');
+    await rebuildArchive(c);
+    const original = await status();
+    expect(original.state).toBe('ready');
+    await updateTakeout('Changed fixture');
+    await rebuildArchive(c);
+    const unchanged = await status();
+    expect(unchanged.state).toBe('ready');
+    expect(unchanged.index).toEqual(original.index);
+
+    await writeFile(join(things, 'tasks.jsonl'), JSON.stringify({ ...task, title: 'Changed task' }) + '\n');
+    expect((await status()).state).toBe('stale');
+    await rebuildArchive(c);
+    expect((await status()).state).toBe('ready');
+});
 test("archive type/date/sort filters and warm original reads retain stale-source checks", async () => {
     const root = await folder(), things = join(root, 'things');
     await mkdir(things);

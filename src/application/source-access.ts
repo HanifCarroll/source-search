@@ -98,7 +98,10 @@ export function createSourceAccess(config: Config, execute: Run = run) {
       async status() {
         const originals=await thingsRecords(config);
         let index:unknown;
-        try {const state=await indexStatus(config);index={...JSON.parse(state['things-archive']||'{}'),indexedAt:state.indexedAt,stale:state.generation!==originals.generation};}
+        try {
+          const state=await indexStatus(config),saved=JSON.parse(state['things-archive']||'{}');
+          index={...saved,stale:saved.generation!==originals.generation};
+        }
         catch(e){index={available:false,error:errorData(e),action:'Run source-search rebuild'};}
         return {available:true,taskCount:originals.info.taskCount,dateRange:originals.info.createdDateRange,snapshotAt:originals.info.exportedAt,editedAt:originals.info.archiveEditedAt,index,filters:['from','to'],querySyntax:'literal full-text terms, all must match',coverage:'Edited historical archive; date filters use task creation time'};
       },
