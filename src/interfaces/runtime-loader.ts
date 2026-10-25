@@ -1,9 +1,10 @@
-import { readdir, readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { readdir, readFile, mkdtemp, chmod, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { rmSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
+import {buildRuntime} from './runtime-builder';
 // Keep the MCP transport alive while loading one bundled runtime revision at a time.
 export function runtimeLoader(entry = join(import.meta.dir, "../application/api.ts")) {
     let revision = "", module: typeof import("../application/api") | undefined;
@@ -35,17 +36,14 @@ export function runtimeLoader(entry = join(import.meta.dir, "../application/api.
             const current = digest.digest("hex");
             if (module && current === revision)
                 return module;
-            const build = await Bun.build({ entrypoints: [entry], target: "bun", define:{SOURCE_SEARCH_PACKAGE_ROOT:JSON.stringify(packageRoot)} }).catch(error => { throw Error("Source Search update could not load; correct the code and retry. " + String(error.message).slice(0, 500)); });
-            if (!build.success)
-                throw Error("Source Search update could not load; correct the code and retry. " + build.logs.map(l => l.message).join("; "));
-            const code = await build.outputs[0].text();
             // A fresh directory avoids Bun's cached directory resolution after the first bundle is loaded.
             const outputDirectory=await mkdtemp(join(tmpdir(), "source-search-runtime-"));outputDirectories.push(outputDirectory);
             const path = join(outputDirectory, current + ".mjs");
-            await writeFile(path, code, { mode: 0o600 });
             let updated: typeof import("../application/api");
             // Bun may lazily resolve bundled imports; retain code until the transport exits.
             try {
+                await buildRuntime(entry,packageRoot,path);
+                await chmod(path,0o600);
                 updated = await import(pathToFileURL(path).href);
             }
             catch (error) {

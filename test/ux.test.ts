@@ -199,6 +199,17 @@ test('loader applies dependency-only upgrades when the lockfile changes',async()
  await writeFile(join(dep,'index.js'),'export const version=2;');await writeFile(join(root,'bun.lock'),'fixture version 2');
  expect(await (await load()).invoke('list_sources',{})).toMatchObject({revision:2});
 });
+test('loader recovers after a dependency is installed following a failed bundle',async()=>{
+ const root=await folder(),entry=join(root,'api.ts'),dep=join(root,'node_modules','new-parser'),load=runtimeLoader(entry);
+ await writeFile(entry,'export const invoke=()=>({revision:1});');
+ expect(await (await load()).invoke('list_sources',{})).toEqual({revision:1});
+ await writeFile(entry,'import {revision} from "new-parser"; export const invoke=()=>({revision});');
+ await expect(load()).rejects.toThrow('could not load');
+ await mkdir(dep,{recursive:true});
+ await writeFile(join(dep,'package.json'),JSON.stringify({name:'new-parser',type:'module',main:'index.js'}));
+ await writeFile(join(dep,'index.js'),'export const revision=2;');
+ expect(await (await load()).invoke('list_sources',{})).toEqual({revision:2});
+});
 test('bundled runtime resolves SDK workers from the installed checkout',async()=>{
  const root=await folder(),entry=join(root,'api.ts');
  await writeFile(entry,`import {packageRoot} from ${JSON.stringify(join(import.meta.dir,'../src/platform/package-root.ts'))};export async function invoke(){return {root:packageRoot};}`);
