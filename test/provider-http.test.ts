@@ -26,6 +26,17 @@ test('permanent errors, expired state and invalid JSON do not retry',async()=>{
     await expect(client.json('/records')).rejects.toMatchObject({code});expect(calls).toBe(1);
   }
 });
+test('interrupted response bodies retry the complete read',async()=>{
+  let calls=0;
+  const client=providerHttp('https://fixture.invalid',{retry,fetch:async()=>{
+    if(++calls>1)return Response.json({complete:true});
+    return new Response(new ReadableStream({start(controller){
+      controller.enqueue(new TextEncoder().encode('{"partial":'));
+      controller.error(new TypeError('Connection closed during response'));
+    }}));
+  }});
+  expect(await client.json('/records')).toEqual({complete:true});expect(calls).toBe(2);
+});
 test('attempts share budgets; long Retry-After values are returned without waiting',async()=>{
   for(const header of ['120',new Date(Date.now()+120000).toUTCString()]) {
     let calls=0;

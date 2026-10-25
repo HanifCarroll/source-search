@@ -80,7 +80,14 @@ export function providerHttp(origin:string, options:Options = {}) {
           throw Object.assign(new Error(`Provider returned HTTP ${response.status}.${retryAfterMs===undefined?'':` Retry after ${Math.ceil(retryAfterMs/1000)} seconds.`}`),
             {code,httpStatus:response.status,retryAfterMs});
         }
-        const text=await boundedBody(response,32*1024*1024);
+        let text:string;
+        try{text=await boundedBody(response,32*1024*1024);}
+        catch(error){
+          // A connection can fail after headers arrive. Retry the whole read,
+          // while preserving size-limit and malformed-response errors.
+          if(['SOURCE_LIMIT','INVALID_PROVIDER_RESPONSE'].includes((error as ProviderError).code||''))throw error;
+          return fail('PROVIDER_UNAVAILABLE','Provider response was interrupted');
+        }
         if(asText)return text;
         try {const data:unknown=JSON.parse(text);return withHeaders?{data,headers:response.headers}:data;}
         catch {return fail('INVALID_PROVIDER_RESPONSE','Provider returned invalid JSON');}
