@@ -1,3 +1,4 @@
+import {disposeSearchWorkers} from '../search/qmd/runner';
 import {syncSources,syncTasks} from '../maintenance/sources';
 import {connectedProvider} from '../sources/connected';
 import {sourceAuthorization} from '../platform/source-auth';
@@ -68,3 +69,5 @@ try {
   }
   if (result !== undefined) console.log(JSON.stringify({ ok: true, data: result }));
 } catch (error) { console.error(JSON.stringify({ ok: false, error: errorData(error) })); process.exitCode = 1; }
+
+if(command!=='mcp')disposeSearchWorkers();

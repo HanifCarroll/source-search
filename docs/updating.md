@@ -1,5 +1,7 @@
 # Updating an installation
 
+Hybrid search now accepts agent-supplied query plans and `depth: "deep"`; reconnect MCP clients to load the updated input schema. Ordinary searches skip local query expansion. Existing sources and references remain valid. The next `index --library --embed` builds clean search text without generated instructions/reference JSON. It preserves canonical bodies and saved reference versions, but changes derived embeddings, so allow the one-time rebuild to finish. Keep a database backup if you need to roll back; rebuild derived projections/indexes when returning to an older version.
+
 Durable memory adds `list_memories`, `read_memory`, `write_memory` and `list_changes`. Reconnect MCP clients to discover them. Existing configuration works: `memoryRoot` defaults to a private directory outside caches and is created only on a write. Follow the [memory and backup guide](maintenance.md#deliberate-memory). No source IDs, integrations or schedules change.
 
 The first explicit source sync upgrades `records.sqlite` to add atomic change tracking and baseline reset events. Records, checkpoints and references are preserved. Reads do not migrate it. Back up this cache before upgrading if you need to roll back to an older binary; that binary cannot read the new cache schema. Restore its cache backup or rebuild its disposable record cache while keeping durable `memoryRoot` intact. Source changes start from this baseline; earlier changes are not reconstructed.

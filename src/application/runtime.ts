@@ -16,9 +16,9 @@ import {memoryTools} from './memory';
 import {changeTools} from './changes';
 export {boundedMap} from './concurrency';
 
-export function createRuntime(config: Config, execute?: Run) {
+export function createRuntime(config: Config, execute?: Run,signal?:AbortSignal) {
   const groups=sourceGroups(config);
-  const access = createSourceAccess(config, execute);
+  const access = createSourceAccess(config, execute,signal);
   async function list_sources() {
     const sources = await boundedMap(configuredSourceIds(config), async source => {
       const base = { source, readOnly: true, checkedAt: now() };

@@ -169,13 +169,20 @@ def rank_loaded(model, head, rows):
 
 def main():
     model, head = load_model(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)
-    request = json.loads(sys.stdin.buffer.read(5 * 1024 * 1024 + 1))
-    rows = request['rows']
-    if (not isinstance(rows, list) or not 1 <= len(rows) <= 100
-            or any(not isinstance(row, list) or not 1 <= len(row) <= 4096
-                   or any(type(token) is not int or token < 0 for token in row) for row in rows)):
-        raise ValueError('Invalid ranking token batch')
-    print(json.dumps(rank_loaded(model, head, rows), allow_nan=False))
+    while line := sys.stdin.buffer.readline(5 * 1024 * 1024 + 1):
+        if len(line) > 5 * 1024 * 1024:
+            raise ValueError('Ranking request exceeds budget')
+        request = json.loads(line)
+        try:
+            rows = request['input']['rows']
+            if (not isinstance(rows, list) or not 1 <= len(rows) <= 100
+                    or any(not isinstance(row, list) or not 1 <= len(row) <= 4096
+                           or any(type(token) is not int or token < 0 for token in row) for row in rows)):
+                raise ValueError('Invalid ranking token batch')
+            reply = {'id': request['id'], 'result': rank_loaded(model, head, rows)}
+        except Exception as error:
+            reply = {'id': request['id'], 'error': str(error)}
+        print('SOURCE_SEARCH_REPLY ' + json.dumps(reply, allow_nan=False), flush=True)
 
 
 if __name__ == '__main__':

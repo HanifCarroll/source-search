@@ -49,6 +49,18 @@ On macOS, semantic and hybrid search also require Homebrew SQLite (`brew install
 
 For a derived library of mail, messages and selected archives, enable `libraryEnabled`, `maintenanceEnabled`, the `library` source and each contributing source, then run `bun run start index --library --embed`. The library works without a vault. Mail backfills may need several runs; `sources` reports progress. Omit `--embed` for keyword-only indexing. Changing the embedding model requires rebuilding embeddings; old vectors are not interchangeable.
 
+## Search plans and ranking
+
+Hybrid discovery accepts an optional plan from the calling agent:
+
+```json
+{"queries":[{"source":"library","query":"How do I regain access to my account?","plan":{"lexical":["password reset"],"semantic":["recover a locked account"]},"limit":10}]}
+```
+
+The original query always participates. Each variant list accepts up to three strings; use complementary terms, not repeated queries. Keep the same plan and depth when following a cursor. Plain queries use keyword and semantic retrieval without generating extra variants. `depth: "deep"` uses local expansion if a plan is absent and the larger Qwen ranker. Forty candidate documents are retained before ranking, with the semantic match and a separate keyword passage where useful. A hit's `focus` opens the selected passage in its canonical record.
+
+The MCP process reuses loaded models between searches and releases idle workers after five minutes. Code, configuration, model and index replacement reload them. The CLI exits after its command. Cancellation stops active inference; a later request starts a fresh worker. Persistent result caches remain separate from loaded models, so measure first-process, new-query and repeated-query latency separately.
+
 ## Incremental updates
 
 | Sources | Update behavior |

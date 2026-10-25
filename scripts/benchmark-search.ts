@@ -7,7 +7,7 @@ import {join,resolve} from 'node:path';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {configSchema,loadConfig} from '../src/platform/config';
-import {runSdk,searchModels} from '../src/search/qmd/runner';
+import {runSdk,searchModels,disposeSearchWorkers} from '../src/search/qmd/runner';
 import {packageRoot} from '../src/platform/package-root';
 
 process.umask(0o077);
@@ -42,7 +42,7 @@ try{
   for(let i=0;i<256;i++)await writeFile(join(notes,`other-${i}.md`),`# Garden observation ${i}\n\nInvented field log ${i}. The gardener watered the seedlings and recorded leaf size and soil moisture. Plants grew in the morning sunlight.`);
   await writeFile(join(excluded,'private.md'),'# Excluded\n\nZXQ731 cobaltimeter locked out of my account rescheduling the company event.');
   const acceleration=settings?.searchAcceleration?{...settings.searchAcceleration,cache:join(root,'models')}:undefined;
-  const c=configSchema.parse({enabledSources:['vault'],maintenanceEnabled:true,qmdDatabase:join(root,'search.sqlite'),qmdRoots:{notes,excluded},...(models?{searchModels:models,searchAcceleration:acceleration}:{})});
+  const c=configSchema.parse({enabledSources:['vault'],maintenanceEnabled:true,qmdDatabase:join(root,'search.sqlite'),qmdRoots:{notes,excluded},...(models?{searchModels:models,searchAcceleration:acceleration,searchRanker:settings?.searchRanker}:{})});
   await runSdk(c,{index:'vault',action:'update'});if(models)await runSdk(c,{index:'vault',action:'embed'});
   // Same index, narrower source selection, via an actual bundled MCP gateway.
   const scoped={...c,qmdRoots:{notes}};await writeFile(configPath,JSON.stringify(scoped),{mode:0o600});client=await connect();
@@ -64,4 +64,4 @@ try{
   await writeFile(join(notes,'exact.md'),'# Equipment code\n\nThe instrument was retired.');await runSdk(scoped,{index:'vault',action:'update'});
   assert.equal((await search('cobaltimeter','lexical')).page.items.length,0,'Stale candidates survived a real source edit');
   console.log(JSON.stringify({ok:true,corpus:'259 invented documents plus an excluded collection',inference:lexicalOnly?'not exercised':'installed local models',transport:'stdio MCP with bundled runtime',checks,restartMs:reopened.ms,noOpRefreshMs:unchanged.ms},null,2));
-}finally{await client?.close();await rm(root,{recursive:true,force:true});}
+}finally{await client?.close();disposeSearchWorkers();await rm(root,{recursive:true,force:true});}

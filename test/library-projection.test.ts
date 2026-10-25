@@ -8,6 +8,7 @@ import {publish,libraryDB,getState} from '../src/search/library/store';
 import {readLibrary,searchLibrary} from '../src/search/library/index';
 import {querySchema,type RecordData} from '../src/domain/contracts';
 import {hash} from '../src/domain/identity';
+import {focusedOffset} from '../src/domain/content';
 import {defaultConfig} from './helpers/config';
 
 const record:RecordData={ref:{source:'whatsapp',id:'fixture',version:'old-version'},title:'Invented meeting',body:'We meet on Tuesday.\nOriginal: {"quoted":"keep this prose"}',author:'Example',occurredAt:'2026-01-01T00:00:00Z',observedAt:'fixture',type:'message',locator:'fixture'};
@@ -46,6 +47,11 @@ test('search projection migration preserves saved refs, rejects stale indexes an
     expect((await retrieve()).items).toHaveLength(0);
     index.query('UPDATE documents SET hash=?').run(chunk.searchHash);
     expect((await retrieve()).items[0]!.ref).toEqual(ref);
+    const start=chunk.searchText.indexOf('Tuesday');
+    const focused=await searchLibrary(c,query,async()=>[{file:'qmd://ss-whatsapp/'+chunk.id+'.md',score:1,snippet:'Tuesday',passage:{start,end:start+7}}]);
+    const item=focused.items[0]!,canonical=await readLibrary(c,item.ref,async()=>{});
+    expect(canonical.body.slice(item.match!.start,item.match!.end)).toBe('Tuesday');
+    expect(()=>focusedOffset(canonical,item.focus!)).not.toThrow();
     const stamp=(await stat(path)).mtimeMs;
     db=libraryDB(c);const state=getState(db,'whatsapp');db.close();
     await publish(c,'whatsapp',[record],{},{state:'ready'});

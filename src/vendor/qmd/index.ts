@@ -7,7 +7,8 @@ const document=documentIdentity.extend({title:z.string(),doc:z.string()});
 const count=z.number().int().nonnegative();
 const collectionStatus=z.object({collection:z.string(),indexedDocuments:count,ready:count,pending:count});
 export type IndexedDocument=z.infer<typeof document>;
-const hits=z.array(z.object({file:z.string(),score:z.number(),title:z.string().optional(),snippet:z.string().optional()}));
+const passage=z.object({start:count,end:count}).refine(p=>p.end>=p.start);
+const hits=z.array(z.object({file:z.string(),score:z.number(),title:z.string().optional(),snippet:z.string().optional(),passage:passage.optional()}));
 export function qmdResults(value:unknown){
   const result=hits.safeParse(value);
   if(!result.success)fail('INVALID_PROVIDER_RESPONSE','Invalid QMD search results');

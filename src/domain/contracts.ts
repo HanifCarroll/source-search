@@ -11,11 +11,16 @@ export const taskFilterSchema=z.object({
 }).strict().refine(t=>!t.dueFrom||!t.dueBefore||t.dueFrom<t.dueBefore,'dueFrom must precede dueBefore');
 export type TaskFields={status:'open'|'completed'|'canceled';project?:{id?:string;name:string};dueDate?:string;invalidDueDate?:true;trashed?:boolean};
 export type SnapshotCoverage={kind:'synchronized-snapshot'|'historical-archive';asOf:string;syncedAt?:string;description:string;window?:{from:string;to:string};lastAttemptAt?:string;lastError?:{code:string;message:string};unclassifiedTasks?:number;invalidDueDates?:number};
+export const queryPlanSchema=z.object({
+  lexical:z.array(z.string().trim().min(1).max(1000)).max(3).default([]),
+  semantic:z.array(z.string().trim().min(1).max(1000)).max(3).default([]),
+}).strict();
 export const querySchema = z.object({
   source: sourceId, query: z.string().max(1000),
   from: z.iso.datetime({ offset: true }).optional(), to: z.iso.datetime({ offset: true }).optional(),
   conversation: z.string().min(1).max(500).optional(), cursor: z.string().max(8192).optional(),
   mode: z.enum(["lexical", "semantic", "hybrid"]).optional(),
+  plan:queryPlanSchema.optional(),depth:z.enum(['standard','deep']).optional(),
   match: z.enum(["words", "phrase"]).optional(),
   sections: z.array(sectionKind).min(1).max(6).optional(),
   sort: z.enum(["relevance", "newest", "oldest", "due"]).optional(),

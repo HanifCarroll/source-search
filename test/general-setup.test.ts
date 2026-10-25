@@ -1,5 +1,5 @@
-import {test,expect} from 'bun:test';
-import {mkdtemp,mkdir,writeFile,readFile,rm,stat} from 'node:fs/promises';
+import {test,expect,afterEach} from 'bun:test';
+import {mkdtemp,mkdir,writeFile,readFile,rm,stat,rename} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {Database} from 'bun:sqlite';
@@ -8,7 +8,8 @@ import {createSourceAccess} from '../src/application/source-access';
 import {createRuntime} from '../src/application/runtime';
 import {indexSources} from '../src/maintenance/search-index';
 import {rebuildConfiguredArchives} from '../src/maintenance/archives';
-import {runSdk} from '../src/search/qmd/runner';
+import {runSdk,disposeSearchWorkers} from '../src/search/qmd/runner';
+afterEach(disposeSearchWorkers);
 import {readQmd,qmdPath} from '../src/search/qmd/vault';
 import {saveSettings,mcpConfig,doctor} from '../src/interfaces/setup';
 import {querySchema} from '../src/domain/contracts';
@@ -43,6 +44,22 @@ test('library keyword index runs with no vault, global QMD executable or models'
  await publish(c,'work',[{ref:{source:'work',id:'invented',version:'v1'},title:'Cobalt project',body:'Cobalt project notes',type:'email',observedAt:'2026-01-01T00:00:00Z',locator:'source-search://work/invented'}],{mail:'work'});
  expect((await indexSources(c,['--library','--update-only']))[0]!.update).toMatchObject({indexed:1});
  expect(await runSdk(c,{index:'library',mode:'lexical',query:'cobalt',collection:'ss-work'})).toHaveLength(1);
+}));
+
+test('workers reopen a replaced index and keyword search survives a missing optional ranker',()=>temporary(async dir=>{
+ const notes=join(dir,'notes');await mkdir(notes);await writeFile(join(notes,'one.md'),'# Cobalt\n\nInvented cobalt observation.');
+ const c=configSchema.parse({maintenanceEnabled:true,qmdRoots:{notes},qmdDatabase:join(dir,'old.sqlite'),searchRanker:{engine:'onnx',python:'/missing/python',directory:join(dir,'missing-model')}});
+ await runSdk(c,{index:'vault',action:'update'});
+ expect(await runSdk(c,{index:'vault',mode:'lexical',query:'cobalt'})).toHaveLength(1);
+ await writeFile(join(notes,'one.md'),'# Amber\n\nInvented amber observation.');
+ const replacement={...c,qmdDatabase:join(dir,'new.sqlite')};
+ await runSdk(replacement,{index:'vault',action:'update'});
+ // An index installer must checkpoint before replacement; copying only the
+ // main file of an active WAL database is not a valid SQLite backup.
+ for(const path of [c.qmdDatabase,replacement.qmdDatabase]){const db=new Database(path);db.exec('PRAGMA wal_checkpoint(TRUNCATE)');db.close();}
+ await rename(replacement.qmdDatabase,c.qmdDatabase);
+ expect(await runSdk(c,{index:'vault',mode:'lexical',query:'amber'})).toHaveLength(1);
+ expect(await runSdk(c,{index:'vault',mode:'lexical',query:'cobalt'})).toHaveLength(0);
 }));
 
 test('stable browser profile IDs survive reorder and keep legacy numeric references',()=>temporary(async dir=>{

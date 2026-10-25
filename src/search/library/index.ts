@@ -6,6 +6,8 @@ import { readFile, lstat, access } from "node:fs/promises";
 import { join, relative, sep, isAbsolute, extname } from "node:path";
 import {sourceEnabled, requireSource, sourceScope, sourceConfig, configuredSourceIds, type Config} from "../../platform/config";
 import { libraryDB } from "./store";
+import {canonicalPassage,type SearchSpan} from './projection';
+import {focusToken} from '../../domain/content';
 import { archiveSignature, type ArchiveSource } from "../../sources/archives/originals";
 import { runQmd, modelsPresent as checkModels, type QmdRun } from "../qmd/runner";
 import { fail, hash, now, cursor, numberPosition, queryKey, assertVersion } from "../../domain/identity";
@@ -61,7 +63,7 @@ export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>run
  const mode=q.mode||"hybrid",status=await libraryStatus(c);
  if(!status.available)fail("SOURCE_NOT_READY","Initial library backfill has not produced searchable text yet");
  if(mode!=="lexical" && (!status.modelsPresent || !(q.source==="library"?status.embeddings?.ready:status.sources?.find(s=>s.source===q.source)?.embeddings?.ready)))fail("SOURCE_NOT_READY","Initial library embeddings are still building; lexical discovery is available after indexing");
- const raw=qmdResults(await execute({index:"library",mode,query:q.query,...(q.source!=="library"?{collection:"ss-"+q.source}:{})}));
+ const raw=qmdResults(await execute({index:"library",mode,query:q.query,...(q.plan?{plan:q.plan}:{}),...(q.depth?{depth:q.depth}:{}),...(q.source!=="library"?{collection:"ss-"+q.source}:{})}));
  await regular(c.libraryDatabase);const db=libraryDB(c),index=qmdIndex(c.libraryDatabase);
  const records:RecordData[]=[],warnings=["Derived search text; read returned references for provenance and verify originals before citing. Ranked candidates are not exhaustive."];
  const scopes=status.sources?.filter(s=>q.source==="library"||s.source===q.source)||[];
@@ -69,6 +71,7 @@ export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>run
  const pendingEmbeddings=scopes.reduce((total,s)=>total+(s.embeddings.pending||0),0);
  if(pendingEmbeddings)warnings.push(`${pendingEmbeddings} selected library chunks await embeddings; semantic coverage is partial while the background job continues.`);
  const hasSearchManifest=!!db.query("SELECT 1 FROM sqlite_master WHERE name='chunk_search'").get();
+ const focused=new Map<string,{token:string;start:number;end:number}>();
  try{for(const r of raw.slice(0,100)){
   const m=/^qmd:\/\/ss-([a-z][a-z0-9-]*)\/([a-f0-9]{64})\.md$/.exec(r.file);
   if(!m || !sourceEnabled(c,m[1]!) || !isProjected(m[1]!,c) || q.source!=="library" && m[1]!==q.source)continue;
@@ -76,10 +79,15 @@ export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>run
   const indexedHash=index.documentHash("ss-"+m[1],m[2]+".md");
   if(row && JSON.parse(row.guard).scope!==sourceScope(c,row.source))continue;
   if(row && JSON.parse(row.guard).mail && JSON.parse(row.guard).accountSignature!==sourceScope(c,row.source))continue;
-  const searchHash=hasSearchManifest?(db.query('SELECT hash FROM chunk_search WHERE id=?').get(row?.id||'') as {hash:string}|null)?.hash:undefined;
+  const searchManifest=hasSearchManifest?db.query('SELECT hash,spans FROM chunk_search WHERE id=?').get(row?.id||'') as {hash:string;spans:string}|null:null;
+  const searchHash=searchManifest?.hash;
   // During an index-format upgrade the previous canonical projection still
   // describes these exact originals. Keep it usable until the clean index lands.
   if(!row || indexedHash!==row.hash && indexedHash!==searchHash){warnings.push("A changed/deleted projection is waiting for QMD refresh; its stale hit was withheld.");continue;}
+  if(r.passage){
+    const passage=indexedHash===row.hash?r.passage:canonicalPassage(JSON.parse(searchManifest!.spans) as SearchSpan[],r.passage.start,r.passage.end);
+    if(passage&&passage.start>=0&&passage.end<=row.body.length)focused.set(row.id,{...passage,token:focusToken({ref:{source:'library',id:row.id,version:row.hash},body:row.body} as RecordData,{field:'body',...passage})});
+  }
   if(row.source==="documents"){
     try { for(const original of JSON.parse(row.refs) as Ref[])await readDocument(c,original); }
     catch { warnings.push("A document whose original is disabled, removed or changed was withheld.");continue; }
@@ -88,7 +96,7 @@ export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>run
  }}finally{db.close();index.close();}
  const key=queryKey(q)+hash(JSON.stringify(records.map(r=>r.ref))),start=numberPosition(q.cursor,key),selected=records.slice(start,start+q.limit);
  if(start>records.length)fail("STALE_CURSOR","Library results changed; restart the query");
- return {source:q.source,status:warnings.length>1?"partial":"ok",items:selected.map((r,i)=>{const item=hit(r,q,start+i+1);item.cursorAfter=cursor(key,start+i+1);item.metadata={...item.metadata,sourceFamily:r.metadata!.sourceFamily,originalCount:r.metadata!.originalCount};return item;}),...(start+selected.length<records.length?{nextCursor:cursor(key,start+selected.length)}:{}),warnings:[...new Set(warnings)],observedAt:now(),retrieval:{requestedMode:mode,effectiveMode:mode}};
+ return {source:q.source,status:warnings.length>1?"partial":"ok",items:selected.map((r,i)=>{const item=hit(r,q,start+i+1);item.cursorAfter=cursor(key,start+i+1);item.metadata={...item.metadata,sourceFamily:r.metadata!.sourceFamily,originalCount:r.metadata!.originalCount};const passage=focused.get(r.ref.id);if(passage){item.focus=passage.token;item.match={field:'body',start:passage.start,end:passage.end,explanation:'Ranked passage in the canonical library section'};}return item;}),...(start+selected.length<records.length?{nextCursor:cursor(key,start+selected.length)}:{}),warnings:[...new Set(warnings)],observedAt:now(),retrieval:{requestedMode:mode,effectiveMode:mode}};
 }
 async function matchesStamp(sig:any[]){
  const s=await lstat(sig[0],{bigint:true});

@@ -11,6 +11,7 @@ import { assertVersion, errorData, fail, hash } from '../domain/identity';
 import { contextMode, usesLibrary } from '../domain/source-policy';
 import { validateOptions } from '../domain/query';
 import { requireSource, configuredSourceIds, mailAccount, markdownSettings, sourceConfig, sourceScope, type Config } from '../platform/config';
+import {runQmd} from '../search/qmd/runner';
 import { libraryStatus, searchLibrary, readLibrary, readDocument } from '../search/library/index';
 import { qmdStatus, searchQmd, readQmd } from '../search/qmd/vault';
 import { cassStatus, searchCass, readCass } from '../sources/agent-history/index';
@@ -29,7 +30,7 @@ const recordOnly = (read: (ref: Ref, context: boolean) => Promise<RecordData>): 
 
 // One registration binds status, native search and original reads for each source.
 // This module owns routing and reference validation, never response formatting.
-export function createSourceAccess(config: Config, execute: Run = run) {
+export function createSourceAccess(config: Config, execute: Run = run,signal?:AbortSignal) {
   function mail(source: MailSource): Adapter {
     return {
       async status() {
@@ -107,16 +108,16 @@ export function createSourceAccess(config: Config, execute: Run = run) {
       },
       search:q=>q.task||q.sort==='due'?searchThingsTasks(config,q):searchArchive(config,q),read:recordOnly(ref=>readExport(config,ref)),
     },
-    vault:{status:async()=>({...await qmdStatus(config),pagination:true}),search:q=>searchQmd(config,q),read:recordOnly(ref=>readQmd(config,ref))},
+    vault:{status:async()=>({...await qmdStatus(config),pagination:true}),search:q=>searchQmd(config,q,request=>runQmd(request,config,signal)),read:recordOnly(ref=>readQmd(config,ref))},
     'agent-history':{status:async()=>({...await cassStatus(config),pagination:true}),search:q=>searchCass(config,q),read:recordOnly((ref,context)=>readCass(config,ref,context))},
     };
     return readers[kind];
   }
   const adapters:Record<Source,Adapter>={
-    library:{status:()=>libraryStatus(config),search:q=>searchLibrary(config,q),read:recordOnly(ref=>readLibrary(config,ref,original=>read(original)))},
+    library:{status:()=>libraryStatus(config),search:q=>searchLibrary(config,q,request=>runQmd(request,config,signal)),read:recordOnly(ref=>readLibrary(config,ref,original=>read(original)))},
     documents:{
       async status(){const status=await libraryStatus(config),doc=status.sources?.find(s=>s.source==='documents');return {...doc,available:(doc?.embeddings?.indexedDocuments||0)>0,modelsPresent:status.modelsPresent};},
-      search:q=>searchLibrary(config,q),
+      search:q=>searchLibrary(config,q,request=>runQmd(request,config,signal)),
       read:recordOnly(async ref=>{const record=await readDocument(config,ref);if(record.metadata?.mailRef)await read(record.metadata.mailRef as Ref);return record;}),
     },
   };
@@ -153,7 +154,7 @@ export function createSourceAccess(config: Config, execute: Run = run) {
       const previews:PreviewBudget={remaining:3,records:new Map()};
       return (q:Query) => {
         requireSource(config,q.source);if(!adapters[q.source])fail("SOURCE_NOT_CONFIGURED","No adapter is configured for this source");validateOptions(q,config);
-        return usesLibrary(q,config) ? searchLibrary(config,q) : adapters[q.source].search(q,previews);
+        return usesLibrary(q,config) ? searchLibrary(config,q,request=>runQmd(request,config,signal)) : adapters[q.source].search(q,previews);
       };
     },
     read,

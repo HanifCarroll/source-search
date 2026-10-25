@@ -27,6 +27,7 @@ export function sortRecords(records: RecordData[], q: Query) {
 }
 export function validateOptions(q: Query,catalog:SourceCatalog={}) {
     const source = sourceKind(q.source,catalog), mail=isMail(q.source,catalog), definition=sourceDefinition(q.source,catalog);
+    if((q.plan||q.depth)&&(!(usesLibrary(q,catalog)||source==='vault')||q.mode&&q.mode!=='hybrid'))fail('UNSUPPORTED_FILTER','Query plans and depth require hybrid library or vault search');
     if((q.task||q.sort==='due')&&!definition?.filters.includes('task'))fail('UNSUPPORTED_FILTER','Task filters and due sorting require a task source');
     if(definition?.filters.includes('task')&&q.conversation)fail('UNSUPPORTED_FILTER','Tasks have no conversation filter');
     if(usesLibrary(q,catalog)){

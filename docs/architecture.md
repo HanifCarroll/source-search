@@ -20,7 +20,7 @@ src/
     agent-history/   CASS search and original conversation reads
   search/
     library/         Projection store, ranked discovery, provenance checks
-    qmd/             Vault adapter and isolated public QMD SDK worker
+    qmd/             Vault adapter, retrieval pipeline and model workers
   maintenance/
     sources.ts       Task and connected-source synchronization
     snapshots.ts     Atomic source snapshot/checkpoint writes
@@ -75,9 +75,13 @@ The runtime composes these small owners without a graph store, model, queue or s
 
 ## Search engines
 
-CASS owns agent-history retrieval. QMD owns vault and library ranking. The QMD subprocess runner accepts a typed request containing the target (`vault` or `library`), mode, query, and optional collection. It selects the database and constructs fixed command arguments itself, keeping process details, time limits, and output budgets out of both adapters. It does not infer the target from an index name or parse a caller-built command line. All three search modes, collection updates and embeddings use the public `@tobilu/qmd` SDK. The dependency is installed with the application. Collections come directly from source configuration or enabled library projections. An isolated Bun process bounds model lifetime, output and time; native diagnostics stay off MCP stdout. QMD owns chunking, ranking and embedding batches. Source Search owns source selection, original-reference validation and response budgets.
+CASS owns agent-history retrieval. QMD supplies vault/library indexing, keyword and vector retrieval, chunking, query embeddings and reciprocal-rank fusion. `pipeline.ts` owns the hybrid policy: original query plus optional variants, forty fused candidates, semantic passage positions, a distinct keyword passage when useful, and position-aware score blending. Its narrow ranking function accepts passages and returns scores. It does not know about subprocesses, source references or response formatting. `sdk.mjs` confines access to the pinned QMD internals; upgrades must pass the pipeline and vector fixtures as well as the public SDK checks.
 
-Current QMD indexes retain literal filenames. The vault reader resolves legacy normalized references to their unchanged originals, so saved references survive the index upgrade. The metadata reads used for provenance remain in the vault/library adapters; no internal QMD modules are imported. Index refresh checks collection roots before updating and reports skipped files.
+The subprocess runner accepts a typed target (`vault` or `library`), mode, query, optional collection and query plan. Collections come from enabled sources. A reusable SDK worker owns loaded models, with serialized requests, cancellation, bounded output, five-minute idle expiry and restart after failure. Configuration, code, model or database replacement invalidates that worker. At most four indexes retain workers. Maintenance uses short-lived sessions. No additional service is installed, and native diagnostics stay off MCP stdout. CLI and runtime disposal close their workers.
+
+Ordinary hybrid queries use the original text and supplied lexical/semantic variants. `depth: "deep"` requests local expansion when no plan is supplied and uses the larger Qwen ranker. The optional ONNX ranker uses maintained ONNX Runtime and Hugging Face Tokenizers; overlapping windows cover long passages without dropping their endings. The Apple accelerator uses the existing Qwen weights and native tokenization. Failed inference remains an error, never an unranked success.
+
+Library and vault adapters validate source selection and original versions, map the selected passage into a usable `focus`, and paginate the ranked results. Query plans and depth participate in cache/cursor identity. Current QMD indexes retain literal filenames; the vault reader also resolves legacy normalized references. Index refresh checks collection roots before updating and reports skipped files.
 
 ## Document maintenance
 

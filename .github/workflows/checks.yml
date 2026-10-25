@@ -40,6 +40,7 @@ jobs:
       - run: bun run bench --lexical-only
       - run: bun run demo
       - run: python -m pip install --require-hashes -r scripts/extraction-requirements.txt
+      - run: python -m pip install -r scripts/ranking-requirements.txt
       - run: python -m unittest discover -s test -p '*_test.py'
       - run: bun audit
   secrets:

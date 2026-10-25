@@ -1,3 +1,4 @@
+import {focusToken} from '../../domain/content';
 import {qmdIndex,qmdResults,type QmdIndex,type IndexedDocument as Indexed} from "../../vendor/qmd";
 import { access } from "node:fs/promises";
 import type { Config } from "../../platform/config";
@@ -51,8 +52,9 @@ export async function searchQmd(c: Config, input: Query, execute: QmdRun = reque
   if (!q.query.trim()) fail("INVALID_QUERY", "QMD requires a nonempty discovery query");
   const state = await qmdStatus(c);
   if (!state.available || q.mode !== "lexical" && !state.semanticReady) fail("SOURCE_NOT_READY", "QMD embeddings/models are not ready; complete the explicit setup or request lexical mode");
-  const raw = qmdResults(await execute({index:"vault",mode:q.mode,query:q.query}));
+  const raw = qmdResults(await execute({index:"vault",mode:q.mode,query:q.query,...(q.plan?{plan:q.plan}:{}),...(q.depth?{depth:q.depth}:{})}));
   const paths = await originalPaths(c), db = open(c), records: RecordData[] = [], seen = new Set<string>();
+  const focused=new Map<string,string>();
   const warnings = ["Bounded ranked discovery: at most 100 candidates (QMD hybrid reranks up to 40). End of these pages does not mean the collection was exhaustively searched."];
   try {
     for (const r of raw.slice(0,candidateLimit)) {
@@ -61,6 +63,7 @@ export async function searchQmd(c: Config, input: Query, execute: QmdRun = reque
       const row = indexed(c,db,r.file);
       if(seen.has(row.hash))continue;
       seen.add(row.hash);
+      if(r.passage && r.passage.end<=row.doc.length)focused.set(r.file,focusToken({ref:{source:'vault',id:r.file,version:row.hash},body:row.doc} as RecordData,{field:'body',...r.passage}));
       const origin = paths.get(r.file)!;
       const locator = await contained(origin.root,origin.path);
       records.push({ ref: {source:"vault",id:r.file,version:row.hash}, title:row.title, body:String(r.snippet || ""), type:"vault-document", locator, observedAt:now(), metadata:{previewOnly:true,collection:row.collection,score:r.score} });
@@ -69,7 +72,7 @@ export async function searchQmd(c: Config, input: Query, execute: QmdRun = reque
   const key = queryKey(q)+hash(JSON.stringify(records.map(r=>r.ref))), start=numberPosition(q.cursor,key);
   if(start>records.length)fail("INVALID_CURSOR","Cursor exceeds the ranked QMD candidates");
   const selected=records.slice(start,start+q.limit);
-  return { source:"vault",status:warnings.length>1?"partial":"ok",items:selected.map((r,i)=>{const h=hit(r,q,start+i+1);h.cursorAfter=cursor(key,start+i+1);return h;}), ...(start+selected.length<records.length?{nextCursor:cursor(key,start+selected.length)}:{}),warnings,observedAt:now(),retrieval:{requestedMode:q.mode,effectiveMode:q.mode} };
+  return { source:"vault",status:warnings.length>1?"partial":"ok",items:selected.map((r,i)=>{const h=hit(r,q,start+i+1);if(focused.has(r.ref.id))h.focus=focused.get(r.ref.id);h.cursorAfter=cursor(key,start+i+1);return h;}), ...(start+selected.length<records.length?{nextCursor:cursor(key,start+selected.length)}:{}),warnings,observedAt:now(),retrieval:{requestedMode:q.mode,effectiveMode:q.mode} };
 }
 export async function readQmd(c: Config, ref: Ref): Promise<RecordData> {
   const origin=(await originalPaths(c)).get(ref.id);

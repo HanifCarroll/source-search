@@ -1,5 +1,5 @@
 import {getMailState as getState,setMailState as setState} from '../src/platform/cache-state';
-import {test,expect} from 'bun:test';
+import {test,expect,afterEach} from 'bun:test';
 import {mkdtemp,mkdir,writeFile,rm,stat,rename} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -8,7 +8,8 @@ import {installSearchRevision} from '../src/vendor/qmd/revisions';
 import {cachedSearch,indexRevision} from '../src/search/qmd/cache';
 import {projectionHealth} from '../src/search/library/index';
 import {textFile} from '../src/platform/source-files';
-import {runSdk} from '../src/search/qmd/runner';
+import {runSdk,disposeSearchWorkers} from '../src/search/qmd/runner';
+afterEach(disposeSearchWorkers);
 import {configSchema} from '../src/platform/config';
 import {rebuildArchive} from '../src/sources/archives/index';
 import {createZip} from './helpers/zip';

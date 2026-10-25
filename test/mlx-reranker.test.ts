@@ -41,18 +41,16 @@ test('inference boundaries reject lost scores, nonfinite values and oversized to
   for(const rows of [[],[[]],[[-1]],[[1.5]],[Array(4097).fill(1)],Array(101).fill([1])])expect(()=>tokenRowsSchema.parse(rows)).toThrow();
 });
 
-test('a preloaded worker accepts one complete batch and stops on cancellation or timeout',async()=>{
-  const worker=startRankingWorker([process.execPath,'-e',"const r=await Bun.stdin.json();console.log(JSON.stringify(r.rows.map((r,i)=>i/10)))"]);
-  expect(await worker.score([[1,2],[3]])).toEqual([0,.1]);expect(await worker.exited).toBe(0);
-  await expect(worker.score([[1]])).rejects.toThrow('already received');
-  const idle=startRankingWorker([process.execPath,'-e','await Bun.stdin.text()']);idle.close();
-  expect(await idle.exited).not.toBe(0);
-  const timed=startRankingWorker([process.execPath,'-e','setInterval(()=>{},1000)'],50);
-  await expect(timed.score([[1]])).rejects.toThrow('worker stopped');
+test('ranking workers retain a model process across complete batches',async()=>{
+  const code=`import {createInterface} from 'node:readline';for await(const line of createInterface({input:process.stdin})){const {id,input}=JSON.parse(line);console.log('SOURCE_SEARCH_REPLY '+JSON.stringify({id,result:input.rows.map((r,i)=>i/10)}));}`;
+  const worker=startRankingWorker([process.execPath,'-e',code]);
+  try{expect(await worker.score([[1,2],[3]])).toEqual([0,.1]);expect(await worker.score([[7]])).toEqual([0]);}finally{worker.close();}
+  await expect(worker.score([[1]])).rejects.toThrow('closed');
 });
 
-test('a worker that fails during preload reports failure instead of returning scores',async()=>{
-  const worker=startRankingWorker([process.execPath,'-e',"console.error('invented load failure');process.exit(2)"]);
-  await worker.exited;
-  await expect(worker.score([[1]])).rejects.toThrow('invented load failure');
+test('failed worker startup and timeouts are explicit failures',async()=>{
+  const broken=startRankingWorker([process.execPath,'-e',"console.error('invented load failure');process.exit(2)"]);
+  try{await expect(broken.score([[1]])).rejects.toThrow('invented load failure');}finally{broken.close();}
+  const timed=startRankingWorker([process.execPath,'-e','setInterval(()=>{},1000)'],50);
+  try{await expect(timed.score([[1]])).rejects.toThrow('timed out');}finally{timed.close();}
 });

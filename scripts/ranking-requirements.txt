@@ -1,0 +1,4 @@
+# Optional portable multilingual ranking. All inference stays local.
+onnxruntime==1.31.0
+tokenizers==0.22.2
+numpy==2.5.4
