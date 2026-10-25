@@ -1,3 +1,4 @@
+import {getMailState,setMailState} from '../platform/cache-state';
 import {syncSources,snapshotSources} from './sources';
 import {snapshotStore} from '../sources/sync/cache';
 import {nativeCache} from './native-cache';
@@ -81,14 +82,17 @@ async function archives(c:Config){
 // The source worker owns mail checkpoints. Library publication consumes the
 // committed cache under the same source lock, including deferred dirty records.
 async function publishCachedMail(c:Config,db:Database,source:string){
- const state=getState(db,source);
- if(!state.accountSignature)return;
- if(state.accountSignature!==sourceScope(c,source))return;
- if(state.dirty||!state.publishedAt){
+ const state=getMailState(db,source),projection=getState(db,source);
+ if(!state.accountSignature || state.accountSignature!==sourceScope(c,source))return;
+ // Copy a legacy checkpoint before publication replaces its old mixed row.
+ setMailState(db,source,state);
+ const freshness={state:state.state,error:state.error,checkedAt:state.checkedAt,lastCompleteScan:state.lastCompleteScan,
+  lastSuccessfulSync:state.lastSuccessfulSync,syncStrategy:state.syncStrategy,coverage:state.coverage};
+ if(state.dirty || !projection.publishedAt){
   const records=(db.query('SELECT data FROM mail WHERE source=? ORDER BY id').all(source) as {data:string}[]).map(r=>JSON.parse(r.data));
-  await publish(c,source,records,{mail:source,accountSignature:sourceScope(c,source)},state);
-  setState(db,source,{...getState(db,source),dirty:false});
- }
+  await publish(c,source,records,{mail:source,accountSignature:sourceScope(c,source)},freshness);
+  setMailState(db,source,{...state,dirty:false});
+ }else setState(db,source,{...projection,...freshness});
 }
 export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSource[]=configuredSourceIds(c).filter(id=>isMail(id,c))){return syncMailbox(c,execute,sources,publishCachedMail);}
 export async function publishMail(c:Config){

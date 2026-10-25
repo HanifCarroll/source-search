@@ -7,6 +7,7 @@ import type {Query} from '../../domain/contracts';
 import type {ImapSettings} from '../../platform/source-settings';
 import {readSecret} from '../../platform/credentials';
 import type {Folder,MailConnector,MailContinuation,MailDetail,MailSummary,MailSyncPage} from './types';
+import {imapCheckpointSchema,type ImapCheckpoint as SyncCheckpoint} from './checkpoints';
 
 const refSchema=z.union([
   z.object({e:z.string().min(1).max(255)}).strict(),
@@ -14,8 +15,7 @@ const refSchema=z.union([
 ]);
 type ImapRef=z.infer<typeof refSchema>;
 type Candidate={ref:ImapRef;message:FetchMessageObject;folder:Folder;folders:Folder[];validity:string;date:string};
-type MailboxCheckpoint={validity:string;modseq?:string;uidNext?:number;exists?:number;rows:Record<string,MailSummary>};
-type SyncCheckpoint={kind:'imap';boxes:Record<string,MailboxCheckpoint>;visible:Record<string,MailSummary>;pending?:string[];removed?:string[]};
+type MailboxCheckpoint=SyncCheckpoint['boxes'][string];
 const encode=(ref:ImapRef)=>'imap_'+Buffer.from(JSON.stringify(ref)).toString('base64url');
 function decode(id:string):ImapRef{
   try{if(!id.startsWith('imap_') || id.length>4000)throw Error();return refSchema.parse(JSON.parse(Buffer.from(id.slice(5),'base64url').toString()));}
@@ -60,7 +60,7 @@ class Session {
   }
   async status(){const boxes=await this.boxes();return {folders:this.allowed(boxes),warnings:[]};}
   async sync(checkpoint?:unknown):Promise<MailSyncPage>{
-    const previous=(checkpoint as SyncCheckpoint|undefined)?.kind==='imap'?checkpoint as SyncCheckpoint:undefined;
+    const previous=imapCheckpointSchema.safeParse(checkpoint).data;
     let next:SyncCheckpoint;
     if(previous?.pending?.length)next=previous;
     else {

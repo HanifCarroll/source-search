@@ -1,3 +1,4 @@
+import {getMailState} from '../src/platform/cache-state';
 import type { QmdRequest } from "../src/search/qmd/runner";
 import {test,expect} from "bun:test";
 import {mkdtemp,mkdir,rm,writeFile} from "node:fs/promises";
@@ -65,7 +66,7 @@ test("embedding coverage warnings follow the selected source",async()=>{
 });
 
 test("mail maintenance resumes failures and prunes only after a complete provider inventory",async()=>{
- const {syncMail}=await import("../src/maintenance/library-sync");const {getState,setState}=await import("../src/search/library/store");
+ const {syncMail}=await import("../src/maintenance/library-sync");const {getMailState:getState,setMailState:setState}=await import("../src/platform/cache-state");
  const root=await mkdtemp(join(tmpdir(),"ss-mail-sync-")),c={...defaultConfig(),libraryRoot:root,libraryEnabled:true};await mkdir(join(root,"mail-raw"),{mode:0o700});
  let pass=0,failSecond=false;const calls:string[][]=[];
  const execute=async(argv:string[])=>{
@@ -109,10 +110,10 @@ test('parser upgrades reformat cached mail locally even while provider scan is d
   await mkdir(join(root,'mail-raw'),{mode:0o700});const source='mail-personal' as const,accountSignature=hash(JSON.stringify(c.mailAccounts[source]));
   const raw={headers:{subject:'Fixture',from:'fixture@example.test'},message:{id:'fixture'},body:'<p>caf&eacute; &mdash; test</p>'};
   await privateJSON(join(root,'mail-raw',source+'-fixture.json'),{source,id:'fixture',accountSignature,raw});
-  const db=libraryDB(c,true);db.query('INSERT INTO mail VALUES(?,?,?,?,?)').run(source,'fixture',JSON.stringify({...rec('fixture','Old text'),ref:{source,id:'fixture'}}),'same-summary','fixture');setState(db,source,{state:'ready',accountSignature,nextScanAt:Date.now()+3600000});db.close();
+  const db=libraryDB(c,true);db.query('INSERT INTO mail VALUES(?,?,?,?,?)').run(source,'fixture',JSON.stringify({...rec('fixture','Old text'),ref:{source,id:'fixture'}}),'same-summary','fixture');db.query('INSERT OR REPLACE INTO states VALUES(?,?)').run(source,JSON.stringify({state:'ready',accountSignature,nextScanAt:Date.now()+3600000}));db.close();
   await syncMail(c,async()=>{throw Error('Provider must not be called for this migration');},[source]);
   const updated=libraryDB(c);
-  try{expect(getState(updated,source)).toMatchObject({state:'ready',projectionVersion:2});expect(JSON.stringify(updated.query('SELECT body FROM chunks').all())).toContain('café — test');}finally{updated.close();}
+  try{expect(getMailState(updated,source)).toMatchObject({state:'ready',projectionVersion:2});expect(JSON.stringify(updated.query('SELECT body FROM chunks').all())).toContain('café — test');}finally{updated.close();}
  }finally{await rm(root,{recursive:true,force:true});}
 });
 

@@ -62,7 +62,7 @@ test('JMAP bounds ID inventory work and rejects changed query pages before fetch
   expect(f.state.requests.some(r=>r.method==='Email/get' && r.args.fetchTextBodyValues)).toBe(false);
 }));
 test('mail maintenance commits checkpoints only after successful bodies and retries publication',()=>fixture(async(f,c)=>{
-  const {syncMail}=await import('../src/maintenance/library-sync'),{libraryDB,getState,setState}=await import('../src/search/library/store');
+  const {syncMail}=await import('../src/maintenance/library-sync'),{libraryDB}=await import('../src/search/library/store'),{getMailState:getState,setMailState:setState}=await import('../src/platform/cache-state');
   const {mkdir}=await import('node:fs/promises'),root=await mkdtemp(join(tmpdir(),'ss-jmap-deltas-'));
   try{
     await mkdir(join(root,'mail-raw'),{mode:0o700});c=configSchema.parse({...c,libraryRoot:root,maintenanceEnabled:true,libraryEnabled:true});
@@ -163,7 +163,7 @@ test('JMAP Basic authentication and bounded response parsing work independently 
 }));
 test('native JMAP library sync captures raw records, preserves references and rejects a different account scope',()=>fixture(async(f,c)=>{
   const {syncMail}=await import('../src/maintenance/library-sync');
-  const {libraryDB,getState}=await import('../src/search/library/store');
+  const {libraryDB}=await import('../src/search/library/store'),{getMailState:getState}=await import('../src/platform/cache-state');
   const {mkdir,readFile}=await import('node:fs/promises');
   const root=await mkdtemp(join(tmpdir(),'source-search-native-cache-'));
   try{

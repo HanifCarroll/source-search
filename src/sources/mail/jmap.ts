@@ -1,4 +1,5 @@
 import {z} from 'zod';
+import {jmapCheckpointSchema} from './checkpoints';
 import {fail,hash,stableJson} from '../../domain/identity';
 import {words} from '../../domain/query';
 import type {Query} from '../../domain/contracts';
@@ -94,9 +95,7 @@ class Session {
   async status(){const boxes=await this.boxes();return {folders:this.settings.folders?resolveFolders(boxes,this.settings.folders):boxes,warnings:[]};}
   async sync(checkpoint?:unknown):Promise<MailSyncPage>{
     const boxes=await this.boxes(),boxKey=hash(stableJson([...boxes].sort((a,b)=>a.id.localeCompare(b.id))));
-    type Inventory={ids:string[];position:number;queryState?:string};
-    type Pending={ids:string[];offset:number};
-    const saved=checkpoint as {kind?:string;state?:string;boxes?:string;position?:number;inventory?:Inventory;pending?:Pending}|undefined;
+    const saved=jmapCheckpointSchema.safeParse(checkpoint).data;
     // Older checkpoints interleaved query pages and body downloads. Start a
     // fresh ID inventory instead of carrying their stale positional cursor.
     let previous=saved?.kind==='jmap' && saved.boxes===boxKey && saved.position===undefined?saved:undefined;

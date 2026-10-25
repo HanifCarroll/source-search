@@ -81,7 +81,7 @@ test('named database sources keep native reads, pagination and library provenanc
 
 test('named mail cache rejects a provider change even when account strings are identical',async()=>{
  const {syncMail}=await import('../src/maintenance/library-sync');
- const {libraryDB,getState}=await import('../src/search/library/store');
+ const {libraryDB}=await import('../src/search/library/store'),{getMailState:getState}=await import('../src/platform/cache-state');
  const root=await mkdtemp(join(tmpdir(),'ss-mail-instance-'));
  try{
   const c=configSchema.parse({enabledSources:['work'],maintenanceEnabled:true,libraryRoot:root,sources:{work:{adapter:'gmail',account:'same',email:'same@example.test'}}});
@@ -89,7 +89,7 @@ test('named mail cache rejects a provider change even when account strings are i
   await syncMail(c,async argv=>argv.includes('search')?{messages:[{id:'one',subject:'Invented message'}]}:{headers:{subject:'Invented message'},message:{id:'one'},body:'Invented body'});
   const next=configSchema.parse({...c,sources:{work:{...c.sources.work,adapter:'fastmail'}}});
   let fetched=false;await syncMail(next,async()=>{fetched=true;throw Error('Must not call the new provider against the old cache');});
-  const db=libraryDB(next);expect(getState(db,'work').state).toBe('error');expect(getState(db,'work').error.message).toContain('provider changed');expect((db.query('SELECT count(*) n FROM mail').get() as any).n).toBe(1);db.close();expect(fetched).toBe(false);
+  const db=libraryDB(next);expect(getState(db,'work').state).toBe('error');expect(getState(db,'work').error?.message).toContain('provider changed');expect((db.query('SELECT count(*) n FROM mail').get() as any).n).toBe(1);db.close();expect(fetched).toBe(false);
  }finally{await rm(root,{recursive:true,force:true});}
 });
 

@@ -1,3 +1,4 @@
+import {getMailState as getState,setMailState as setState} from '../src/platform/cache-state';
 import {test,expect} from 'bun:test';
 import {mkdtemp,mkdir,writeFile,rm,stat,rename} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -13,7 +14,7 @@ import {rebuildArchive} from '../src/sources/archives/index';
 import {createZip} from './helpers/zip';
 import type {RecordData} from '../src/domain/contracts';
 import {syncMail} from '../src/maintenance/library-sync';
-import {libraryDB,getState,setState,publish} from '../src/search/library/store';
+import {libraryDB,publish} from '../src/search/library/store';
 
 async function temporary(fn:(root:string)=>Promise<void>){const root=await mkdtemp(join(tmpdir(),'ss-incremental-'));try{await fn(root);}finally{await rm(root,{recursive:true,force:true});}}
 test('ranked cache coalesces work, survives reopening, and invalidates changes and scopes',()=>temporary(async root=>{

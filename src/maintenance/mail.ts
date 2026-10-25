@@ -2,7 +2,8 @@ import type {Database} from 'bun:sqlite';
 import {readFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {privateDirectory,privateJSON} from '../platform/storage';
-import {cacheDB,getState,setState} from '../platform/cache-db';
+import {cacheDB} from '../platform/cache-db';
+import {getMailState as getState,setMailState as setState,type MailState} from '../platform/cache-state';
 import {configuredSourceIds,requireMaintenance,sourceEnabled,sourceScope,type Config} from '../platform/config';
 import {isMail,sourceKind} from '../domain/source-catalog';
 import {hash,now,errorData} from '../domain/identity';
@@ -41,7 +42,8 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
    if(backend){await syncNativeMail(c,db,source,backend);return;}
    if(sourceKind(source,c)==='gmail' && await syncGmailChanges(c,db,source,execute))return;
    state=getState(db,source);
-   state={...state,accountSignature,cycle:state.cycle||now(),state:state.lastCompleteScan?'refreshing':'backfilling',error:null,syncStrategy:'snapshot-reconciliation'};
+   const cycle=state.cycle||now();
+   state={...state,accountSignature,cycle,state:state.lastCompleteScan?'refreshing':'backfilling',error:null,syncStrategy:'snapshot-reconciliation'};
    const cacheItems=async(items:any[])=>{
     for(let offset=0;offset<items.length;offset+=4){
      const batch=await Promise.allSettled(items.slice(offset,offset+4).map(async item=>{
@@ -50,10 +52,10 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
        let raw:any;const record=await readMail(source,item.id,execute,c,value=>{raw=value;});
        // Write attachment evidence before committing its cached-record checkpoint.
        await privateJSON(join(c.libraryRoot,"mail-raw",source+"-"+(item.id.length>180?hash(item.id):item.id)+".json"),{source,id:item.id,ref:record.ref,accountSignature,raw});
-       db.query("INSERT OR REPLACE INTO mail VALUES(?,?,?,?,?)").run(source,item.id,JSON.stringify(record),item.summary,state.cycle);
+       db.query("INSERT OR REPLACE INTO mail VALUES(?,?,?,?,?)").run(source,item.id,JSON.stringify(record),item.summary,cycle);
        state.dirty=true;
        if(sourceKind(source,c)==='gmail' && !state.gmailAnchor)state.gmailAnchor=await gmailAnchor(c,source,item.id);
-      }else db.query("UPDATE mail SET seen=? WHERE source=? AND id=?").run(state.cycle,source,item.id);
+      }else db.query("UPDATE mail SET seen=? WHERE source=? AND id=?").run(cycle,source,item.id);
      }));
      const failed=batch.find(r=>r.status==="rejected");if(failed?.status==="rejected")throw failed.reason;
     }
@@ -63,7 +65,7 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
    const recent=summaries((await searchMail({source,query:"",limit:25,excludeSpamTrash:true},execute,{remaining:0,records:new Map()},c)).items);
    await cacheItems(recent);
    if(sourceKind(source,c)==='gmail' && !state.gmailAnchor && recent[0])state.gmailAnchor=await gmailAnchor(c,source,recent[0].id);
-   let pending:any[]=state.pending||[],next=state.cursor;
+   let pending:NonNullable<MailState['pending']>=state.pending||[],next=state.cursor;
    // A complete paginated listing is the deletion reconciliation boundary. Interrupted/failed passes never prune.
    for(let page=0;page<8;page++){
     if(!pending.length){
@@ -78,8 +80,8 @@ export async function syncMail(c:Config,execute:Run=run,sources:readonly MailSou
      state={...state,pending,cursor:next};setState(db,source,state);
     }
     if(state.pageEnd){
-     const removed=db.query("SELECT id FROM mail WHERE source=? AND seen!=?").all(source,state.cycle) as any[];
-     db.query("DELETE FROM mail WHERE source=? AND seen!=?").run(source,state.cycle);
+     const removed=db.query("SELECT id FROM mail WHERE source=? AND seen!=?").all(source,cycle) as any[];
+     db.query("DELETE FROM mail WHERE source=? AND seen!=?").run(source,cycle);
      for(const row of removed)await rm(join(c.libraryRoot,"mail-raw",source+"-"+(row.id.length>180?hash(row.id):row.id)+".json"),{force:true});
      state.dirty ||= removed.length>0;
      state={...state,cycle:null,cursor:undefined,pending:[],pageEnd:false,lastCompleteScan:now(),lastSuccessfulSync:now(),gmailHistory:state.gmailAnchor,gmailPage:undefined,gmailAnchor:undefined,nextScanAt:Date.now()+(state.gmailAnchor?60000:15*60*1000),state:"ready"};break;

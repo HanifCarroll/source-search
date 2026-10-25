@@ -1,4 +1,5 @@
 import type {Database} from 'bun:sqlite';
+import {z} from 'zod';
 import {readFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import type {RecordData} from '../domain/contracts';
@@ -7,7 +8,7 @@ import {sourceScope,mailAccount} from '../platform/config';
 import {errorData,hash,now} from '../domain/identity';
 import {formatMail,readMail,type Run} from '../sources/mail/index';
 import type {MailConnector} from '../sources/mail/types';
-import {getState,setState} from '../platform/cache-db';
+import {getMailState as getState,setMailState as setState} from '../platform/cache-state';
 import {privateJSON} from '../platform/storage';
 
 export const rawMailPath=(c:Config,source:string,id:string)=>join(c.libraryRoot,'mail-raw',source+'-'+(id.length>180?hash(id):id)+'.json');
@@ -54,10 +55,11 @@ export async function syncGmailChanges(c:Config,db:Database,source:string,execut
   try{
     let page=state.gmailPage;
     for(let i=0;i<8;i++){
-      const raw=await execute([c.gmailBinary,'gmail','history','--account',mailAccount(c,source)!.account,'--gmail-no-send','--json','--no-input','--since',state.gmailHistory,'--max','100',...(page?['--page',page]:[])]) as any;
-      const ids=raw.messages===null?[]:raw.messages;
-      if(!/^\d+$/.test(raw.historyId) || !Array.isArray(ids) || ids.some((id:unknown)=>typeof id!=='string'||!/^[A-Za-z0-9_-]{1,200}$/.test(id)))return false;
-      for(const id of new Set<string>(ids)){
+      const result=await execute([c.gmailBinary,'gmail','history','--account',mailAccount(c,source)!.account,'--gmail-no-send','--json','--no-input','--since',state.gmailHistory!,'--max','100',...(page?['--page',page]:[])]);
+      const parsed=gmailHistorySchema.safeParse(result);
+      if(!parsed.success)return false;
+      const raw=parsed.data;
+      for(const id of new Set(raw.messages ?? [])){
         let response:any;const record=await readMail(source,id,execute,c,r=>{response=r;});
         const excluded=record.metadata?.labels as string[]|undefined;
         if(excluded?.some(l=>l==='SPAM'||l==='TRASH'))continue;
@@ -77,6 +79,11 @@ export async function syncGmailChanges(c:Config,db:Database,source:string,execut
     state={...state,gmailHistory:undefined,gmailPage:undefined,nextScanAt:0};setState(db,source,state);return false;
   }
 }
+const gmailHistorySchema=z.object({
+  historyId:z.string().regex(/^\d+$/),
+  messages:z.array(z.string().regex(/^[A-Za-z0-9_-]{1,200}$/)).nullable(),
+  nextPageToken:z.string().optional(),
+});
 export async function gmailAnchor(c:Config,source:string,id:string){
   const saved=JSON.parse(await readFile(rawMailPath(c,source,id),'utf8'));
   const value=saved.raw?.message?.historyId;
