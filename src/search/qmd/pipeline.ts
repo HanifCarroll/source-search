@@ -30,12 +30,15 @@ export async function hybridSearch(store:Store,request:Request,primitives:Primit
   for(const variant of unique)if(variant.type==='lex')collect(s.searchFTS(variant.query,20,collections),1);
   if(s.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='vectors_vec'").get()){
     const queries=[{query,weight:2},...unique.filter(v=>v.type==='vec'||v.type==='hyde').map(v=>({query:v.query,weight:1}))];
+    // A plain question often has no keyword hits. Without expansion, retrieve
+    // the full candidate budget instead of silently halving semantic recall.
+    const vectorLimit=queries.length===1?40:20;
     const model=s.llm.embedModelName;
     const embeddings=await s.llm.embedBatch(queries.map(q=>primitives.formatQueryForEmbedding(q.query,model)));
     for(let i=0;i<queries.length;i++){
       const embedding=embeddings[i]?.embedding;
       if(!embedding)throw Error('Embedding model returned an incomplete query batch');
-      collect(await s.searchVec(queries[i]!.query,model,20,collections,undefined,embedding),queries[i]!.weight,true);
+      collect(await s.searchVec(queries[i]!.query,model,vectorLimit,collections,undefined,embedding),queries[i]!.weight,true);
     }
   }
   const candidates=primitives.reciprocalRankFusion(lists,weights).slice(0,40);

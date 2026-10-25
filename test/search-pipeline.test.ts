@@ -4,18 +4,18 @@ import {querySchema} from '../src/domain/contracts';
 import {validateOptions} from '../src/domain/query';
 
 function fixture(){
-  let expanded=0;const queries:string[]=[],ranked:string[][]=[];
+  let expanded=0;const queries:string[]=[],ranked:string[][]=[],vectorLimits:number[]=[];
   const body='cobalt introduction'.padEnd(500,' ')+ 'A telescope uses mirrors to collect light.';
   const h={filepath:'qmd://selected/one.md',title:'Invented optics',body,score:.8};
   const internal={db:{prepare:()=>({get:()=>true})},llm:{embedModelName:'fixture',embedBatch:async(texts:string[])=>texts.map(()=>({embedding:[1,0]}))},
     searchFTS:(query:string,_limit:number,collections:string[])=>{queries.push('lex:'+query);expect(collections).toEqual(['selected']);return [h];},
-    searchVec:async(query:string,_model:string,_limit:number,collections:string[])=>{queries.push('vec:'+query);expect(collections).toEqual(['selected']);return [{...h,chunkPos:500}];},
+    searchVec:async(query:string,_model:string,limit:number,collections:string[])=>{queries.push('vec:'+query);vectorLimits.push(limit);expect(collections).toEqual(['selected']);return [{...h,chunkPos:500}];},
     expandQuery:async()=>{expanded++;return [{type:'lex',query:'optics'}];},
     rerank:async(_query:string,docs:{file:string;text:string}[])=>{ranked.push(docs.map(d=>d.text));return docs.map(doc=>({file:doc.file,score:doc.text.includes('mirrors')?.9:.2}));},
   };
   const weights:number[][]=[];
   const primitives={formatQueryForEmbedding:(q:string)=>q,chunkDocument:(text:string)=>[{pos:0,text:text.slice(0,500)},...(text.length>500?[{pos:500,text:text.slice(500)}]:[])],reciprocalRankFusion:(lists:any[][],w:number[])=>{weights.push(w);return lists[0]!;}};
-  return {store:{internal},primitives,queries,ranked,weights,body,get expanded(){return expanded;}};
+  return {store:{internal},primitives,queries,ranked,weights,body,vectorLimits,get expanded(){return expanded;}};
 }
 test('supplied variants keep original retrieval weights and semantic passages through ranking',async()=>{
   const f=fixture(),plan={lexical:['optics','cobalt'],semantic:['mirrors collect light']};
@@ -23,11 +23,12 @@ test('supplied variants keep original retrieval weights and semantic passages th
   expect(f.expanded).toBe(0);
   expect(f.queries).toEqual(['lex:cobalt','lex:optics','vec:cobalt','vec:mirrors collect light']);
   expect(f.weights).toEqual([[2,1,2,1]]);
+  expect(f.vectorLimits).toEqual([20,20]);
   expect(f.ranked[0]).toHaveLength(2);expect(f.ranked[0]!.some(p=>p.includes('mirrors'))).toBe(true);
   expect(hits[0]!.bestChunkPos).toBe(500);expect(hits[0]!.bestChunk).toContain('mirrors');
 });
 test('plain searches and deep searches share retrieval and differ only in requested inference',async()=>{
-  const normal=fixture();await hybridSearch(normal.store,{query:'cobalt',collections:['selected']},normal.primitives);expect(normal.expanded).toBe(0);
+  const normal=fixture();await hybridSearch(normal.store,{query:'cobalt',collections:['selected']},normal.primitives);expect(normal.expanded).toBe(0);expect(normal.vectorLimits).toEqual([40]);
   const deep=fixture();await hybridSearch(deep.store,{query:'cobalt',collections:['selected'],depth:'deep'},deep.primitives);expect(deep.expanded).toBe(1);expect(deep.queries).toContain('lex:optics');
   const supplied=fixture();await hybridSearch(supplied.store,{query:'cobalt',collections:['selected'],depth:'deep',plan:{lexical:['optics'],semantic:[]}},supplied.primitives);expect(supplied.expanded).toBe(0);
 });
