@@ -7,9 +7,10 @@ import {packageRoot} from '../../platform/package-root';
 import {isProjected} from '../../domain/source-policy';
 import {libraryDB,getState} from '../library/store';
 import {fail,hash} from '../../domain/identity';
-import {Database} from 'bun:sqlite';
+import {qmdIndex} from '../../vendor/qmd';
+import {trackIndexRevision} from '../../vendor/qmd/revisions';
 import worker from './sdk.mjs' with {type:'text'};
-import {cachedSearch,installSearchRevision} from './cache';
+import {cachedSearch} from './cache';
 export type QmdRequest={index:'vault'|'library';mode:'lexical'|'semantic'|'hybrid';query:string;collection?:string};
 export type QmdRun=(request:QmdRequest)=>Promise<unknown>;
 export function searchModels(c:Config) {
@@ -30,14 +31,8 @@ export async function runSdk(c:Config,request:{index:'vault'|'library';action?:'
  if(!request.action && request.mode!=='lexical'){
   const names=request.collection?[request.collection]:Object.keys(collections);
   if(!names.length)fail('SOURCE_NOT_CONFIGURED','No enabled search collections');
-  const db=new Database(database,{create:false,strict:true});
-  try{
-   db.exec('PRAGMA query_only=ON');
-   const columns=(db.query('PRAGMA table_info(content_vectors)').all() as {name:string}[]).map(r=>r.name);
-   if(!columns.includes('embed_fingerprint'))fail('SOURCE_NOT_READY','This index needs migration to the bundled SDK; run index --embed');
-   const incompatible=db.query(`SELECT 1 FROM content_vectors v JOIN documents d ON d.hash=v.hash WHERE d.active=1 AND d.collection IN (${names.map(()=>'?').join(',')}) AND (v.model!=? OR v.embed_fingerprint='') LIMIT 1`).get(...names,models!.embed);
-   if(incompatible)fail('SOURCE_NOT_READY','Index vectors use a different model or an older format; complete index --embed before semantic search');
-  }finally{db.close();}
+  const index=qmdIndex(database);
+  try{index.assertEmbeddingModel(names,models!.embed);}finally{index.close();}
  }
  if(request.action==='update')for(const [name,collection] of Object.entries(collections)){
   const info=await lstat(collection.path).catch(error=>{if(request.index==='library' && error.code==='ENOENT')return undefined;throw error;});
@@ -61,7 +56,7 @@ export async function runSdk(c:Config,request:{index:'vault'|'library';action?:'
  };
  if(request.action){
   const result=await perform();
-  if(request.action!=='status'){const db=new Database(database,{create:false,strict:true});try{installSearchRevision(db);}finally{db.close();}}
+  if(request.action!=='status')trackIndexRevision(database);
   return result;
  }
  const modelStamps=await Promise.all(Object.values(models||{}).map(async p=>{const s=await lstat(p).catch(e=>{if(e.code!=='ENOENT')throw e;return undefined;});return [p,s?.size,s?.mtimeMs,s?.ctimeMs];}));

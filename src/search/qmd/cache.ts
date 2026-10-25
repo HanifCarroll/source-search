@@ -1,27 +1,16 @@
 import {Database} from 'bun:sqlite';
 import {lstat,chmod} from 'node:fs/promises';
+import {qmdIndex} from '../../vendor/qmd';
 import {hash,stableJson} from '../../domain/identity';
 
 // Ranked candidates are shared by repeated searches and pagination. Original
 // record/scope checks still run on every page in the vault and library readers.
 const ttl=30*60*1000, maxEntries=128, maxBytes=512*1024;
 const pending=new Map<string,Promise<unknown>>();
-export function installSearchRevision(db:{exec(sql:string):unknown}) {
-  db.exec(`CREATE TABLE IF NOT EXISTS source_search_revision(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
-    INSERT OR IGNORE INTO source_search_revision VALUES(1,0);`);
-  for(const table of ['documents','content_vectors'])for(const event of ['INSERT','UPDATE','DELETE']) {
-    // A touched timestamp is not a content change. Vector writes always count.
-    const when=event==='UPDATE' && table==='documents' ? 'WHEN old.hash IS NOT new.hash OR old.active IS NOT new.active OR old.title IS NOT new.title OR old.collection IS NOT new.collection OR old.path IS NOT new.path' : '';
-    db.exec(`CREATE TRIGGER IF NOT EXISTS source_search_${table}_${event.toLowerCase()} AFTER ${event} ON ${table} ${when} BEGIN UPDATE source_search_revision SET revision=revision+1 WHERE id=1; END;`);
-  }
-}
 export async function indexRevision(database:string):Promise<string|undefined> {
-  const stat=await lstat(database),db=new Database(database,{create:false,strict:true});
-  try {
-    db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=10000');
-    if(!db.query("SELECT 1 FROM sqlite_master WHERE name='source_search_revision'").get())return undefined;
-    return `${stat.dev}:${stat.ino}:`+(db.query('SELECT revision FROM source_search_revision WHERE id=1').get() as {revision:number}).revision;
-  } finally {db.close();}
+  const stat=await lstat(database),index=qmdIndex(database);
+  try {const revision=index.revision();return revision===undefined?undefined:`${stat.dev}:${stat.ino}:${revision}`;}
+  finally {index.close();}
 }
 export async function cachedSearch(database:string,identity:unknown,search:()=>Promise<unknown>) {
   const revision=await indexRevision(database);

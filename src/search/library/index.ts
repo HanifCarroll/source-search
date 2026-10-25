@@ -1,7 +1,7 @@
 import {getMailState,getProjectionState} from '../../platform/cache-state';
 import {sourceKind,isMail,connectedKinds} from '../../domain/source-catalog';
 import { isProjected } from "../../domain/source-policy";
-import { Database } from "bun:sqlite";
+import {qmdIndex,qmdResults} from "../../vendor/qmd";
 import { readFile, lstat, access } from "node:fs/promises";
 import { join, relative, sep, isAbsolute, extname } from "node:path";
 import {sourceEnabled, requireSource, sourceScope, sourceConfig, configuredSourceIds, type Config} from "../../platform/config";
@@ -37,9 +37,9 @@ export async function libraryStatus(c:Config){
     return [{source,...saved,...(failure?.state==='error'?{state:'error',error:failure.error,checkedAt:failure.checkedAt}:{})}];
   }).map(({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,lastSuccessfulSync,syncStrategy,coverage,error,failures,skipped,pending,discovered})=>projectionHealth({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,lastSuccessfulSync,syncStrategy,coverage,error,failedFiles:failures?.length||0,skippedFiles:skipped?.length||0,pending:Array.isArray(pending)?pending.length:pending,discovered},isMail(source,c)));
   let embeddings:any={ready:0,pending:0};const bySource:Record<string,any>={};
-  try{await regular(c.libraryDatabase);const q=new Database(c.libraryDatabase,{create:false,strict:true});q.exec("PRAGMA query_only=ON");try{
-    for(const row of q.query("SELECT collection,count(*) indexedDocuments,sum(EXISTS(SELECT 1 FROM content_vectors v WHERE v.hash=d.hash)) ready,sum(NOT EXISTS(SELECT 1 FROM content_vectors v WHERE v.hash=d.hash)) pending FROM documents d WHERE active=1 GROUP BY collection").all() as any[])bySource[row.collection.replace(/^ss-/,"")]=row;
-   }finally{q.close();}}catch(e){embeddings={ready:0,pending:null,error:(e as Error).message};}
+  try{await regular(c.libraryDatabase);const index=qmdIndex(c.libraryDatabase);try{
+    for(const row of index.collections(sources.map(source=>'ss-'+source.source)))bySource[row.collection.slice(3)]=row;
+   }finally{index.close();}}catch(e){embeddings={ready:0,pending:null,error:(e as Error).message};}
   if(!embeddings.error)embeddings=sources.reduce((a,s)=>{const e=bySource[s.source]||{};return {indexedDocuments:a.indexedDocuments+(e.indexedDocuments||0),ready:a.ready+(e.ready||0),pending:a.pending+(e.pending||0)};},{indexedDocuments:0,ready:0,pending:0});
   const available=(embeddings?.indexedDocuments||0)>0;
   return {available,state:!available?"building":sources.some(s=>s.state!=="ready") || embeddings.error || embeddings.pending?"partial":"ready",modelsPresent,sources:sources.map(s=>({...s,embeddings:bySource[s.source]||{indexedDocuments:0,ready:0,pending:null}})),embeddings,coverage:"Derived text with original references. Ranked discovery; inspect per-source backfill/freshness. Mail excludes spam/trash. Exports reflect selected snapshots."};
@@ -52,23 +52,21 @@ export async function searchLibrary(c:Config,q:Query,execute:QmdRun=request=>run
  const mode=q.mode||"hybrid",status=await libraryStatus(c);
  if(!status.available)fail("SOURCE_NOT_READY","Initial library backfill has not produced searchable text yet");
  if(mode!=="lexical" && (!status.modelsPresent || !(q.source==="library"?status.embeddings?.ready:status.sources?.find(s=>s.source===q.source)?.embeddings?.ready)))fail("SOURCE_NOT_READY","Initial library embeddings are still building; lexical discovery is available after indexing");
- const raw=await execute({index:"library",mode,query:q.query,...(q.source!=="library"?{collection:"ss-"+q.source}:{})});
- if(!Array.isArray(raw))fail("INVALID_PROVIDER_RESPONSE","QMD returned invalid library results");
- await regular(c.libraryDatabase);const db=libraryDB(c),index=new Database(c.libraryDatabase,{create:false,strict:true});index.exec("PRAGMA query_only=ON");
+ const raw=qmdResults(await execute({index:"library",mode,query:q.query,...(q.source!=="library"?{collection:"ss-"+q.source}:{})}));
+ await regular(c.libraryDatabase);const db=libraryDB(c),index=qmdIndex(c.libraryDatabase);
  const records:RecordData[]=[],warnings=["Derived search text; read returned references for provenance and verify originals before citing. Ranked candidates are not exhaustive."];
  const scopes=status.sources?.filter(s=>q.source==="library"||s.source===q.source)||[];
  if(scopes.some(s=>s.state!=="ready"))warnings.push("Some selected sources have incomplete indexing, stale synchronization or failures; list_sources reports coverage and freshness.");
  const pendingEmbeddings=scopes.reduce((total,s)=>total+(s.embeddings.pending||0),0);
  if(pendingEmbeddings)warnings.push(`${pendingEmbeddings} selected library chunks await embeddings; semantic coverage is partial while the background job continues.`);
  try{for(const r of raw.slice(0,100)){
-  if(typeof r.file!=="string"||typeof r.score!=="number")fail("INVALID_PROVIDER_RESPONSE","Invalid QMD hit");
   const m=/^qmd:\/\/ss-([a-z][a-z0-9-]*)\/([a-f0-9]{64})\.md$/.exec(r.file);
   if(!m || !sourceEnabled(c,m[1]!) || !isProjected(m[1]!,c) || q.source!=="library" && m[1]!==q.source)continue;
   const row=db.query("SELECT * FROM chunks WHERE id=? AND source=?").get(m[2]!,m[1]!) as any;
-  const indexed=index.query("SELECT hash FROM documents WHERE active=1 AND collection=? AND path=?").get("ss-"+m[1],m[2]+".md") as any;
+  const indexedHash=index.documentHash("ss-"+m[1],m[2]+".md");
   if(row && JSON.parse(row.guard).scope!==sourceScope(c,row.source))continue;
   if(row && JSON.parse(row.guard).mail && JSON.parse(row.guard).accountSignature!==sourceScope(c,row.source))continue;
-  if(!row || row.hash!==indexed?.hash){warnings.push("A changed/deleted projection is waiting for QMD refresh; its stale hit was withheld.");continue;}
+  if(!row || row.hash!==indexedHash){warnings.push("A changed/deleted projection is waiting for QMD refresh; its stale hit was withheld.");continue;}
   if(row.source==="documents"){
     try { for(const original of JSON.parse(row.refs) as Ref[])await readDocument(c,original); }
     catch { warnings.push("A document whose original is disabled, removed or changed was withheld.");continue; }

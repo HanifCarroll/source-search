@@ -1,4 +1,5 @@
 import {Database} from 'bun:sqlite';
+import {qmdIndex} from '../../vendor/qmd';
 import {lstat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {hash,fail} from '../../domain/identity';
@@ -41,11 +42,11 @@ export const vault:Reader=async(c,source)=>{
  await regular(scoped.qmdDatabase);
  // Same selected, active document inventory used by the QMD reader. This
  // observes committed index revisions without running ranking or embeddings.
- const db=new Database(scoped.qmdDatabase,{create:false,strict:true});db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=10000');
- try{return db.transaction(()=>({
-  entries:(db.query(`SELECT collection,path,hash FROM documents WHERE active=1 AND collection IN (${collections.map(()=>'?').join(',')})`).all(...collections) as {collection:string;path:string;hash:string}[]).map(r=>({ref:{source,id:`qmd://${r.collection}/${r.path}`,version:r.hash},signature:r.hash})),
+ const index=qmdIndex(scoped.qmdDatabase);
+ try{return {
+  entries:index.inventory(collections).map(r=>({ref:{source,id:`qmd://${r.collection}/${r.path}`,version:r.hash},signature:r.hash})),
   state:state('indexed-document-fingerprints','Active documents in selected QMD collections; index refresh controls freshness and original reads verify file content'),
- }))();}finally{db.close();}
+ };}finally{index.close();}
 };
 export const agentHistory:Reader=async(c,source)=>{
  const scoped=sourceConfig(c,source),health=await createCassProvider({binaryPath:scoped.cassBinary,dataDir:scoped.cassData}).health();

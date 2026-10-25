@@ -9,7 +9,8 @@ async function modules(dir=root):Promise<string[]> {
 }
 test('module dependencies keep transport and maintenance out of retrieval and domain code',async()=>{
  const graph=new Map<string,string[]>();
- for(const path of await modules()){
+ const paths=await modules(),known=new Set(paths);
+ for(const path of paths){
   const name=relative(root,path);
   const code=ts.transpileModule(await readFile(path,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ESNext,module:ts.ModuleKind.ESNext}}).outputText;
   if(name.startsWith('domain/')) {
@@ -17,7 +18,10 @@ test('module dependencies keep transport and maintenance out of retrieval and do
    for(const dep of external)expect(dep,`${name} must remain free of source I/O`).not.toMatch(/^(?:node:)?(?:fs|child_process|net|http|https)(?:\/|$)|^bun:sqlite$/);
    expect(code,`${name} must remain free of source I/O`).not.toMatch(/\b(?:Bun\.(?:spawn|file|write)|fetch)\s*\(/);
   }
-  const dependencies=[...code.matchAll(/(?:from\s*|import\s*\(\s*|import\s+)["'](\.[^"']+)["']/g)].map(m=>relative(root,resolve(dirname(path),m[1]!.replace(/\.ts$/,'')))+'.ts');
+  const dependencies=[...code.matchAll(/(?:from\s*|import\s*\(\s*|import\s+)["'](\.[^"']+)["']/g)].map(m=>{
+   const base=resolve(dirname(path),m[1]!.replace(/\.ts$/,''));
+   return relative(root,known.has(base+'.ts')?base+'.ts':resolve(base,'index.ts'));
+  });
   graph.set(name,dependencies);
   const forbidden=name.startsWith('domain/') || name.startsWith('platform/') ? /^(application|interfaces|maintenance|search|sources)\// : name.startsWith('sources/') ? /^(application|interfaces|maintenance|search)\// : name.startsWith('search/') ? /^(application|interfaces|maintenance)\// : null;
   for(const dep of dependencies)if(forbidden)expect(dep,`${name} must not import ${dep}`).not.toMatch(forbidden);

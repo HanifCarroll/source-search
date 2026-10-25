@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import {qmdIndex,qmdResults,type QmdIndex,type IndexedDocument as Indexed} from "../../vendor/qmd";
 import { access } from "node:fs/promises";
 import type { Config } from "../../platform/config";
 import { fail, now, hash, numberPosition, queryKey, cursor } from "../../domain/identity";
@@ -7,24 +7,15 @@ import { hit } from "../../domain/results";
 import { type Query, type Ref, type Page, type RecordData } from "../../domain/contracts";
 
 const candidateLimit = 100;
-type Indexed = { collection: string; path: string; title: string; hash: string; doc: string };
 import { runQmd, modelsPresent as checkModels, type QmdRun } from "./runner";
-function open(c: Config) {
-  // The QMD cache uses WAL. macOS SQLite needs to create its auxiliary WAL/SHM
-  // files when QMD removed them on close; a read-only file handle cannot do that.
-  // Open only an existing cache and prohibit SQL writes. Never open originals here.
-  const db = new Database(c.qmdDatabase, { create: false, strict: true });
-  db.exec("PRAGMA query_only=ON");
-  return db;
-}
+const open=(c:Config)=>qmdIndex(c.qmdDatabase);
 export async function qmdStatus(c: Config) {
   const db = open(c);
   try {
     const collections = Object.keys(c.qmdRoots);
     if (!collections.length) fail("SOURCE_NOT_CONFIGURED", "Configure QMD collections before searching");
-    const marks = collections.map(() => "?").join(",");
-    const state = db.query(`SELECT count(*) records, sum(CASE WHEN NOT EXISTS (SELECT 1 FROM content_vectors v WHERE v.hash=d.hash) THEN 1 ELSE 0 END) pending FROM documents d WHERE active=1 AND collection IN (${marks})`).get(...collections) as { records: number; pending: number | null };
-    const vectorIndexPresent = !!db.query("SELECT 1 FROM sqlite_master WHERE name='vectors_vec'").get();
+    const state=db.collections(collections).reduce((sum,row)=>({records:sum.records+row.indexedDocuments,pending:sum.pending+row.pending}),{records:0,pending:0});
+    const vectorIndexPresent=db.hasVectorIndex();
     const modelsPresent = await checkModels(c);
     return { available: state.records > 0, records: state.records, semanticReady: state.records > 0 && !state.pending && modelsPresent && vectorIndexPresent, pendingEmbeddings: state.pending || 0, vectorIndexPresent, modelsPresent, collections, coverage: "Configured Markdown collections; ranked candidate discovery, not exhaustive enumeration", warnings: state.pending ? [`${state.pending} documents still need embeddings; run source-search index --embed`] : [], configuredPath: c.qmdDatabase };
   } finally { db.close(); }
@@ -48,11 +39,10 @@ async function originalPaths(c: Config) {
   }
   return {get(id:string){const candidates=legacy.get(id);if(candidates && candidates.length>1)fail('AMBIGUOUS_REFERENCE',`Two originals normalize to ${id}; use a current literal path reference`);return paths.get(id)||candidates?.[0];},has(id:string){return !!this.get(id);}};
 }
-function indexed(c: Config, db: Database, id: string, originalPath?:string): Indexed {
+function indexed(c: Config, db: QmdIndex, id: string, originalPath?:string): Indexed {
   const match = /^qmd:\/\/([a-zA-Z0-9_-]+)\/(.+)$/.exec(id);
   if (!match || !c.qmdRoots[match[1]!]) fail("INVALID_REFERENCE", "Unconfigured QMD collection");
-  let row = db.query("SELECT d.collection,d.path,d.title,d.hash,c.doc FROM documents d JOIN content c ON c.hash=d.hash WHERE d.active=1 AND d.collection=? AND d.path=?").get(match[1]!,match[2]!) as Indexed | null;
-  if(!row && originalPath)row=db.query("SELECT d.collection,d.path,d.title,d.hash,c.doc FROM documents d JOIN content c ON c.hash=d.hash WHERE d.active=1 AND d.collection=? AND d.path=?").get(match[1]!,originalPath) as Indexed|null;
+  const row=db.document(match[1]!,match[2]!) || (originalPath?db.document(match[1]!,originalPath):undefined);
   if (!row) fail("STALE_RECORD", "QMD record no longer exists in the active index");
   return row;
 }
@@ -61,8 +51,7 @@ export async function searchQmd(c: Config, input: Query, execute: QmdRun = reque
   if (!q.query.trim()) fail("INVALID_QUERY", "QMD requires a nonempty discovery query");
   const state = await qmdStatus(c);
   if (!state.available || q.mode !== "lexical" && !state.semanticReady) fail("SOURCE_NOT_READY", "QMD embeddings/models are not ready; complete the explicit setup or request lexical mode");
-  const raw = await execute({index:"vault",mode:q.mode,query:q.query});
-  if (!Array.isArray(raw) || raw.some(r => typeof r.file !== "string" || typeof r.score !== "number")) fail("INVALID_PROVIDER_RESPONSE", "Invalid QMD search results");
+  const raw = qmdResults(await execute({index:"vault",mode:q.mode,query:q.query}));
   const paths = await originalPaths(c), db = open(c), records: RecordData[] = [], seen = new Set<string>();
   const warnings = ["Bounded ranked discovery: at most 100 candidates (QMD hybrid reranks up to 40). End of these pages does not mean the collection was exhaustively searched."];
   try {
