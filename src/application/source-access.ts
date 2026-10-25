@@ -2,12 +2,12 @@ import {connectedStatus,searchConnected,readConnected} from '../sources/connecte
 import {browserStatus,searchBrowser,readBrowser} from '../sources/browser';
 import {thingsRecords,searchThingsTasks} from '../sources/tasks/things';
 import {taskStatus,searchTasks,readTask} from '../sources/tasks';
-import {bindFocus} from '../domain/content';
+import {legacySource,type SourceAdapter as Adapter,type ReadResult} from './legacy-source';
 import {filePimStatus,searchFilePim,readFilePim} from '../sources/local/pim-files';
 import {sourceKind,isMail,connectedKinds} from '../domain/source-catalog';
 import { searchMessages, readMessage, messagesStatus } from "../sources/messages/index";
 import type { Query, Ref, RecordData, Page } from '../domain/contracts';
-import { assertVersion, errorData, fail, cursor, position, hash } from '../domain/identity';
+import { assertVersion, errorData, fail, hash } from '../domain/identity';
 import { contextMode, usesLibrary } from '../domain/source-policy';
 import { validateOptions } from '../domain/query';
 import { requireSource, configuredSourceIds, mailAccount, markdownSettings, sourceConfig, sourceScope, type Config } from '../platform/config';
@@ -24,18 +24,12 @@ import { searchArchive, indexStatus } from '../sources/archives/index';
 import { archiveSignature, checkExportSelection, readExport, exportPaths, exportProjectionVersion, chatGptContext, linkedInContext, twitterArchiveContext, type ArchiveSource } from '../sources/archives/originals';
 
 type Source = Query['source'];
-type ReadResult = {record: RecordData; context?: unknown[]; contextWarnings?: string[]};
-type Adapter = {
-  status(): Promise<Record<string, unknown>>;
-  search(query: Query, previews: PreviewBudget): Promise<Page>;
-  read(ref: Ref, context: boolean): Promise<ReadResult>;
-};
 const recordOnly = (read: (ref: Ref, context: boolean) => Promise<RecordData>): Adapter['read'] =>
   async (ref, context) => ({record: await read(ref, context)});
 
 // One registration binds status, native search and original reads for each source.
 // This module owns routing and reference validation, never response formatting.
-export function createSourceAccess(config: Config, execute: Run = run, bound = false) {
+export function createSourceAccess(config: Config, execute: Run = run) {
   function mail(source: MailSource): Adapter {
     return {
       async status() {
@@ -54,22 +48,22 @@ export function createSourceAccess(config: Config, execute: Run = run, bound = f
     };
   }
   const archiveContext = {'chatgpt-archive':chatGptContext, 'linkedin-archive':linkedInContext, 'twitter-archive':twitterArchiveContext};
-  function archive(source: ArchiveSource): Adapter {
+  function archive(source: ArchiveSource, settings:Config=config): Adapter {
     return {
       async status() {
-        const selected=exportPaths(config,source);
+        const selected=exportPaths(settings,source);
         if (!selected.length) return {available:false,error:{code:'SOURCE_NOT_CONFIGURED',message:'Fresh export not yet downloaded and selected'}};
-        await checkExportSelection(config,source);
-        const state=await indexStatus(config), index=state[source] ? JSON.parse(state[source]) : null;
-        if (index) index.stale=(exportProjectionVersion(source)>1 && index.projectionVersion!==exportProjectionVersion(source)) || !!index.signature && index.signature!==await archiveSignature(config,source);
+        await checkExportSelection(settings,source);
+        const state=await indexStatus(settings), index=state[source] ? JSON.parse(state[source]) : null;
+        if (index) index.stale=(exportProjectionVersion(source)>1 && index.projectionVersion!==exportProjectionVersion(source)) || !!index.signature && index.signature!==await archiveSignature(settings,source);
         return {available:!!index,index,selectedExports:selected,coverage:'Selected original export snapshot; edits appear after explicit rebuild',filters:['from','to',...(source in archiveContext ? ['conversation'] : [])],querySyntax:'literal full-text terms, all must match',pagination:true};
       },
-      search: q => searchArchive(config,q),
+      search: q => searchArchive(settings,q),
       async read(ref, context) {
-        const record=await readExport(config,ref);
+        const record=await readExport(settings,ref);
         const neighbors=archiveContext[source as keyof typeof archiveContext];
         if (!context || !neighbors) return {record};
-        const result=await neighbors(config,record);
+        const result=await neighbors(settings,record);
         return {record,context:result.records,contextWarnings:result.warnings};
       },
     };
@@ -80,17 +74,18 @@ export function createSourceAccess(config: Config, execute: Run = run, bound = f
   function notes(source: string): Adapter {
     return {status:async()=>({available:true,...await notesStatus(config,source),filters:['from','to'],querySyntax:'literal words, all must match',pagination:true}),search:q=>searchNotes(config,q),read:recordOnly(ref=>readNote(config,ref))};
   }
-  function pim(source: 'calendar' | 'contacts'): Adapter {
-    return {status:async()=>({available:true,...await pimStatus(config,source),filters:source==='calendar'?['from and to required; bounded window continuation']:[],querySyntax:'literal words, all must match',pagination:true}),search:q=>searchPim(config,q),read:recordOnly(ref=>readPim(config,ref))};
+  function pim(source: 'calendar' | 'contacts', settings:Config=config): Adapter {
+    return {status:async()=>({available:true,...await pimStatus(settings,source),filters:source==='calendar'?['from and to required; bounded window continuation']:[],querySyntax:'literal words, all must match',pagination:true}),search:q=>searchPim(settings,q),read:recordOnly(ref=>readPim(settings,ref))};
   }
-  function chrome(source: 'chrome-history' | 'chrome-bookmarks' | 'chrome-downloads'): Adapter {
-    return {status:async()=>({available:true,...await chromeStatus(config,source),filters:['from','to'],querySyntax:'literal words, all must match',pagination:true}),search:q=>searchChrome(config,q),read:recordOnly(ref=>readChrome(config,ref))};
+  function chrome(source: 'chrome-history' | 'chrome-bookmarks' | 'chrome-downloads', settings:Config=config): Adapter {
+    return {status:async()=>({available:true,...await chromeStatus(settings,source),filters:['from','to'],querySyntax:'literal words, all must match',pagination:true}),search:q=>searchChrome(settings,q),read:recordOnly(ref=>readChrome(settings,ref))};
   }
-  const adapters: Record<Source, Adapter> = {
-    'calendar':pim('calendar'), 'contacts':pim('contacts'),
-    'chrome-history':chrome('chrome-history'), 'chrome-bookmarks':chrome('chrome-bookmarks'), 'chrome-downloads':chrome('chrome-downloads'),
-    'chatgpt-archive':archive('chatgpt-archive'), 'takeout-archive':archive('takeout-archive'),
-    'linkedin-archive':archive('linkedin-archive'), 'twitter-archive':archive('twitter-archive'),
+  function canonical(kind:string, config:Config):Adapter|undefined {
+    const readers:Record<string,Adapter>={
+    'calendar':pim('calendar',config), 'contacts':pim('contacts',config),
+    'chrome-history':chrome('chrome-history',config), 'chrome-bookmarks':chrome('chrome-bookmarks',config), 'chrome-downloads':chrome('chrome-downloads',config),
+    'chatgpt-archive':archive('chatgpt-archive',config), 'takeout-archive':archive('takeout-archive',config),
+    'linkedin-archive':archive('linkedin-archive',config), 'twitter-archive':archive('twitter-archive',config),
     messages: {
       status:async()=>({available:true,...await messagesStatus(config),filters:['from','to','conversation'],querySyntax:'literal words, all must match',coverage:'Local Mac store; bounded candidate scan with continuation'}),
       search:q=>searchMessages(config,q),
@@ -111,6 +106,10 @@ export function createSourceAccess(config: Config, execute: Run = run, bound = f
     },
     vault:{status:async()=>({...await qmdStatus(config),pagination:true}),search:q=>searchQmd(config,q),read:recordOnly(ref=>readQmd(config,ref))},
     'agent-history':{status:async()=>({...await cassStatus(config),pagination:true}),search:q=>searchCass(config,q),read:recordOnly((ref,context)=>readCass(config,ref,context))},
+    };
+    return readers[kind];
+  }
+  const adapters:Record<Source,Adapter>={
     library:{status:()=>libraryStatus(config),search:q=>searchLibrary(config,q),read:recordOnly(ref=>readLibrary(config,ref,original=>read(original)))},
     documents:{
       async status(){const status=await libraryStatus(config),doc=status.sources?.find(s=>s.source==='documents');return {...doc,available:(doc?.embeddings?.indexedDocuments||0)>0,modelsPresent:status.modelsPresent};},
@@ -127,23 +126,11 @@ export function createSourceAccess(config: Config, execute: Run = run, bound = f
     else if(kind==='markdown')adapters[id]=isDailyJournal(config,id)?{status:async()=>({available:true,dailyNotes:(await journalPaths(markdownSettings(config,id).root,markdownSettings(config,id).exclude)).paths.length,filters:['from','to'],coverage:'Daily Markdown journals'}),search:q=>searchJournals(config,q),read:recordOnly(ref=>journalRecord(config,ref))}:notes(id);
     else if(kind==='muesli' || kind==='whatsapp')adapters[id]=database(id);
     else if(kind==='ical'||kind==='vcard')adapters[id]={status:()=>filePimStatus(config,id),search:q=>searchFilePim(config,q),read:recordOnly(ref=>readFilePim(config,ref))};
-    else if(!bound && config.sources[id] && !['library','documents'].includes(kind) && adapters[kind]) {
+    else if(!['library','documents'].includes(kind)) {
       const scoped=sourceConfig(config,id);
-      const inner=createSourceAccess({...scoped,sources:{[kind]:config.sources[id]!},enabledSources:[kind]},execute,true);
-      const key=hash(id+sourceScope(config,id));
-      const token=(value:string)=>id===kind?value:cursor(key,value);
-      function map(value:any):any {
-        if(Array.isArray(value))return value.map(map);
-        if(!value || typeof value!=='object')return value;
-        return {...(value.ref?.source===kind?{adapter:kind}:{}),...Object.fromEntries(Object.entries(value).map(([k,v])=>[k,
-          k==='focus' && typeof v==='string' && id!==kind?bindFocus(v,id,kind):k==='source' && v===kind?id:(k==='nextCursor'||k==='cursorAfter') && typeof v==='string'?token(v):
-          k==='locator' && typeof v==='string'?v.replace('source-search://'+kind+'/','source-search://'+id+'/'):map(v)]))};
-      }
-      adapters[id]={
-        status:()=>inner.status(kind),
-        search:async(q)=>map(await inner.searchSession()({...q,source:kind,cursor:q.cursor && id!==kind?String(position(q.cursor,key)):q.cursor})),
-        read:async(ref,context)=>map(await inner.read({...ref,source:kind},{context})),
-      };
+      const settings=config.sources[id] ? {...scoped,sources:{[kind]:config.sources[id]!},enabledSources:[kind]} : scoped;
+      const adapter=canonical(kind,settings);
+      if(adapter)adapters[id]=legacySource(id,kind,hash(id+sourceScope(config,id)),adapter);
     }
   }
   async function read(ref: Ref, options: {context?:boolean; continuation?:boolean} = {}): Promise<ReadResult> {

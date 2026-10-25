@@ -1,7 +1,7 @@
 import {join} from 'node:path';
 import type {Config} from '../../platform/config';
 import {evidenceScope,requireSource,requireMaintenance} from '../../platform/config';
-import {sourceKind,isMail} from '../../domain/source-catalog';
+import {sourceKind,sourceDefinition} from '../../domain/source-catalog';
 import {errorData,fail,now} from '../../domain/identity';
 import {recordStore} from '../../platform/record-store';
 import {withSourceLock} from '../source-lock';
@@ -11,15 +11,11 @@ import {mail} from './mail';
 import type {Reader} from './model';
 
 export function directReader(c:Config,source:string):Reader{
- const kind=sourceKind(source,c);
- if(isMail(source,c))return mail;
- if(kind==='markdown')return markdown;
- if(['messages','whatsapp','muesli'].includes(kind))return native;
- if(/^(chrome|firefox|safari)-/.test(kind))return browser;
- if(['calendar','contacts','ical','vcard'].includes(kind))return pim;
- if(kind.endsWith('-archive'))return archive;
- if(kind==='vault')return vault;
- if(kind==='agent-history')return agentHistory;
+ const readers:Partial<Record<NonNullable<ReturnType<typeof sourceDefinition>>['tracking']&string,Reader>>={
+  mail,markdown,native,browser,pim,archive,vault,'agent-history':agentHistory,
+ };
+ const tracking=sourceDefinition(source,c)?.tracking;
+ if(tracking && readers[tracking])return readers[tracking]!;
  return fail('INVALID_SOURCE','This source has no direct change tracker');
 }
 export async function syncDirect(c:Config,sources:string[],reader=directReader){

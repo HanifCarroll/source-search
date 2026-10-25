@@ -1,3 +1,3 @@
-import {connectedKinds} from './source-catalog';
-export const snapshotKinds:readonly string[]=['tasks',...connectedKinds];
-export const directKinds:readonly string[]=['gmail','fastmail','jmap','imap','markdown','messages','whatsapp','muesli','calendar','contacts','ical','vcard','chrome-history','chrome-bookmarks','chrome-downloads','firefox-history','firefox-bookmarks','safari-history','safari-bookmarks','things-archive','chatgpt-archive','takeout-archive','linkedin-archive','twitter-archive','vault','agent-history'];
+import {adapterKinds,sourceDefinitions} from './source-catalog';
+export const snapshotKinds:readonly string[]=adapterKinds.filter(kind=>sourceDefinitions[kind].tracking==='snapshot');
+export const directKinds:readonly string[]=adapterKinds.filter(kind=>sourceDefinitions[kind].tracking!==null&&sourceDefinitions[kind].tracking!=='snapshot');

@@ -7,7 +7,7 @@ import {syncDirect} from './direct';
 import {directKinds,snapshotKinds} from '../domain/change-policy';
 import {fail} from '../domain/identity';
 
-const kinds:readonly string[]=['tasks',...connectedKinds];
+const kinds=snapshotKinds;
 export function snapshotSources(c:Config,selected?:string,allowed=kinds){
   if(selected){
     requireSource(c,selected);

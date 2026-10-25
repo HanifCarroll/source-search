@@ -117,3 +117,24 @@ test('fresh MCP uses configured note names, date fields, exclusions and DST, and
   expect((await invoke('search_sources',{queries:[{source:'journals',query:'invented'}]})).results[0].error.code).toBe('SOURCE_DISABLED');
  }finally{await client.close();await rm(root,{recursive:true,force:true});}
 });
+
+test('named Messages preserve references, focus, context and instance-bound continuation',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'ss-message-instance-'));
+ try{
+  const {Database}=await import('bun:sqlite'),database=join(root,'messages.sqlite'),db=new Database(database);
+  db.exec(`CREATE TABLE message(guid TEXT,date INTEGER,is_from_me INTEGER,text TEXT,handle_id INTEGER);
+    CREATE TABLE chat(guid TEXT);CREATE TABLE chat_message_join(chat_id INTEGER,message_id INTEGER);CREATE TABLE handle(id TEXT);
+    INSERT INTO handle VALUES('fixture@example.test');INSERT INTO chat VALUES('thread');
+    INSERT INTO message VALUES('one',800000000000000000,0,'Invented cobalt first',1),('two',800000000000000001,0,'Invented cobalt second',1);
+    INSERT INTO chat_message_join VALUES(1,1),(1,2);`);db.close();
+  const config=configSchema.parse({enabledSources:['phone','other'],sources:{phone:{adapter:'messages',database},other:{adapter:'messages',database}}});
+  const runtime=createRuntime(config),query={source:'phone',query:'cobalt',limit:1};
+  const first=(await runtime.search_sources({queries:[query]})).results[0]!;
+  expect(first.items[0]!.ref.source).toBe('phone');expect(first.nextCursor).toBeDefined();
+  const read=await runtime.read_record({ref:first.items[0]!.ref,focus:first.items[0]!.focus,context:true});
+  expect(read.record.body).toContain('cobalt');expect(read.context).toHaveLength(1);expect((read.context[0] as any).ref.source).toBe('phone');
+  const next=(await runtime.search_sources({queries:[{...query,cursor:first.nextCursor}]})).results[0]!;
+  expect(next.items[0]!.ref.id).not.toBe(first.items[0]!.ref.id);
+  expect((await runtime.search_sources({queries:[{...query,source:'other',cursor:first.nextCursor}]})).results[0]!.error?.code).toBe('INVALID_CURSOR');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
