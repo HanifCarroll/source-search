@@ -58,6 +58,7 @@ export const configSchema = z.object({
   qmdDatabase: path.default(join(state, "vault.sqlite")),
   qmdModels: z.array(path).default([]),
   searchModels: z.object({embed:path,rerank:path,generate:path}).strict().optional(),
+  searchAcceleration: z.object({rerank:z.literal('mlx'),python:path,cache:path.default(join(state,'mlx-models'))}).strict().optional(),
   qmdRoots: z.record(z.string().regex(/^[a-zA-Z0-9_-]+$/), path).default({}),
   libraryEnabled: z.boolean().default(false),
   libraryRoot: path.default(join(state, "library")),
@@ -69,7 +70,7 @@ export const configSchema = z.object({
   cassData: path.default(join(home, ".local/share/cass"))
 }).strict().superRefine((c,ctx)=>{
   const contains=(a:string,b:string)=>{const r=relative(resolve(a),resolve(b));return !r||r!=='..'&&!r.startsWith('..'+sep)&&!isAbsolute(r);};
-  const caches=[state,c.index,c.libraryRoot,c.libraryDatabase,c.qmdDatabase,c.previews,...Object.values(c.sources).flatMap(s=>s.adapter==='vault'&&s.database?[s.database]:[])];
+  const caches=[state,c.index,c.libraryRoot,c.libraryDatabase,c.qmdDatabase,c.previews,...(c.searchAcceleration?[c.searchAcceleration.cache]:[]),...Object.values(c.sources).flatMap(s=>s.adapter==='vault'&&s.database?[s.database]:[])];
   if(caches.some(p=>contains(p,c.memoryRoot)||contains(c.memoryRoot,p)))ctx.addIssue({code:'custom',path:['memoryRoot'],message:'Durable memory must be separate from cache paths'});
   for(const id of c.enabledSources)if(!c.sources[id] && !adapterKinds.includes(sourceKind(id) as typeof adapterKinds[number]))ctx.addIssue({code:'custom',path:['enabledSources'],message:'Unknown source: '+id});
 }).transform(config=>({...config,voiceNotes:config.voiceNotes || config.journals}));

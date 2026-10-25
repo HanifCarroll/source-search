@@ -19,8 +19,13 @@ export async function main() {
   const request=JSON.parse(input);
   const {createStore,extractSnippet,Maintenance}=await import(request.sdkUrl);
   const store=await createStore({dbPath:request.database,config:{collections:request.collections,models:request.models}});
+  let disposeReranker;
   try {
     if(!request.action && request.mode!=='lexical')prepareInferenceCache(store.internal.db,request.inferenceRevision);
+    if(!request.action && request.mode==='hybrid' && request.acceleration){
+      const {configureReranker}=await import(request.rerankerUrl);
+      disposeReranker=configureReranker(store.internal.llm,request.acceleration,request.models.rerank);
+    }
     let result;
     if(request.action==='update'){
       const db=store.internal.db;
@@ -54,5 +59,5 @@ export async function main() {
       result=hits.map(r=>({file:r.file||r.filepath,score:r.score,title:r.title,snippet:extractSnippet(r.body||'',request.query,500).snippet}));
     }
     console.log('SOURCE_SEARCH_RESULT '+JSON.stringify(result));
-  } finally {await store.close();}
+  } finally {disposeReranker?.();await store.close();}
 }

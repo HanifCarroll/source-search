@@ -41,7 +41,8 @@ try{
   for(const [id,text] of Object.entries(documents))await writeFile(join(notes,id+'.md'),text);
   for(let i=0;i<256;i++)await writeFile(join(notes,`other-${i}.md`),`# Garden observation ${i}\n\nInvented field log ${i}. The gardener watered the seedlings and recorded leaf size and soil moisture. Plants grew in the morning sunlight.`);
   await writeFile(join(excluded,'private.md'),'# Excluded\n\nZXQ731 cobaltimeter locked out of my account rescheduling the company event.');
-  const c=configSchema.parse({enabledSources:['vault'],maintenanceEnabled:true,qmdDatabase:join(root,'search.sqlite'),qmdRoots:{notes,excluded},...(models?{searchModels:models}:{})});
+  const acceleration=settings?.searchAcceleration?{...settings.searchAcceleration,cache:join(root,'models')}:undefined;
+  const c=configSchema.parse({enabledSources:['vault'],maintenanceEnabled:true,qmdDatabase:join(root,'search.sqlite'),qmdRoots:{notes,excluded},...(models?{searchModels:models,searchAcceleration:acceleration}:{})});
   await runSdk(c,{index:'vault',action:'update'});if(models)await runSdk(c,{index:'vault',action:'embed'});
   // Same index, narrower source selection, via an actual bundled MCP gateway.
   const scoped={...c,qmdRoots:{notes}};await writeFile(configPath,JSON.stringify(scoped),{mode:0o600});client=await connect();
@@ -50,7 +51,7 @@ try{
     const cold=await search(c.query,c.mode),rank=cold.page.items.findIndex((i:any)=>i.ref.id===`qmd://notes/${c.expected}.md`)+1;
     assert(rank>0 && rank<=3,`Relevant ${c.expected} missing from top three for ${c.mode}`);
     const warm=await search(c.query,c.mode);assert.deepEqual(warm.page.items.map((i:any)=>[i.ref,i.rank]),cold.page.items.map((i:any)=>[i.ref,i.rank]));
-    assert(cold.ms<(lexicalOnly?15000:90000),'Cold search exceeded release budget');assert(warm.ms<3000,'Repeated search exceeded cache budget');
+    assert(cold.ms<(lexicalOnly?15000:90000),`${c.mode} cold search took ${cold.ms} ms, exceeding the release budget`);assert(warm.ms<3000,`${c.mode} repeated search took ${warm.ms} ms (cold: ${cold.ms} ms), exceeding the cache budget`);
     let pageMs:number|undefined;
     if(cold.page.nextCursor){const next=await search(c.query,c.mode,2,cold.page.nextCursor);pageMs=next.ms;assert(next.ms<3000,'Pagination reran expensive retrieval');assert(!next.page.items.some((n:any)=>cold.page.items.some((p:any)=>p.ref.id===n.ref.id)));}
     checks.push({query:c.query,mode:c.mode,coldMs:cold.ms,repeatMs:warm.ms,...(pageMs!==undefined?{pageMs}:{}),expectedRank:rank});

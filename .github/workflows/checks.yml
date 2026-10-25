@@ -22,6 +22,12 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check
       - run: bun test
+      - name: Check optional Apple reranking with invented weights
+        if: runner.os == 'macOS' && runner.arch == 'ARM64'
+        run: |
+          python -m venv "$RUNNER_TEMP/source-search-mlx"
+          "$RUNNER_TEMP/source-search-mlx/bin/pip" install -r scripts/acceleration-requirements.txt
+          "$RUNNER_TEMP/source-search-mlx/bin/python" -m unittest discover -s test -p 'mlx_ranker_test.py'
       - name: Compile the macOS source helper
         if: runner.os == 'macOS'
         env:

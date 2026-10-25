@@ -1,0 +1,4 @@
+# Optional Apple Silicon reranking. Portable search uses the bundled native engine.
+mlx==0.32.4
+mlx-lm==0.32.2
+gguf==0.19.0
