@@ -6,12 +6,13 @@ import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
-import {configSchema,loadConfig} from '../src/platform/config';
+import {configSchema,loadConfig,sourceConfig} from '../src/platform/config';
 import {runSdk,searchModels,disposeSearchWorkers} from '../src/search/qmd/runner';
 import {packageRoot} from '../src/platform/package-root';
 import type {Query} from '../src/domain/contracts';
 
 process.umask(0o077);
+const source='research';
 const lexicalOnly=process.argv.includes('--lexical-only'),at=process.argv.indexOf('--models-from');
 const settings=at>=0?configSchema.parse(JSON.parse(await readFile(resolve(process.argv[at+1]!), 'utf8'))):undefined;
 const models=lexicalOnly?undefined:searchModels(settings||await loadConfig());
@@ -25,11 +26,11 @@ async function connect(){
   return next;
 }
 async function search(query:string,mode:string,limit=3,cursor?:string,options:Pick<Query,'plan'|'depth'>={}){
-  const started=performance.now(),raw=await client!.callTool({name:'search_sources',arguments:{queries:[{source:'vault',query,mode,limit,...options,...(cursor?{cursor}:{})}]}},undefined,{timeout:120000});
+  const started=performance.now(),raw=await client!.callTool({name:'search_sources',arguments:{queries:[{source,query,mode,limit,...options,...(cursor?{cursor}:{})}]}},undefined,{timeout:120000});
   assert(!raw.isError,JSON.stringify(raw));
   const block=(raw.content as {type:string;text:string}[]).find(b=>b.type==='text');assert(block);
   const data=JSON.parse(block.text),page=data.results[0];assert.notEqual(page.status,'error',JSON.stringify(page.error));
-  assert(page.items.every((i:any)=>i.ref.id.startsWith('qmd://notes/')),'Excluded collection leaked into results');
+  assert(page.items.every((i:any)=>i.ref.source===source&&i.ref.id.startsWith('qmd://notes/')),'Excluded collection leaked into results');
   return {page,ms:Math.round(performance.now()-started)};
 }
 try{
@@ -43,10 +44,10 @@ try{
   for(let i=0;i<256;i++)await writeFile(join(notes,`other-${i}.md`),`# Garden observation ${i}\n\nInvented field log ${i}. The gardener watered the seedlings and recorded leaf size and soil moisture. Plants grew in the morning sunlight.`);
   await writeFile(join(excluded,'private.md'),'# Excluded\n\nZXQ731 cobaltimeter locked out of my account rescheduling the company event.');
   const acceleration=settings?.searchAcceleration?{...settings.searchAcceleration,cache:join(root,'models')}:undefined;
-  const c=configSchema.parse({enabledSources:['vault'],maintenanceEnabled:true,qmdDatabase:join(root,'search.sqlite'),qmdRoots:{notes,excluded},...(models?{searchModels:models,searchAcceleration:acceleration,searchRanker:settings?.searchRanker}:{})});
-  await runSdk(c,{index:'vault',action:'update'});if(models)await runSdk(c,{index:'vault',action:'embed'});
+  const c=configSchema.parse({enabledSources:[source],maintenanceEnabled:true,sources:{[source]:{adapter:'vault',database:join(root,'search.sqlite'),roots:{notes,excluded}}},...(models?{searchModels:models,searchAcceleration:acceleration,searchRanker:settings?.searchRanker}:{})});
+  await runSdk(sourceConfig(c,source),{index:'vault',action:'update'});if(models)await runSdk(sourceConfig(c,source),{index:'vault',action:'embed'});
   // Same index, narrower source selection, via an actual bundled MCP gateway.
-  const scoped={...c,qmdRoots:{notes}};await writeFile(configPath,JSON.stringify(scoped),{mode:0o600});client=await connect();
+  const scoped=configSchema.parse({...c,sources:{[source]:{adapter:'vault',database:join(root,'search.sqlite'),roots:{notes}}}});await writeFile(configPath,JSON.stringify(scoped),{mode:0o600});client=await connect();
   const cases:({query:string;mode:string;expected:string}&Pick<Query,'plan'|'depth'>)[]=[{query:'cobaltimeter',mode:'lexical',expected:'exact'},...(!lexicalOnly?[
     {query:'locked out of my account',mode:'semantic',expected:'recovery'},
     {query:'rescheduling the company event',mode:'hybrid',expected:'event'},
@@ -71,9 +72,9 @@ try{
   await client.close();client=await connect();
   const reopened=await search('cobaltimeter','lexical');assert(reopened.ms<3000,'Cache did not survive a gateway restart');
   const revisionBefore=JSON.stringify(reopened.page.items.map((i:any)=>i.ref));
-  await runSdk(scoped,{index:'vault',action:'update'});
+  await runSdk(sourceConfig(scoped,source),{index:'vault',action:'update'});
   const unchanged=await search('cobaltimeter','lexical');assert.equal(JSON.stringify(unchanged.page.items.map((i:any)=>i.ref)),revisionBefore);assert(unchanged.ms<3000);
-  await writeFile(join(notes,'exact.md'),'# Equipment code\n\nThe instrument was retired.');await runSdk(scoped,{index:'vault',action:'update'});
+  await writeFile(join(notes,'exact.md'),'# Equipment code\n\nThe instrument was retired.');await runSdk(sourceConfig(scoped,source),{index:'vault',action:'update'});
   assert.equal((await search('cobaltimeter','lexical')).page.items.length,0,'Stale candidates survived a real source edit');
   console.log(JSON.stringify({ok:true,corpus:'259 invented documents plus an excluded collection',inference:lexicalOnly?'not exercised':'installed local models',transport:'stdio MCP with bundled runtime',checks,restartMs:reopened.ms,noOpRefreshMs:unchanged.ms},null,2));
 }finally{await client?.close();disposeSearchWorkers();await rm(root,{recursive:true,force:true});}
