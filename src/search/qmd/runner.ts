@@ -64,11 +64,16 @@ export async function runSdk(c:Config,request:Omit<Partial<QmdRequest>,'index'> 
    const key=hash(JSON.stringify([identity,dbStamp?.dev,dbStamp?.ino]));
    const existing=workers.get(database);
    if(request.action||existing?.identity!==key){existing?.client.close();workers.delete(database);}
+   if(!request.action&&!workers.has(database)&&workers.size>=4){
+     // Reuse the limited slots for recently searched indexes. Never evict a
+     // worker with active or queued requests; overflow stays short-lived.
+     for(const [name,worker] of workers)if(!worker.client.busy){worker.client.close();workers.delete(name);break;}
+   }
    const persistent=!request.action&&(workers.has(database)||workers.size<4);
    const client=workers.get(database)?.client || new JsonWorker([c.bunBinary,'--input-type=module','--eval',worker+'\nawait main();'],{
      env:{HF_HUB_OFFLINE:'1',QMD_RERANK_CONTEXT_SIZE:'4096',QMD_EMBED_PARALLELISM:'1',...(process.platform==='darwin'&&process.env.QMD_METAL_KEEP_RESIDENCY!=='1'?{GGML_METAL_NO_RESIDENCY:'1'}:{})},
    });
-   if(persistent)workers.set(database,{identity:key,client});
+   if(persistent){workers.delete(database);workers.set(database,{identity:key,client});}
    try{return await client.request(input,{signal,timeoutMs:request.action==='embed'?1800000:request.action==='update'?600000:240000});}
    catch(error){fail(signal?.aborted?'CANCELLED':'QMD_FAILED',(error as Error).message);}
    finally{if(!persistent)client.close();}

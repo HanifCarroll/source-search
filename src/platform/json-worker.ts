@@ -19,6 +19,7 @@ export class JsonWorker {
   private idle?:ReturnType<typeof setTimeout>;
   private stderr='';
   private disposed=false;
+  get busy(){return this.queued>0;}
   constructor(private command:string[],private options:Options={}){
     if(!owned.size){process.once('exit',closeOwned);process.once('SIGTERM',terminate);process.once('SIGINT',interrupt);}
     owned.add(this);
