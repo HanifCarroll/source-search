@@ -5,7 +5,6 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Database} from 'bun:sqlite';
 import {cachedSearch,installSearchRevision,indexRevision} from '../src/search/qmd/cache';
-import {nativeCache} from '../src/maintenance/native-cache';
 import {projectionHealth} from '../src/search/library/index';
 import {textFile} from '../src/platform/source-files';
 import {runSdk} from '../src/search/qmd/runner';
@@ -54,14 +53,6 @@ test('unchanged SDK refresh preserves ranked cache, while edits and removals inv
   await rm(join(notes,'one.md'));await runSdk(c,{index:'vault',action:'update'});
   expect(await runSdk(c,{index:'vault',mode:'lexical',query:'amber'})).toHaveLength(0);
 }),15000);
-test('native row diffs reuse decoded records, include joined changes, and reconcile deletions',()=>temporary(async root=>{
-  const db=new Database(join(root,'cache.sqlite'));let calls=0;
-  const project=():RecordData=>{calls++;return {ref:{source:'messages',id:'one'},title:'Fixture',body:'Invented text',type:'message',locator:'fixture',observedAt:'fixture'};};
-  let cache=nativeCache(db,'messages','format-1');cache.reuse('one',{body:Buffer.from('binary'),date:1n,chat:'room'},project);cache.reuse('two',{text:'fixture'},project);cache.commit();expect(calls).toBe(2);
-  cache=nativeCache(db,'messages','format-1');cache.reuse('one',{body:Buffer.from('binary'),date:1n,chat:'room'},project);expect(cache.commit()).toEqual({decoded:0,reused:1,removed:1});
-  cache=nativeCache(db,'messages','format-1');cache.reuse('one',{body:Buffer.from('binary'),date:1n,chat:'renamed'},project);expect(cache.commit().decoded).toBe(1);
-  cache=nativeCache(db,'messages','format-2');cache.reuse('one',{body:Buffer.from('binary'),date:1n,chat:'renamed'},project);expect(cache.commit().decoded).toBe(1);db.close();
-}));
 test('unchanged library publications skip indexing, and changed projections are indexed',()=>temporary(async root=>{
   const c=configSchema.parse({enabledSources:['library','whatsapp'],libraryEnabled:true,libraryRoot:root,libraryDatabase:join(root,'index.sqlite')});
   const r:RecordData={ref:{source:'whatsapp',id:'1',version:'v1'},title:'Fixture',body:'Cobalt',type:'message',locator:'fixture',observedAt:'fixture'};

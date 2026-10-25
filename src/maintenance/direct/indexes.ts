@@ -3,8 +3,9 @@ import {lstat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {hash,fail} from '../../domain/identity';
 import type {Ref} from '../../domain/contracts';
+import type {ObservedProjection} from '../../domain/observations';
 import {sourceKind} from '../../domain/source-catalog';
-import {sourceConfig} from '../../platform/config';
+import {sourceConfig,sourceScope} from '../../platform/config';
 import {regular} from '../../platform/source-files';
 import {sourceFiles} from '../../sources/local/notes';
 import {archiveSignature,exportPaths,exportProjectionVersion,type ArchiveSource} from '../../sources/archives/originals';
@@ -20,16 +21,19 @@ export const archive:Reader=async(c,source,previous)=>{
   if((await lstat(path)).isDirectory())paths.push(...(await sourceFiles(path,()=>true)).paths.map(p=>join(path,p)));
   else paths.push(path,path+'-wal');
  }
- return stamped(paths,previous,{...state('changed-export-inventory','Selected exported records only; no automatic account export'),generation:String(exportProjectionVersion(kind))},async()=>{
+ let projection:ObservedProjection|undefined=previous?.state.projection;
+ const scan=await stamped(paths,projection?previous:undefined,{...state('changed-export-inventory','Selected exported records only; no automatic account export'),generation:String(exportProjectionVersion(kind))},async()=>{
   const signature=await archiveSignature(c,source);let saved:any;
   try{saved=JSON.parse((await indexStatus(scoped))[kind]||'{}');}catch(e){if(!['ENOENT','INDEX_NOT_READY'].includes((e as any).code))throw e;}
   if(saved?.signature!==signature||saved?.projectionVersion!==exportProjectionVersion(kind))await rebuildArchive(scoped);
   const db=new Database(scoped.index,{readonly:true});
   try{return db.transaction(()=>{
    const entries=(db.query("SELECT json_extract(data,'$.ref') ref FROM records WHERE source=? ORDER BY id").all(kind) as {ref:string}[]).map(row=>{const ref=JSON.parse(row.ref) as Ref;return {ref:{...ref,source},signature:ref.version!};});
+   projection={kind:'archive',revision:signature,scope:sourceScope(c,source),version:exportProjectionVersion(kind),guard:{archive:source,signature}};
    return entries;
   })();}finally{db.close();}
  });
+ return {...scan,state:{...scan.state,projection}};
 };
 export const vault:Reader=async(c,source)=>{
  const scoped=sourceConfig(c,source),collections=Object.keys(scoped.qmdRoots);

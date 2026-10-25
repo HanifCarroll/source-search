@@ -31,7 +31,7 @@ export async function libraryStatus(c:Config){
   const sources=configuredSourceIds(c).filter(source=>sourceEnabled(c,source) && isProjected(source,c)).flatMap(source=>{
     const kind=sourceKind(source,c);
     const stage=kind.endsWith('-archive')?'archives':isMail(source,c)?'mail':kind==='documents'?'documents':kind==='tasks'||connectedKinds.includes(kind as typeof connectedKinds[number])?'snapshots':'native';
-    const failure=states.get('maintenance-'+stage),projection=states.has(source)?getProjectionState(db,source):undefined;
+    const failure=(stage==='archives'||stage==='native'?states.get('maintenance-direct'):undefined)||states.get('maintenance-'+stage),projection=states.has(source)?getProjectionState(db,source):undefined;
     const saved=isMail(source,c)?{...projection,...getMailState(db,source)}:projection;
     if(!saved && !failure)return [{source,state:'queued',records:0,chunks:0}];
     return [{source,...saved,...(failure?.state==='error'?{state:'error',error:failure.error,checkedAt:failure.checkedAt}:{})}];

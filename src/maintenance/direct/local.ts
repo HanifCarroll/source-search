@@ -1,6 +1,6 @@
 import {join} from 'node:path';
 import {hash,fail,stableJson} from '../../domain/identity';
-import {databasePath,markdownSettings,sourceConfig} from '../../platform/config';
+import {databasePath,markdownSettings,sourceConfig,sourceEnabled,sourceScope} from '../../platform/config';
 import {sourceKind} from '../../domain/source-catalog';
 import {sourceFiles,matchesNote,readNote} from '../../sources/local/notes';
 import {isDailyJournal,journalRecord} from '../../sources/local/journals';
@@ -30,16 +30,33 @@ export const markdown:Reader=async(c,source,previous)=>{
 };
 export const native:Reader=async(c,source,previous)=>{
  const kind=sourceKind(source,c),scoped=sourceConfig(c,source),path=kind==='messages'?scoped.messages:databasePath(c,source);
- const generation=String(kind==='messages'?1:databaseProjectionVersion(source,c));
+ const version=kind==='messages'?1:databaseProjectionVersion(source,c),generation=String(version);
+ const retainRecords=c.libraryEnabled&&sourceEnabled(c,'library');
+ const paths=[path,path+'-wal'],scope=sourceScope(c,source);
  const old=new Map(previous?.state.generation===generation?previous.entries.map(e=>[e.key,e]):[]);
- return stamped([path,path+'-wal'],previous,{...state('snapshot-row-fingerprints','Current local database, including records without searchable text; phone-only history is outside coverage'),generation},async()=>{
+ const needsRecords=retainRecords&&(!previous?.state.projection||previous.entries.some(e=>!e.record));
+ // Enabling library publication fills the body cache once without resetting
+ // existing change cursors or changing record versions.
+ const reusable=needsRecords?undefined:previous;
+ let decoded=0,reused=0;
+ const scan=await stamped(paths,reusable,{...state('snapshot-row-fingerprints','Current local database, including records without searchable text; phone-only history is outside coverage'),generation},async()=>{
   const reuse=(key:string,raw:unknown,project:()=>RecordData)=>{
    const input=hash(JSON.stringify(raw,(_k,v)=>typeof v==='bigint'?String(v):v instanceof Uint8Array?Buffer.from(v).toString('base64'):v)),saved=old.get(key);
-   if(saved?.input===input)return saved;
-   const record=project();return {...observed(record,source),signature:hash(stableJson({...record,observedAt:undefined})),key,input};
+   if(saved?.input===input&&(!retainRecords||saved.record)){reused++;return saved;}
+   decoded++;
+   const record=project();
+   return {...observed(record,source),signature:hash(stableJson({...record,observedAt:undefined})),key,input,
+    ...(retainRecords?{record:{...record,...(source!==kind?{adapter:kind}:{}),ref:{...record.ref,source}}}:{})};
   };
   return kind==='messages'?allMessageRecords(scoped,reuse):allDatabaseRecords(c,source,reuse);
  },true);
+ if(retainRecords){
+  const entries=scan.entries;
+  const revision=entries?hash(stableJson(entries.map(e=>[e.ref.id,e.signature]).sort((a,b)=>a[0]!.localeCompare(b[0]!)))):previous!.state.projection!.revision;
+  const keys=new Set(entries?.map(e=>e.key));
+  scan.state.projection={kind:'native',revision,scope,version,guard:{paths},incremental:{decoded,reused,removed:entries?[...old.keys()].filter(k=>!keys.has(k)).length:0}};
+ }
+ return scan;
 };
 export const browser:Reader=async(c,source,previous)=>{
  const kind=sourceKind(source,c),scoped=sourceConfig(c,source),chromium=kind.startsWith('chrome-'),bookmarks=kind.endsWith('bookmarks');

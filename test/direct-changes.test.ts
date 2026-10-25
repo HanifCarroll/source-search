@@ -1,6 +1,6 @@
 import {test,expect} from 'bun:test';
 import {Database} from 'bun:sqlite';
-import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,rename} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {configSchema,evidenceScope,type Config} from '../src/platform/config';
@@ -11,6 +11,9 @@ import {createRuntime} from '../src/application/runtime';
 import {syncSources} from '../src/maintenance/sources';
 import {syncDirect,directReader} from '../src/maintenance/direct';
 import {publishMail} from '../src/maintenance/library-sync';
+import {publishDirect} from '../src/maintenance/direct-publication';
+import {getProjectionState} from '../src/platform/cache-state';
+import {createZip} from './helpers/zip';
 import {jmapFixture} from './helpers/jmap';
 
 async function temp(fn:(root:string)=>Promise<void>){const root=await mkdtemp(join(tmpdir(),'ss-direct-'));try{await fn(root);}finally{await rm(root,{recursive:true,force:true});}}
@@ -50,6 +53,42 @@ test('Messages inventories include textless rows, edits, joined metadata changes
  await sync(c);const page=await feed(c,first.cursor);expect(page.items.map((e:any)=>[e.kind,e.ref.id])).toEqual([['updated','a'],['added','c'],['removed','empty']]);
  expect((await createRuntime(c).read_record({ref:page.items[0].ref})).record.author).toBe('blair@example.test');
  db=new Database(path);db.exec('DROP TABLE chat');db.close();expect((await syncSources(c)).ok).toBe(false);expect((await feed(c,page.cursor)).items).toEqual([]);
+}));
+
+test('native publication consumes one committed scan and enabling it preserves change cursors',()=>temp(async root=>{
+ const path=join(root,'messages.sqlite');let db=new Database(path);
+ db.exec(`CREATE TABLE message(guid TEXT,date INTEGER,is_from_me INTEGER,service TEXT,text TEXT,attributedBody BLOB,handle_id INTEGER,item_type INTEGER);
+ CREATE TABLE chat(guid TEXT);CREATE TABLE chat_message_join(chat_id INTEGER,message_id INTEGER);CREATE TABLE handle(id TEXT);
+ INSERT INTO handle VALUES('alex@example.test');INSERT INTO chat VALUES('chat');
+ INSERT INTO message VALUES('a',800000000000000000,0,'iMessage','Invented hello',NULL,1,0),('b',800000000000000001,0,'iMessage','Invented second',NULL,1,0);
+ INSERT INTO chat_message_join VALUES(1,1),(1,2);`);db.close();
+ const c=config(root,{enabledSources:['phone'],sources:{phone:{adapter:'messages',database:path}}});
+ await sync(c);const first=await feed(c),before=(await inventory(c,'phone'))!;
+ expect(before.entries.every(e=>!e.record)).toBe(true);
+ const indexed={...c,libraryEnabled:true,enabledSources:['phone','library']};
+ await sync(indexed);expect((await feed(c,first.cursor)).items).toEqual([]);
+ expect((await inventory(c,'phone'))!.entries.map(e=>e.ref)).toEqual(before.entries.map(e=>e.ref));
+ await rename(path,path+'.away');await publishDirect(indexed);
+ db=cacheDB(c);expect(JSON.stringify(db.query('SELECT body FROM chunks').all())).toContain('Invented hello');
+ const revision=getProjectionState(db,'phone').projectionRevision;db.close();
+ await rename(path+'.away',path);await sync(indexed);
+ expect((await inventory(c,'phone'))!.state.projection?.incremental).toMatchObject({decoded:0,reused:2});
+ await publishDirect(indexed);db=cacheDB(c);expect(getProjectionState(db,'phone').projectionRevision).toBe(revision);db.close();
+ db=new Database(path);db.exec("UPDATE handle SET id='revised@example.test';DELETE FROM message WHERE guid='b'");db.close();await sync(indexed);
+ expect((await inventory(c,'phone'))!.state.projection?.incremental).toMatchObject({decoded:1,removed:1});
+ await publishDirect(indexed);db=cacheDB(c);expect(JSON.stringify(db.query('SELECT body FROM chunks').all())).toContain('revised@example.test');db.close();
+ await rm(path);expect((await syncSources(indexed)).ok).toBe(false);await publishDirect(indexed);
+ db=cacheDB(c);expect(getProjectionState(db,'phone').state).toBe('error');expect(db.query('SELECT count(*) n FROM chunks').get()).toEqual({n:1});db.close();
+}));
+
+test('archive publication uses the committed export index without reopening originals',()=>temp(async root=>{
+ const path=join(root,'export.zip');
+ await writeFile(path,await createZip([{path:'Takeout/Calendar/Fixture.ics',text:'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:fixture\r\nDTSTART:20240101T000000Z\r\nSUMMARY:Violet fixture\r\nEND:VEVENT\r\nEND:VCALENDAR'}]));
+ const c=config(root,{enabledSources:['takeout-archive','library'],takeout:[path],libraryEnabled:true});
+ await sync(c);await rename(path,path+'.away');await publishDirect(c);
+ let db=cacheDB(c);expect(JSON.stringify(db.query('SELECT body FROM chunks').all())).toContain('Violet fixture');
+ const revision=getProjectionState(db,'takeout-archive').projectionRevision;db.close();
+ await publishDirect(c);db=cacheDB(c);expect(getProjectionState(db,'takeout-archive').projectionRevision).toBe(revision);db.close();
 }));
 
 test('JMAP source changes reuse provider deltas, survive failures, and publish deferred library text',()=>temp(async root=>{

@@ -7,7 +7,8 @@ import {defaultConfig} from './helpers/config';
 import {createRuntime} from '../src/application/runtime';
 import {allDatabaseRecords} from '../src/sources/local/databases';
 import {makeChunks,publish,libraryDB,getState} from '../src/search/library/store';
-import {syncLibrary,stampPaths} from '../src/maintenance/library-sync';
+import {syncLibrary} from '../src/maintenance/library-sync';
+import {stamp as stampPaths} from '../src/maintenance/direct/model';
 
 test('WhatsApp photo and video captions participate in search, reads, context and library text',async()=>{
  const root=await mkdtemp(join(tmpdir(),'ss-caption-')),c={...defaultConfig(),whatsapp:join(root,'whatsapp.sqlite'),libraryRoot:join(root,'library'),index:join(root,'archive.sqlite'),libraryEnabled:true,maintenanceEnabled:true,enabledSources:['whatsapp' as const,'library' as const]};
