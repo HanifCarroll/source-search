@@ -44,8 +44,9 @@ export async function runSdk(c:Config,request:{index:'vault'|'library';action?:'
   try{const db=libraryDB(c);try{projectionSignature=hash(JSON.stringify([1,collections,Object.keys(collections).sort().map(name=>{const source=name.slice(3),s=getState(db,source);return [source,s.projectionRevision||s.publishedAt,sourceScope(c,source)];})]));}finally{db.close();}}
   catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;}
  }
+ const modelStamps=await Promise.all(Object.values(models||{}).map(async p=>{const s=await lstat(p).catch(e=>{if(e.code!=='ENOENT')throw e;return undefined;});return [p,s?.size,s?.mtimeMs,s?.ctimeMs];}));
  const perform=async()=>{
- const input=JSON.stringify({...request,database,models,collections,projectionSignature,sdkUrl:pathToFileURL(Bun.resolveSync('@tobilu/qmd',packageRoot)).href});
+ const input=JSON.stringify({...request,database,models,collections,projectionSignature,inferenceRevision:hash(JSON.stringify([1,modelStamps])),sdkUrl:pathToFileURL(Bun.resolveSync('@tobilu/qmd',packageRoot)).href});
  const child=Bun.spawn([c.bunBinary,'--input-type=module','--eval',worker+'\nawait main();'],{stdout:'pipe',stderr:'pipe',stdin:new Blob([input]),env:{...process.env,HF_HUB_OFFLINE:'1',QMD_RERANK_CONTEXT_SIZE:'4096',QMD_EMBED_PARALLELISM:'1',...(process.platform==='darwin'&&process.env.QMD_METAL_KEEP_RESIDENCY!=='1'?{GGML_METAL_NO_RESIDENCY:'1'}:{})}});
  let timer:ReturnType<typeof setTimeout>|undefined;
  const bounded=async(stream:ReadableStream<Uint8Array>)=>{let bytes=0;const chunks:Uint8Array[]=[];for await(const part of stream){bytes+=part.length;if(bytes>4*1024*1024){child.kill();fail('OUTPUT_LIMIT','Search worker exceeded its output budget');}chunks.push(part);}return Buffer.concat(chunks).toString();};
@@ -59,7 +60,6 @@ export async function runSdk(c:Config,request:{index:'vault'|'library';action?:'
   if(request.action!=='status')trackIndexRevision(database);
   return result;
  }
- const modelStamps=await Promise.all(Object.values(models||{}).map(async p=>{const s=await lstat(p).catch(e=>{if(e.code!=='ENOENT')throw e;return undefined;});return [p,s?.size,s?.mtimeMs,s?.ctimeMs];}));
  const scopes=configuredSourceIds(c).filter(s=>sourceEnabled(c,s)).map(s=>[s,sourceScope(c,s)]);
  const lock=await lstat(join(packageRoot,'bun.lock'));
  return cachedSearch(database,{request,collections,models:modelStamps,scopes,sdk:worker,dependency:[lock.size,lock.mtimeMs]},perform);

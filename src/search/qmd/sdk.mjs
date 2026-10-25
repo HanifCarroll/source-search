@@ -1,4 +1,18 @@
 // Isolated SDK process: bounds native model lifetime and keeps diagnostics off MCP stdout.
+export function prepareInferenceCache(db, revision) {
+  if(!revision)return;
+  db.exec('CREATE TABLE IF NOT EXISTS source_search_maintenance(key TEXT PRIMARY KEY,value TEXT)');
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const previous=db.prepare("SELECT value FROM source_search_maintenance WHERE key='inference-revision'").get();
+    if(previous?.value!==revision){
+      // Content changes have their own keys; replaced model files do not.
+      db.exec('DELETE FROM llm_cache');
+      db.prepare("INSERT OR REPLACE INTO source_search_maintenance VALUES('inference-revision',?)").run(revision);
+    }
+    db.exec('COMMIT');
+  } catch(error) {db.exec('ROLLBACK');throw error;}
+}
 export async function main() {
   process.umask(0o077);
   let input='';for await(const data of process.stdin){input+=data;if(input.length>256*1024)throw Error('Search configuration exceeds budget');}
@@ -6,6 +20,7 @@ export async function main() {
   const {createStore,extractSnippet,Maintenance}=await import(request.sdkUrl);
   const store=await createStore({dbPath:request.database,config:{collections:request.collections,models:request.models}});
   try {
+    if(!request.action && request.mode!=='lexical')prepareInferenceCache(store.internal.db,request.inferenceRevision);
     let result;
     if(request.action==='update'){
       const db=store.internal.db;
