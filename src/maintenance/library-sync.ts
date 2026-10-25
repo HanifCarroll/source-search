@@ -52,7 +52,15 @@ export async function publishMail(c:Config){
  requireMaintenance(c);
  if(!c.libraryEnabled||!sourceEnabled(c,'library'))return;
  for(const source of configuredSourceIds(c).filter(id=>sourceEnabled(c,id)&&isMail(id,c))){
-  await withSourceLock(c,'mail-'+source,async()=>{const db=libraryDB(c,true);try{await publishCachedMail(c,db,source);}finally{db.close();}});
+  try{
+   await withSourceLock(c,'mail-'+source,async()=>{const db=libraryDB(c,true);try{await publishCachedMail(c,db,source);}finally{db.close();}});
+  }catch(e){
+   // The source worker is still committing this mailbox. Leave its checkpoint
+   // and prior projection alone; publish the other mailboxes and retry later.
+   if(errorData(e).code==='ELOCKED')continue;
+   const db=libraryDB(c,true);
+   try{setState(db,source,{...getState(db,source),state:'error',error:errorData(e),checkedAt:now()});}finally{db.close();}
+  }
  }
 }
 async function documents(c:Config){

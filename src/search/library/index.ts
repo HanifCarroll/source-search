@@ -1,4 +1,4 @@
-import {getMailState,getProjectionState} from '../../platform/cache-state';
+import {getMailState,getProjectionState,type ProjectionState} from '../../platform/cache-state';
 import {sourceKind,isMail,connectedKinds} from '../../domain/source-catalog';
 import { isProjected } from "../../domain/source-policy";
 import {qmdIndex,qmdResults} from "../../vendor/qmd";
@@ -13,29 +13,38 @@ import { hit } from "../../domain/results";
 import { regular } from "../../platform/source-files";
 import { type Ref, type RecordData, type Query, type Page } from "../../domain/contracts";
 
-export function projectionHealth(source:any,mail:boolean,at=Date.now()){
+type CoverageState=ProjectionState&{source?:string;publicationPending?:boolean;failedFiles?:number;skippedFiles?:number};
+export function projectionHealth<T extends CoverageState>(source:T,mail:boolean,at=Date.now()){
  const complete=source.state==='ready'||source.state==='refreshing'||!!source.lastCompleteScan;
  const activity=source.state==='backfilling'&&complete?'refreshing':source.state==='ready'?'idle':source.state;
  const lastCompletedAt=source.lastSuccessfulSync||source.lastCompleteScan;
  const ageSeconds=lastCompletedAt?Math.max(0,Math.floor((at-Date.parse(lastCompletedAt))/1000)):undefined;
  const stale=mail && ageSeconds!==undefined && ageSeconds>3600;
  const failed=source.state==='error'||!!source.failedFiles;
- return {...source,state:failed?'error':!complete?source.state:stale?'stale':'ready',activity,initialBackfillComplete:complete,freshness:{lastCheckedAt:source.checkedAt,lastCompletedAt,ageSeconds,stale}};
+ return {...source,state:failed?'error':!complete?source.state:source.publicationPending?'indexing':stale?'stale':'ready',activity,initialBackfillComplete:complete,freshness:{lastCheckedAt:source.checkedAt,lastCompletedAt,ageSeconds,stale}};
 }
 export async function libraryStatus(c:Config){
  if(!c.libraryEnabled || !sourceEnabled(c,"library"))return {available:false,state:"not-configured"};
  const modelsPresent = await checkModels(c);
  const db=libraryDB(c);
  try{
-  const states=new Map((db.query("SELECT source,data FROM states").all() as any[]).map(r=>[r.source,JSON.parse(r.data)]));
-  const sources=configuredSourceIds(c).filter(source=>sourceEnabled(c,source) && isProjected(source,c)).flatMap(source=>{
+  const states=new Map((db.query("SELECT source FROM states").all() as {source:string}[]).map(r=>[r.source,getProjectionState(db,r.source)]));
+  const sources=configuredSourceIds(c).filter(source=>sourceEnabled(c,source) && isProjected(source,c)).map((source):ProjectionState&{source:string;publicationPending?:boolean}=>{
     const kind=sourceKind(source,c);
     const stage=kind.endsWith('-archive')?'archives':isMail(source,c)?'mail':kind==='documents'?'documents':kind==='tasks'||connectedKinds.includes(kind as typeof connectedKinds[number])?'snapshots':'native';
-    const failure=(stage==='archives'||stage==='native'?states.get('maintenance-direct'):undefined)||states.get('maintenance-'+stage),projection=states.has(source)?getProjectionState(db,source):undefined;
-    const saved=isMail(source,c)?{...projection,...getMailState(db,source)}:projection;
-    if(!saved && !failure)return [{source,state:'queued',records:0,chunks:0}];
-    return [{source,...saved,...(failure?.state==='error'?{state:'error',error:failure.error,checkedAt:failure.checkedAt}:{})}];
-  }).map(({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,lastSuccessfulSync,syncStrategy,coverage,error,failures,skipped,pending,discovered})=>projectionHealth({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,lastSuccessfulSync,syncStrategy,coverage,error,failedFiles:failures?.length||0,skippedFiles:skipped?.length||0,pending:Array.isArray(pending)?pending.length:pending,discovered},isMail(source,c)));
+    const failure=(stage==='archives'||stage==='native'?states.get('maintenance-direct'):undefined)||states.get('maintenance-'+stage),projection=states.get(source);
+    const mail=isMail(source,c)?getMailState(db,source):undefined;
+    const saved=mail?{...projection,...mail,publicationPending:mail.dirty===true,
+      ...(projection?.state==='error'?{state:projection.state,error:projection.error,checkedAt:projection.checkedAt}:{})}:projection;
+    if(!saved && !failure)return {source,state:'queued',records:0,chunks:0};
+    return {source,...saved,...(failure?.state==='error'?{state:'error',error:failure.error,checkedAt:failure.checkedAt}:{})};
+  }).map(({source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,
+    lastSuccessfulSync,syncStrategy,coverage,error,failures,skipped,pending,discovered,publicationPending})=>projectionHealth({
+      source,state,records,textRecords,chunks,publishedAt,checkedAt,lastCompleteScan,
+      lastSuccessfulSync,syncStrategy,coverage,error,discovered,publicationPending,
+      failedFiles:failures?.length||0,skippedFiles:skipped?.length||0,
+      pending:Array.isArray(pending)?pending.length:pending,
+    },isMail(source,c)));
   let embeddings:any={ready:0,pending:0};const bySource:Record<string,any>={};
   try{await regular(c.libraryDatabase);const index=qmdIndex(c.libraryDatabase);try{
     for(const row of index.collections(sources.map(source=>'ss-'+source.source)))bySource[row.collection.slice(3)]=row;

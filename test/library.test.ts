@@ -1,4 +1,7 @@
-import {getMailState} from '../src/platform/cache-state';
+import {getMailState,setMailState,getProjectionState,setProjectionState} from '../src/platform/cache-state';
+import {configSchema,sourceScope} from '../src/platform/config';
+import {withSourceLock} from '../src/maintenance/source-lock';
+import {publishMail} from '../src/maintenance/library-sync';
 import type { QmdRequest } from "../src/search/qmd/runner";
 import {test,expect} from "bun:test";
 import {mkdtemp,mkdir,rm,writeFile} from "node:fs/promises";
@@ -11,6 +14,26 @@ import {readLibrary,searchLibrary,libraryStatus} from "../src/search/library/ind
 import { querySchema, type RecordData } from "../src/domain/contracts";
 import {validateOptions} from "../src/domain/query";
 const rec=(id:string,body:string):RecordData=>({ref:{source:"whatsapp",id,version:id},title:"Synthetic chat",body,type:"message",locator:"synthetic",author:"Fixture speaker",conversation:"fixture",occurredAt:"2026-01-01T00:00:00Z",observedAt:"synthetic"});
+test('mail publication defers a locked mailbox, continues others and retains publication failures',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'ss-mail-publication-'));
+ const c=configSchema.parse({libraryRoot:root,libraryEnabled:true,maintenanceEnabled:true,enabledSources:['left','right','library'],sources:{left:{adapter:'gmail',account:'left',email:'left@example.test'},right:{adapter:'gmail',account:'right',email:'right@example.test'}}});
+ try{
+  let db=libraryDB(c,true);
+  for(const source of ['left','right']){
+   const record={...rec('one','Invented message'),ref:{source,id:'one',version:'v1'}};
+   db.query('INSERT INTO mail VALUES(?,?,?,?,?)').run(source,'one',JSON.stringify(record),'summary','cycle');
+   setMailState(db,source,{state:'ready',dirty:true,accountSignature:sourceScope(c,source),records:1});
+  }db.close();
+  await withSourceLock(c,'mail-left',()=>publishMail(c));
+  db=libraryDB(c);expect(getMailState(db,'left').dirty).toBe(true);expect(getMailState(db,'right').dirty).toBe(false);
+  expect(getProjectionState(db,'right').state).toBe('ready');expect(getProjectionState(db,'left').error).toBeUndefined();db.close();
+  const deferred=await libraryStatus(c);expect(deferred.sources?.find(s=>s.source==='left')?.state).toBe('indexing');
+  await publishMail(c);db=libraryDB(c,true);expect(getMailState(db,'left').dirty).toBe(false);
+  setProjectionState(db,'left',{...getProjectionState(db,'left'),state:'error',error:{code:'TEST','message':'Invented publication failure'}});db.close();
+  const failed=await libraryStatus(c);expect(failed.sources?.find(s=>s.source==='left')).toMatchObject({state:'error',error:{code:'TEST'}});
+  expect(failed.sources?.find(s=>s.source==='right')?.state).toBe('ready');
+ }finally{await rm(root,{recursive:true,force:true});}
+});
 test("projections preserve every passage, source reference and section, and bound conversation groups",()=>{
  const records=Array.from({length:45},(_,i)=>rec(String(i),"Invented message "+i));records.push({...rec("long","z".repeat(31000)),sections:[{kind:"generated",start:0,end:31000}]});
  const chunks=makeChunks("whatsapp",records,{});
