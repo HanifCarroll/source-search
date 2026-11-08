@@ -26,7 +26,7 @@ const searchSchema = z.object({
     session_id: text.min(1).max(2000), project: text, agent: text, machine: text,
     display_name: nullableText, location: text, role: text, ordinal,
     timestamp: nullableText, snippet: text, ordinal_range: z.tuple([ordinal,ordinal]).optional(),
-    transcript_revision: revision,
+    transcript_revision: revision, score: z.number().finite().nullish(), subordinate: z.boolean().optional(),
   })).max(25),
   next_cursor: ordinal.optional(), revision_bound: z.boolean(),
   coverage: z.object({status:text,lexical:z.object({status:text}),
@@ -61,18 +61,24 @@ export class AgentsViewClient {
     } catch { return fail('PERMISSION_DENIED','AgentsView tokenFile is unreadable, empty or invalid; check the configured credential file.'); }
     finally { await file?.close(); }
   }
-  private async get<T>(path:string, schema:z.ZodType<T>, params:Record<string,string|number|undefined>={}) {
+  private async get<T>(path:string, schema:z.ZodType<T>, params:Record<string,string|number|undefined>={}, headers:Record<string,string>={}) {
     const url=new URL(this.server+path);
     for(const [key,value] of Object.entries(params))if(value!==undefined)url.searchParams.set(key,String(value));
     const token=await this.token(),controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),this.timeoutMs);
     let response:Response|undefined;
     try {
-      try { response=await this.fetcher(url.toString(),{method:'GET',headers:{Authorization:'Bearer '+token,Accept:'application/json'},signal:controller.signal,redirect:'error'}); }
+      try { response=await this.fetcher(url.toString(),{method:'GET',headers:{...headers,Authorization:'Bearer '+token,Accept:'application/json'},signal:controller.signal,redirect:'error'}); }
       catch { fail('SOURCE_NOT_READY','AgentsView server is unreachable or the request timed out.'); }
       if(response.status===401 || response.status===403)fail('PERMISSION_DENIED','AgentsView authentication failed; check tokenFile and server access.');
       if(response.status===409)fail('STALE_RECORD','AgentsView transcript changed; search again for its current reference.');
       if(response.status===404)fail('NOT_FOUND','AgentsView session or endpoint was not found; search again.');
+      // 501 is AgentsView's "semantic search not available" family (index missing, building or stale).
+      if(response.status===501) {
+        let reason='';
+        try { const body=JSON.parse((await response.text()).slice(0,2000));if(typeof body?.error==='string')reason=body.error.replaceAll(token,'[redacted]').replace(/[\r\n\0]/g,' ').slice(0,300); } catch {}
+        fail('SEMANTIC_UNAVAILABLE',reason || 'AgentsView semantic search is not available.');
+      }
       if(!response.ok)fail(response.status>=500?'SOURCE_NOT_READY':'SOURCE_HTTP_ERROR',`AgentsView request failed (HTTP ${response.status}).`);
       if(Number(response.headers.get('content-length'))>this.maxBytes)fail('SOURCE_LIMIT','AgentsView response exceeded the byte limit; request a smaller window.');
       const reader=response.body?.getReader(),chunks:Uint8Array[]=[];let used=0;
@@ -97,7 +103,7 @@ export class AgentsViewClient {
     } finally { clearTimeout(timer);await response?.body?.cancel().catch(()=>{}); }
   }
   version() { return this.get('/api/v1/version',versionSchema); }
-  search(params:Record<string,string|number|undefined>) { return this.get('/api/v1/search/content',searchSchema,params); }
+  search(params:Record<string,string|number|undefined>, headers:Record<string,string>={}) { return this.get('/api/v1/search/content',searchSchema,params,headers); }
   session(id:string) { return this.get('/api/v1/sessions/'+encodeURIComponent(id),sessionSchema); }
   messages(id:string,around:number,context:number,expectedRevision:string) {
     return this.get('/api/v1/sessions/'+encodeURIComponent(id)+'/messages',messagesSchema,

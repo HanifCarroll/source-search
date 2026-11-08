@@ -9,7 +9,7 @@ export async function agentHistoryStatus(c:Config, fetcher?:AgentsViewFetch) {
   const result=await new AgentsViewClient(c,fetcher).version();
   return {available:true,checkedAt:now(),health:result.data,server:c.agentsviewServer,warnings:result.warnings,
     coverage:'AgentsView coding-agent session index',
-    querySyntax:'AgentsView FTS syntax; lexical uses fts. Hybrid (default) and semantic fall back to lexical with a warning.',
+    querySyntax:'Hybrid (default) and semantic use AgentsView meaning-based search (one ranked page, no continuation); lexical uses AgentsView FTS syntax with continuation. When the semantic index is unavailable, hybrid/semantic fall back to lexical with a warning.',
     filters:['from','to']};
 }
 const identitySchema=z.object({session:z.string().min(1).max(2000),ordinal:z.number().int().safe().nonnegative()}).strict();
@@ -29,12 +29,26 @@ export async function searchAgentHistory(c:Config, input:Query, fetcher?:AgentsV
   if(q.conversation)fail('UNSUPPORTED_FILTER','Agent history does not accept conversation filters here');
   const token=position(q.cursor,queryKey(q))??0;
   if(typeof token!=='number' || !Number.isSafeInteger(token) || token<0)fail('INVALID_CURSOR','Expected an AgentsView integer continuation');
-  const result=await new AgentsViewClient(c,fetcher).search({pattern:q.query,mode:'fts',limit:q.limit,cursor:token,
+  const client=new AgentsViewClient(c,fetcher);
+  const base={pattern:q.query,limit:q.limit,
     date_from:q.from?date(q.from,c.timeZone):undefined,
     date_to:q.to?date(new Date(Date.parse(q.to)-1).toISOString(),c.timeZone):undefined,
-    timezone:c.timeZone,include_children:'true',include_automated:'true',include_one_shot:'true'});
+    timezone:c.timeZone,include_automated:'true',include_one_shot:'true'};
+  // Lexical pages use FTS with integer cursors. Semantic/hybrid return one ranked page (no cursor) and
+  // use scope instead of include_children; AgentsView requires the explicit search-intent header.
+  const lexical=()=>client.search({...base,mode:'fts',cursor:token,include_children:'true'});
+  let fallbackReason:string|undefined, effectiveMode:string=q.mode;
+  let result:Awaited<ReturnType<typeof lexical>>;
+  if(q.mode==='lexical')result=await lexical();
+  else if(token>0){fallbackReason='Continuing an earlier lexical fallback page.';effectiveMode='lexical';result=await lexical();}
+  else {
+    try { result=await client.search({...base,mode:q.mode,scope:'all'},{'X-AgentsView-Search-Intent':'semantic'}); }
+    catch(error) {
+      if((error as {code?:string}).code!=='SEMANTIC_UNAVAILABLE')throw error;
+      fallbackReason=`AgentsView semantic search is unavailable (${(error as Error).message}); using fts.`;effectiveMode='lexical';result=await lexical();
+    }
+  }
   const data=result.data,warnings=[...result.warnings];
-  const fallbackReason=q.mode==='lexical'?undefined:'AgentsView semantic search is unavailable on this backend; using fts.';
   if(fallbackReason)warnings.push(`Requested ${q.mode}; AgentsView used lexical: ${fallbackReason}`);
   if(data.coverage.status!=='ready')warnings.push(`AgentsView coverage is ${data.coverage.status.slice(0,100)} (lexical: ${data.coverage.lexical.status.slice(0,100)}; semantic: ${data.coverage.semantic.status.slice(0,100)}).`);
   if(!data.revision_bound)fail('SOURCE_NOT_READY','AgentsView search cannot provide revision-bound references.');
@@ -43,14 +57,15 @@ export async function searchAgentHistory(c:Config, input:Query, fetcher?:AgentsV
   if(q.from||q.to)warnings.push('AgentsView from/to filters select sessions active on calendar dates in the configured timezone; they do not filter individual message timestamps.');
   warnings.push('AgentsView reads return bounded message context; tool calls are summarized.');
   return {source:q.source,status:fallbackReason||data.coverage.lexical.status!=='ready'||data.coverage.status!=='ready'||result.warnings.length?'partial':'ok',
-    retrieval:{requestedMode:q.mode,effectiveMode:'lexical',...(fallbackReason?{fallbackReason}:{})},
+    retrieval:{requestedMode:q.mode,effectiveMode,...(fallbackReason?{fallbackReason}:{})},
     items:data.matches.map(m=>hit({ref:reference(q.source,m.session_id,m.ordinal,m.transcript_revision),
       title:(m.display_name||`${m.project} · ${m.agent} (${m.machine})`).slice(0,300),body:m.snippet.slice(0,10000),
       type:'agent-conversation-hit',author:m.agent,conversation:m.session_id,observedAt:now(),
       locator:locator(q.source,m.session_id,m.ordinal),
       ...(m.timestamp&&Number.isFinite(Date.parse(m.timestamp))?{occurredAt:new Date(m.timestamp).toISOString()}:{}),
       metadata:{previewOnly:true,provenance:{sessionId:m.session_id,ordinal:m.ordinal,revision:m.transcript_revision,
-        project:m.project,agent:m.agent,machine:m.machine,role:m.role,location:m.location,ordinalRange:m.ordinal_range}}},q,'retry-smaller-page')),
+        project:m.project,agent:m.agent,machine:m.machine,role:m.role,location:m.location,ordinalRange:m.ordinal_range,
+        ...(m.score!=null?{score:m.score}:{}),...(m.subordinate?{subordinate:true}:{})}}},q,'retry-smaller-page')),
     ...(data.next_cursor?{nextCursor:cursor(queryKey(q),data.next_cursor)}:{}),warnings,observedAt:now()};
 }
 function formatMessage(message:AgentMessage) {

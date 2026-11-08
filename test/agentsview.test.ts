@@ -33,18 +33,51 @@ test('AgentsView maps search attribution, integer continuation, flags and timezo
  }finally{await f.cleanup();}
 });
 
-test('AgentsView hybrid/default/semantic requests report lexical fallback and partial coverage',async()=>{
+test('AgentsView hybrid/default/semantic requests use semantic search with the intent header',async()=>{
  const f=await agentsviewFixture();try{
+  f.search.coverage={status:'ready',lexical:{status:'ready'},semantic:{status:'ready',reason:null,embedded:10,missing:0}} as any;
+  (f.search.matches[0] as any).score=0.82;(f.search.matches[0] as any).subordinate=true;
   for(const mode of [undefined,'hybrid','semantic'] as const){
+   f.calls.length=0;
    const page=await searchAgentHistory(f.c,{...query(),mode},f.fetcher);
-   expect(page.retrieval).toMatchObject({requestedMode:mode||'hybrid',effectiveMode:'lexical'});
-   expect(page.retrieval?.fallbackReason).toContain('unavailable');expect(page.status).toBe('partial');
-   expect(page.warnings.join(' ')).toContain('AgentsView used lexical');
+   expect(page.retrieval).toMatchObject({requestedMode:mode||'hybrid',effectiveMode:mode||'hybrid'});
+   expect(page.retrieval?.fallbackReason).toBeUndefined();expect(page.status).toBe('ok');
+   const call=f.calls[0]!,params=call.url.searchParams;
+   expect(params.get('mode')).toBe(mode||'hybrid');expect(params.get('scope')).toBe('all');
+   expect(params.has('cursor')).toBe(false);expect(params.has('include_children')).toBe(false);
+   expect((call.init.headers as Record<string,string>)['X-AgentsView-Search-Intent']).toBe('semantic');
+   expect(page.items[0]!.conversation).toBe(f.session.id);expect(page.nextCursor).toBeUndefined();
   }
-  f.search.coverage.status='ready';
+  f.calls.length=0;
   const lexical=await searchAgentHistory(f.c,query(),f.fetcher);
-  expect(lexical.status).toBe('ok');expect(lexical.retrieval?.fallbackReason).toBeUndefined();
-  expect(f.calls.every(c=>c.url.searchParams.get('mode')==='fts')).toBe(true);
+  expect(lexical.status).toBe('ok');expect(lexical.retrieval).toMatchObject({requestedMode:'lexical',effectiveMode:'lexical'});
+  expect(f.calls[0]!.url.searchParams.get('mode')).toBe('fts');
+  expect((f.calls[0]!.init.headers as Record<string,string>)['X-AgentsView-Search-Intent']).toBeUndefined();
+ }finally{await f.cleanup();}
+});
+
+test('AgentsView semantic unavailability (501) falls back to lexical and keeps fallback continuations lexical',async()=>{
+ const f=await agentsviewFixture();try{
+  const fetcher:AgentsViewFetch=async(input,init)=>{
+   const url=new URL(input);
+   if(url.pathname.endsWith('/search/content')&&url.searchParams.get('mode')!=='fts'){f.calls.push({url,init});
+    return Response.json({error:'semantic search not available: index is building: 40% complete '+f.token},{status:501});}
+   return f.fetcher(input,init);
+  };
+  f.search.next_cursor=2;
+  for(const mode of [undefined,'hybrid','semantic'] as const){
+   f.calls.length=0;
+   const page=await searchAgentHistory(f.c,{...query(),mode},fetcher);
+   expect(page.retrieval).toMatchObject({requestedMode:mode||'hybrid',effectiveMode:'lexical'});
+   expect(page.retrieval?.fallbackReason).toContain('index is building');expect(page.status).toBe('partial');
+   expect(page.warnings.join(' ')).toContain('AgentsView used lexical');
+   expect(JSON.stringify(page)).not.toContain(f.token);
+   expect(f.calls.map(c=>c.url.searchParams.get('mode'))).toEqual([mode||'hybrid','fts']);
+   f.calls.length=0;f.search.next_cursor=0;
+   const next=await searchAgentHistory(f.c,{...query(),mode,cursor:page.nextCursor},fetcher);f.search.next_cursor=2;
+   expect(next.retrieval).toMatchObject({effectiveMode:'lexical'});
+   expect(f.calls.map(c=>c.url.searchParams.get('mode'))).toEqual(['fts']);expect(f.calls[0]!.url.searchParams.get('cursor')).toBe('2');
+  }
  }finally{await f.cleanup();}
 });
 
