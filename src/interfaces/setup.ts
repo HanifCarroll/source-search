@@ -33,7 +33,10 @@ export async function doctor(c:Config) {
  if(kinds.has('gmail'))await check('Gmail CLI',c.gmailBinary,'Install gog or configure an IMAP/JMAP source.');
  if(kinds.has('fastmail'))await check('Legacy mailbridge',c.mailbridgeBinary,'Use a native JMAP source for a new installation.');
  for(const id of c.enabledSources){const s=sourceConfig(c,id),kind=sourceKind(id,c);
-  if(kind==='agent-history')await check(id+' CASS',s.cassBinary,'Install CASS and build its index.');
+  if(kind==='agent-history'){
+   if(s.agentsviewTokenFile)await check(id+' AgentsView token',s.agentsviewTokenFile,'Configure a readable AgentsView tokenFile.',false);
+   checks.push({name:id+' AgentsView server',available:sources.sources.some(source=>source.source===id&&source.available),action:'Check AgentsView server reachability and bearer-token access.'});
+  }
   if(kind==='calendar'||kind==='contacts')await check(id+' macOS helper',s.pimHelper,'Build the optional macOS helper, or use ical/vcard files.');
   const definition=c.sources[id];
   if(definition?.adapter==='tasks'&&definition.connector.type==='apple-reminders'){
@@ -145,7 +148,7 @@ export async function setup(args:string[]) {
      console.error(definition.connector.repositories.length?'After setup, run sync-sources '+id+'.':'After setup, run source-lists '+id+', add selected names to connector.repositories in your config, then run sync-sources '+id+'.');
     }
     else if(adapter.startsWith('chrome-')||adapter.startsWith('browser-'))definition.profiles=[{id:await ask('Stable profile ID','default'),path:await path('Chromium profile folder')}];
-    else if(adapter==='agent-history'){definition.data=await path('CASS data folder');definition.binary=await path('CASS executable');}
+    else if(adapter==='agent-history'){definition.server=await ask('AgentsView server URL (http/https)');definition.tokenFile=await path('AgentsView bearer-token file');}
     else if(!['calendar','contacts','library','documents'].includes(adapter))fail('INVALID_CONFIG','Unknown integration');
     configSchema.parse({...settings,sources:{...settings.sources,[id]:definition},enabledSources:[...settings.enabledSources,id]});
     settings.sources[id]=definition;settings.enabledSources.push(id);

@@ -58,7 +58,7 @@ Email matching preserves local-part case, dots and plus tags; domains are case-i
 
 The result includes cited excerpts, the reason each was retrieved, confirmed links, task fields where present, source coverage, gaps and unread references. `coverage.planComplete` means the configured plan finished, not that all history was searched. Follow each search's `nextCursor` with `search_sources`, open `pending` references with `read_record`, and use each evidence item's `read` input for its full text. Historical task states remain historical. A changed pinned record is reported as stale; search again and review its new version before updating the mapping.
 
-Use saved queries for CASS agent history. Its references are bound to a particular search result; an index refresh can invalidate them even when the conversation still exists. Removing `version` does not remove that query binding. A stale result needs a new search reference.
+Agent-history references identify an AgentsView session and message ordinal. Their `version` pins the transcript revision, so an index refresh alone does not invalidate them. If the transcript changes, search again and review the new reference. Old query-bound references must be replaced by a new search.
 
 Each call runs at most eight saved searches, selects at most sixteen entities, and opens up to `limit` unique candidates (default 12, maximum 20). Excerpts and the whole response are bounded; omitted work is reported. For a larger project, narrow the sources or split its saved searches. Use original sources for context; `library` and `documents` can discover original references separately.
 
@@ -136,19 +136,27 @@ Select downloaded ZIP exports; ChatGPT also accepts an extracted export director
 
 ## Agent history
 
-Install [CASS](https://github.com/Dicklesworthstone/coding_agent_session_search) and build its index for the sessions you want to search. The adapter was developed against CASS 0.10.0. Configure its existing data directory and executable:
+Connect to an existing [AgentsView v0.46.1 server](https://github.com/kenn-io/agentsview/tree/v0.46.1) that indexes your selected coding-agent sessions. Add this entry under `sources` and opt in to its ID through `enabledSources`:
 
 ```json
 {
   "coding-history": {
     "adapter": "agent-history",
-    "data": "/absolute/path/to/cass-data",
-    "binary": "/absolute/path/to/cass"
+    "server": "https://agentsview.example.test",
+    "tokenFile": "/absolute/path/to/agentsview.token"
   }
 }
 ```
 
-CASS owns ingestion and incremental indexing. Source Search's `sources` command reports its readiness and recovery guidance; `rebuild` only handles account exports. Keep a working CASS index and its existing refresh process when adding this connector.
+Use an HTTP or HTTPS server URL without embedded credentials, query parameters or fragments, and an absolute path to a private bearer-token file. The client reopens and trims that file for every request, so token rotation needs no restart. The token stays out of results and errors. `sources` and `doctor` check server access; `doctor` also checks token-file readability. No AgentsView binary or local session database is needed by Source Search.
+
+Lexical mode uses AgentsView FTS query syntax. Hybrid is still the default; both hybrid and semantic currently fall back to FTS and report the requested/effective modes, a fallback reason and a warning. Search includes child, automated and one-shot sessions across the server's indexed machines and agents. Coverage and stale-archive warnings describe incomplete results. Follow every `nextCursor` to continue.
+
+`from` and `to` are converted to calendar dates in the configured `timeZone`; the exclusive `to` instant is reduced by one millisecond before conversion to the provider's inclusive date. AgentsView selects sessions active on those dates, so these bounds do not filter individual message timestamps or enforce sub-day precision.
+
+Search references contain session ID and message ordinal, with the transcript revision in `version`. `read_record` returns session metadata and that message; `context: true` adds up to five messages on either side. Each message is capped at 10,000 characters, tool calls are summarized, and text continuation preserves the same window. Reads use `expected_revision`; changed transcripts return `STALE_RECORD`. Old query-bound references return `INVALID_REFERENCE`; search again.
+
+AgentsView owns ingestion and index maintenance. Source Search only sends bounded read-only GET requests and does not start rebuilds or ingestion. The stale-archive response header becomes a warning. Version 0.46.1 has no reliable whole-index generation: `data_version` identifies the parser format and the newest session cannot reveal edits to older sessions. Change tracking therefore returns `UNSUPPORTED_CHANGE_TRACKING`. A future index-level feed must emit resets that mean rerun relevant searches, rather than claim per-message deltas.
 
 ## Task apps
 

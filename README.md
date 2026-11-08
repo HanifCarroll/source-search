@@ -49,7 +49,7 @@ Use the guide for each selected source:
 | GitHub code, issues and pull requests; Linear | [Selected repositories](docs/connectors.md#github-repository-files), [issues and comments](docs/connectors.md#github-and-linear) |
 | Notion, cloud files and Slack | [Notion](docs/connectors.md#notion), [Drive/OneDrive](docs/connectors.md#google-drive-and-onedrive), [Slack](docs/connectors.md#slack) |
 | ChatGPT, Google Takeout, LinkedIn and X exports | [Account exports](docs/connectors.md#account-exports) |
-| Coding-agent conversations | [CASS agent history](docs/connectors.md#agent-history) |
+| Coding-agent conversations | [AgentsView agent history](docs/connectors.md#agent-history) |
 
 For interactive setup, run `bun run start setup`. Install only the dependencies needed by the selected sources; keyword search needs no models.
 
@@ -62,7 +62,7 @@ Set `maintenanceEnabled: true` for the commands below. Replace `SOURCE_ID` with 
 | `tasks`, `calendars`, `address-books`, `notes` (Notion), `files`, `issues`, `chat`, `repositories` | `bun run start sync-sources SOURCE_ID` |
 | `*-archive` | `bun run start rebuild` |
 | `vault` | `bun run start index --source SOURCE_ID` |
-| Other direct readers | No Source Search indexing step; CASS maintains its own index |
+| Other direct readers | No Source Search indexing step; AgentsView maintains the agent-history index |
 
 Finish provider login and collection selection from the source's guide before syncing. `source-lists SOURCE_ID` discovers lists, folders or repositories where supported. Choose the repositories explicitly before their first sync.
 

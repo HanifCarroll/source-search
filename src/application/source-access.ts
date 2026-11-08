@@ -14,7 +14,7 @@ import { requireSource, configuredSourceIds, mailAccount, markdownSettings, sour
 import {runQmd} from '../search/qmd/runner';
 import { libraryStatus, searchLibrary, readLibrary, readDocument } from '../search/library/index';
 import { qmdStatus, searchQmd, readQmd } from '../search/qmd/vault';
-import { cassStatus, searchCass, readCass } from '../sources/agent-history/index';
+import { agentHistoryStatus, searchAgentHistory, readAgentHistory } from '../sources/agent-history/index';
 import { isDailyJournal, journalPaths, searchJournals, journalRecord } from '../sources/local/journals';
 import { databaseStatus, searchDatabase, readDatabase } from '../sources/local/databases';
 import { notesStatus, searchNotes, readNote } from '../sources/local/notes';
@@ -109,7 +109,7 @@ export function createSourceAccess(config: Config, execute: Run = run,signal?:Ab
       search:q=>q.task||q.sort==='due'?searchThingsTasks(config,q):searchArchive(config,q),read:recordOnly(ref=>readExport(config,ref)),
     },
     vault:{status:async()=>({...await qmdStatus(config),pagination:true}),search:q=>searchQmd(config,q,request=>runQmd(request,config,signal)),read:recordOnly(ref=>readQmd(config,ref))},
-    'agent-history':{status:async()=>({...await cassStatus(config),pagination:true}),search:q=>searchCass(config,q),read:recordOnly((ref,context)=>readCass(config,ref,context))},
+    'agent-history':{status:async()=>({...await agentHistoryStatus(config),pagination:true}),search:q=>searchAgentHistory(config,q),read:recordOnly((ref,context)=>readAgentHistory(config,ref,context))},
     };
     return readers[kind];
   }
@@ -141,7 +141,7 @@ export function createSourceAccess(config: Config, execute: Run = run,signal?:Ab
     requireSource(config,ref.source);
     if(!adapters[ref.source])fail('SOURCE_NOT_CONFIGURED','No adapter is configured for this source');
     const mode=contextMode(ref.source,config);
-    // CASS neighbors form part of the record body, so continuation must retain
+    // AgentsView neighbors form part of the record body, so continuation must retain
     // that same window. Separate neighboring records need fetching only once.
     const context=!!options.context && (mode==='inline' || !options.continuation);
     const result=await adapters[ref.source].read(ref,context);

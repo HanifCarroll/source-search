@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import {sourceKind,isMail,adapterKinds,connectedKinds} from "../domain/source-catalog";
-import {sourcesSchema,accountSchema,timeZoneSchema,type MarkdownSettings} from "./source-settings";
+import {sourcesSchema,accountSchema,timeZoneSchema,agentsviewServerSchema,type MarkdownSettings} from "./source-settings";
 import { sourceId } from "../domain/contracts";
 import {contextEntitiesSchema} from '../domain/context';
 import { fail } from "../domain/identity";
@@ -71,8 +71,8 @@ export const configSchema = z.object({
   libraryDatabase: path.default(join(state, "library-qmd.sqlite")),
   documentRoots: z.array(path).default([]),
   extractorPython: path.default(join(home, ".local/share/source-search/extract-env/bin/python")),
-  cassBinary: path.default(executable("cass")),
-  cassData: path.default(join(home, ".local/share/cass"))
+  agentsviewServer: agentsviewServerSchema.optional(),
+  agentsviewTokenFile: path.optional()
 }).strict().superRefine((c,ctx)=>{
   const contains=(a:string,b:string)=>{const r=relative(resolve(a),resolve(b));return !r||r!=='..'&&!r.startsWith('..'+sep)&&!isAbsolute(r);};
   const caches=[state,c.index,c.libraryRoot,c.libraryDatabase,c.qmdDatabase,c.previews,...(c.searchAcceleration?[c.searchAcceleration.cache]:[]),...Object.values(c.sources).flatMap(s=>s.adapter==='vault'&&s.database?[s.database]:[])];
@@ -108,6 +108,7 @@ export function requireMaintenance(config:Config) { if(!config.maintenanceEnable
 export function sourceScope(config:Config,source:string):string {
   const fields:Record<string,string[]>={
     "things-archive":["things"],"chatgpt-archive":["chatgpt"],"takeout-archive":["takeout"],"linkedin-archive":["linkedin"],"twitter-archive":["twitter"],
+    "agent-history":["agentsviewServer","agentsviewTokenFile"],
     messages:["messages"],whatsapp:["whatsapp"],calls:["muesli"],documents:["documentRoots","takeout","mailAccounts","enabledSources"]
   };
   const kind=sourceKind(source,config),definition=config.sources[source];
@@ -147,7 +148,7 @@ export function evidenceScope(config:Config,source:string):string {
   const c=sourceConfig(config,source),kind=sourceKind(source,config);
   const direct=kind==='markdown'?markdownSettings(config,source)
     :kind==='vault'?{roots:c.qmdRoots,database:c.qmdDatabase}
-    :kind==='agent-history'?{data:c.cassData,binary:c.cassBinary}
+    :kind==='agent-history'?{server:c.agentsviewServer,tokenFile:c.agentsviewTokenFile}
     :['calendar','contacts'].includes(kind)?{helper:c.pimHelper,launcher:c.pimLauncher}
     :kind.startsWith('chrome-')?{profiles:c.chromeProfiles,ids:c.chromeProfileIds}:undefined;
   return createHash('sha256').update(JSON.stringify({scope:sourceScope(config,source),definition:connectionIdentity(c.sources[source]),direct})).digest('hex');
@@ -162,7 +163,7 @@ export function sourceConfig(c:Config,id:string):Config {
  if('paths' in s && s.adapter.endsWith('-archive'))(v as any)[s.adapter.replace('-archive','')]=s.paths || (v as any)[s.adapter.replace('-archive','')];
  if('profiles' in s && s.profiles){v.chromeProfiles=s.profiles.map(p=>p.path);v.chromeProfileIds=s.profiles.map(p=>p.id);v.chromeLegacyProfileIds='legacyProfileIds' in s?s.legacyProfileIds:undefined;}
  if(s.adapter==='calendar'||s.adapter==='contacts'){v.pimHelper=s.helper||v.pimHelper;v.pimLauncher=s.launcher||v.pimLauncher;}
- if(s.adapter==='agent-history'){v.cassData=s.data||v.cassData;v.cassBinary=s.binary||v.cassBinary;}
+ if(s.adapter==='agent-history'){v.agentsviewServer=s.server;v.agentsviewTokenFile=s.tokenFile;}
  if(s.adapter==='vault'){v.qmdRoots=s.roots||v.qmdRoots;v.qmdDatabase=s.database||(id==='vault'?v.qmdDatabase:join(state,'indexes',id+'.sqlite'));}
  if(id!==s.adapter && s.adapter.endsWith('-archive'))v.index=join(c.index+'.sources',id+'.sqlite');
  return v;

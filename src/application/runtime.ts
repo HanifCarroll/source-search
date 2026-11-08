@@ -63,7 +63,7 @@ export function createRuntime(config: Config, execute?: Run,signal?:AbortSignal)
       }
       result.items.pop(); result.budgetReduced = true; output.truncated = true;
       if (!canTrimItems(queries[results.indexOf(result)]!,config)) {
-        // shortcut: Gmail/CASS have no safe intra-page token here; retry smaller pages until their providers expose one.
+        // shortcut: Gmail/AgentsView have no safe intra-page token here; retry smaller pages until their providers expose one.
         const index=results.indexOf(result), q=queries[index];
         results[index]=await fetchPage({...q,limit:Math.max(1,Math.floor(result.items.length/2))});
         results[index].budgetReduced=true;

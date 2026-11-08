@@ -8,14 +8,12 @@ import { createRuntime } from "../src/application/runtime";
 import { querySchema, type Ref } from "../src/domain/contracts";
 import { rebuildArchive } from "../src/sources/archives/index";
 import { exportRecords } from "../src/sources/archives/originals";
-import { searchCass, readCass, cassStatus } from "../src/sources/agent-history/index";
-import type { CassRunnerRequest } from "../src/vendor/cass/contracts";
 import { createZip } from "./helpers/zip";
 import { notesStatus } from "../src/sources/local/notes";
 let root: string, c: Config;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "source-search-more-"));
-  c = { ...defaultConfig(), things: join(root,"things"), index: join(root,"index.sqlite"), whatsapp: join(root,"wa.db"), muesli: join(root,"calls.db"), voiceNotes: join(root,"voice"), callNotes: join(root,"notes"), chromeProfiles: [join(root,"chrome")], pimLauncher: join(root,"launcher"), pimHelper: join(root,"helper"), cassBinary: join(root,"missing-cass"), cassData: join(root,"cass-data") };
+  c = { ...defaultConfig(), things: join(root,"things"), index: join(root,"index.sqlite"), whatsapp: join(root,"wa.db"), muesli: join(root,"calls.db"), voiceNotes: join(root,"voice"), callNotes: join(root,"notes"), chromeProfiles: [join(root,"chrome")], pimLauncher: join(root,"launcher"), pimHelper: join(root,"helper") };
   for (const p of [c.things,c.voiceNotes,c.callNotes,c.chromeProfiles[0]]) await mkdir(p);
   await writeFile(join(c.things,"tasks.jsonl"), ""); await writeFile(join(c.things,"context.json"),'{"TMTask":[]}'); await writeFile(join(c.things,"snapshot-info.json"),'{"exportedAt":"2026-10-11T00:00:00Z","taskCount":0}');
 });
@@ -112,15 +110,6 @@ test("Takeout products retain nested Maps and contributions; malformed refresh a
   await writeFile(zip,await createZip([{path:"../outside.json",text:"{}"}])); await expect(exportRecords(c,"takeout-archive")).rejects.toThrow();
 });
 
-test("CASS stays read-only, gates rebuilding and validates query-bound context references", async () => {
-  const calls: CassRunnerRequest[]=[]; let rebuilding=false;
-  const runner=async(r:CassRunnerRequest)=>{calls.push(r); const data=r.args.includes("health") ? {healthy:!rebuilding,initialized:true,status:rebuilding?"rebuilding":"healthy",index:{exists:true},database:{opened:true}} : r.args.includes("search") ? {hits:[{title:"Fixture agent",snippet:"fixture",source_path:"/synthetic/session.jsonl",line_number:2,agent:"codex",source_id:"local",origin_kind:"local"}],total_matches:1,_meta:{next_cursor:null}} : {path:"/synthetic/session.jsonl",target_line:2,context:0,total_lines:3,source_exists:true,archive_only:false,lines:[{line:2,content:"Fixture original line",highlighted:true}]};return{exitCode:0,stdout:JSON.stringify(data),stderr:"",timedOut:false,outputLimitExceeded:false};};
-  const q=querySchema.parse({source:"agent-history",query:"fixture"}), p=await searchCass(c,q,runner); expect(p.items).toHaveLength(1); expect((await readCass(c,p.items[0].ref,false,runner)).body).toContain("Fixture original line");
-  expect(calls.filter(r=>r.args.includes("search")).every(r=>r.args.includes("--no-maintenance")&&r.args.includes("--no-daemon"))).toBe(true); expect(calls.every(r=>!r.args.includes("index")&&!r.args.includes("models"))).toBe(true);
-  const view=calls.find(r=>r.args.includes("view"))!;expect(view.args).toContain('--message-index');expect(view.args).not.toContain('--line');expect(view.args).not.toContain('--data-dir');expect(view.args.indexOf('--db')).toBeLessThan(view.args.indexOf('view'));
-  const malformed={source:"agent-history" as const,id:Buffer.from('{"q":{"source":"agent-history","query":"x","limit":10},"result":99,"fingerprint":"x"}').toString("base64url")}; await expect(readCass(c,malformed,false,runner)).rejects.toThrow("Invalid");
-  rebuilding=true; expect((await cassStatus(c,runner)).available).toBe(false); await expect(searchCass(c,q,runner)).rejects.toThrow("rebuilding");
-});
 
 
 test("actual Takeout field aliases and nested MIME text remain searchable without attachment bytes", async () => {

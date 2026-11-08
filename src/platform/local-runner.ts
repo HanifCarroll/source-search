@@ -1,6 +1,21 @@
 import { isAbsolute } from "node:path";
 
-import type { CassRunner, CassRunnerRequest, CassRunnerResult } from "./contracts.ts";
+export type LocalRunnerRequest = {
+  binaryPath: string;
+  args: readonly string[];
+  timeoutMs: number;
+  maxOutputBytes: number;
+};
+
+export type LocalRunnerResult = {
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  outputLimitExceeded: boolean;
+};
+
+export type LocalRunner = (request: LocalRunnerRequest) => Promise<LocalRunnerResult>;
 
 type OutputBudget = {
   used: number;
@@ -44,26 +59,25 @@ async function readLimitedStream(
   }
 }
 
-function validateRunnerRequest(request: CassRunnerRequest): void {
+function validateRunnerRequest(request: LocalRunnerRequest): void {
   if (!isAbsolute(request.binaryPath) || request.binaryPath.includes("\0")) {
-    throw new Error("CASS binary path must be an absolute local path");
+    throw new Error("Local runner binary path must be an absolute local path");
   }
   if (!Number.isInteger(request.timeoutMs) || request.timeoutMs < 1) {
-    throw new Error("CASS timeout must be a positive integer");
+    throw new Error("Local runner timeout must be a positive integer");
   }
   if (!Number.isInteger(request.maxOutputBytes) || request.maxOutputBytes < 1) {
-    throw new Error("CASS output limit must be a positive integer");
+    throw new Error("Local runner output limit must be a positive integer");
   }
   if (request.args.some((arg) => typeof arg !== "string" || arg.includes("\0"))) {
-    throw new Error("CASS arguments must be NUL-free strings");
+    throw new Error("Local runner arguments must be NUL-free strings");
   }
 }
 
 /**
- * Runs CASS locally with an argv array. This intentionally does not invoke a
- * shell, set a remote source, refresh an index, or execute a CASS mutation.
+ * Runs a local executable with an argv array, without invoking a shell.
  */
-export const runLocalCass: CassRunner = async (request): Promise<CassRunnerResult> => {
+export const runLocal: LocalRunner = async (request): Promise<LocalRunnerResult> => {
   validateRunnerRequest(request);
 
   // Bun receives one executable plus one argument per array entry. No shell

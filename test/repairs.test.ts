@@ -10,7 +10,6 @@ import {typedMessage} from "./helpers/messages";
 import { querySchema, type RecordData } from "../src/domain/contracts";
 import { hit, textPage, packetBytes } from "../src/domain/results";
 import {findRecordMatch,contentSections} from "../src/domain/content";
-import {cassStatus,searchCass} from "../src/sources/agent-history/index";
 import {annotateDuplicates,compactRecord,googleDocument} from "../src/domain/presentation";
 import {writePreview} from "../src/application/preview";
 import {rebuildArchive,searchArchive} from "../src/sources/archives/index";
@@ -40,17 +39,6 @@ test('WhatsApp native participants are separate from group identity, and unknown
  const r=await createRuntime(c).read_record({ref:p.items[1].ref});expect(r.record.author).toBe('Alex');expect(r.record.conversation).toBe('group@g.us');
 });
 
-test('CASS reconciles nested stale quick health with full readiness, but never bypasses active maintenance',async()=>{
- let active=false;let origin='local';let line:number|null=1;const calls:string[][]=[];
- const runner=async(r:any)=>{calls.push(r.args);const data=r.args.includes('health')?{healthy:false,initialized:true,status:active?'rebuilding':'unhealthy',errors:['index stale'],state:{index:{exists:true,stale:true,status:'ready'},database:{exists:true,opened:true},rebuild:{active}}}:r.args.includes('status')?{healthy:true,status:'healthy',index:{exists:true,fresh:true},database:{exists:true,opened:true},rebuild:{active:false}}:{hits:[{title:'Fixture',snippet:'fixture',source_path:'/synthetic/session',line_number:line,agent:'codex',source_id:'fixture-import',origin_kind:origin}],total_matches:1,_meta:{next_cursor:null}};return {exitCode:0,stdout:JSON.stringify(data),stderr:'',timedOut:false,outputLimitExceeded:false};};
- const c=defaultConfig();expect((await cassStatus(c,runner)).available).toBe(true);
- expect((await searchCass(c,querySchema.parse({source:'agent-history',query:'fixture'}),runner)).items).toHaveLength(1);
- expect(calls.filter(c=>c.includes('search')).every(c=>c.includes('--no-maintenance')&&c.includes('--no-daemon'))).toBe(true);
- origin='remote';await expect(searchCass(c,querySchema.parse({source:'agent-history',query:'fixture'}),runner)).rejects.toThrow('non-local');origin='local';
- line=null;const p=await searchCass(c,querySchema.parse({source:'agent-history',query:'fixture'}),runner);const {readCass}=await import('../src/sources/agent-history/index');await expect(readCass(c,p.items[0].ref,false,runner)).rejects.toThrow('canonical message');line=1;
- active=true;await expect(searchCass(c,querySchema.parse({source:'agent-history',query:'fixture'}),runner)).rejects.toThrow('rebuilding');
- expect(calls.some(c=>c.includes('index'))).toBe(false);
-});
 
 test('matches identify the section, name-only hits and exact Unicode positions; focus binds the original',()=>{
  const r=record('Original transcript\n'+'a'.repeat(15000)+'\nİstanbul café needle\n\nGenerated meeting notes\nsummarytoken\n\nManual notes\nmanualtoken');
@@ -107,7 +95,7 @@ test('grouped Gmail requests share the three-original preview budget and Fastmai
 });
 
 test('full-catalogue grouped search retains matching sources and every mail hit after budget reductions',async()=>{
- const root=await folder(),c={...defaultConfig(),journals:root,voiceNotes:root,callNotes:root,things:join(root,'missing'),messages:join(root,'missing-messages'),whatsapp:join(root,'missing-wa'),muesli:join(root,'missing-calls'),chromeProfiles:[root],pimLauncher:join(root,'missing-helper'),cassBinary:join(root,'missing-cass')};
+ const root=await folder(),c={...defaultConfig(),journals:root,voiceNotes:root,callNotes:root,things:join(root,'missing'),messages:join(root,'missing-messages'),whatsapp:join(root,'missing-wa'),muesli:join(root,'missing-calls'),chromeProfiles:[root],pimLauncher:join(root,'missing-helper')};
  await writeFile(join(root,'2024-01-01.md'),'fixture journal');
  const all=Array.from({length:30},(_,i)=>({id:'m'+i,subject:'Fixture '+i+'x'.repeat(250),from:'x'.repeat(500),snippet:'fixture '+'x'.repeat(500)}));
  const run=async(argv:string[])=>{if(argv.includes('get'))throw Error('unused');if(argv.includes('--paged'))return {position:0,queryState:'stable',total:0,nextPosition:null,messages:[]};const n=Number(argv[argv.indexOf('--max')+1]),p=argv.indexOf('--page'),start=p>=0?Number(argv[p+1]):0;return {messages:all.slice(start,start+n),nextPageToken:start+n<all.length?String(start+n):undefined};};

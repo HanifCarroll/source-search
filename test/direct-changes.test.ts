@@ -146,7 +146,7 @@ test('portable contact files track exact references and QMD observes only select
 }));
 
 test('index-level trackers emit resets only for changed content and isolate failed readers',()=>temp(async root=>{
- const c=config(root,{enabledSources:['history','notes'],sources:{history:{adapter:'agent-history'},notes:{adapter:'markdown',root}}});
+ const c=config(root,{enabledSources:['history','notes'],sources:{history:{adapter:'agent-history',server:'http://agentsview.example.test',tokenFile:join(root,'invented-token')},notes:{adapter:'markdown',root}}});
  let revision='one';const reader:typeof directReader=(_c,source)=>async()=>{if(source==='notes')throw Error('Invented unavailable source');return {entries:[],state:{checkedAt:new Date().toISOString(),strategy:'index',coverage:'Fixture committed index',generation:revision,granularity:'index'}};};
  expect((await syncDirect(c,c.enabledSources,reader)).ok).toBe(false);const first=await feed(c);expect(first.items).toHaveLength(1);
  await syncDirect(c,c.enabledSources,reader);expect((await feed(c,first.cursor)).items).toEqual([]);

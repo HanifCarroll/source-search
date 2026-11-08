@@ -12,8 +12,6 @@ import {readNote} from "../src/sources/local/notes";
 import {annotateDuplicates,compactRecord,googleDocument,progress} from "../src/domain/presentation";
 import {readablePim} from "../src/sources/local/pim";
 import {linkedInRecords} from "../src/sources/archives/linkedin";
-import {cassStatus,searchCass} from "../src/sources/agent-history/index";
-import {describeSource} from "../src/application/catalogue";
 import {searchMail} from "./helpers/mail";
 import {rebuildArchive,searchArchive} from "../src/sources/archives/index";
 import {exportRecords,readExport} from "../src/sources/archives/originals";
@@ -44,14 +42,6 @@ test("mail footers are labelled, provider-only matches stay honest, and spam/tra
  expect(calls[0].at(-1)).toContain("-in:spam -in:trash");expect(calls[1].at(-1)).toBe("community");expect(calls[2]).toContain("--exclude-spam-trash");expect(calls[3]).not.toContain("--exclude-spam-trash");
 });
 
-test("CASS stale fingerprint diagnosis and recovery never start maintenance",async()=>{
- const calls:string[][]=[],raw={healthy:false,status:"unhealthy",initialized:true,index:{exists:true,stale:true,reason:"database fingerprint changed since the last lexical checkpoint",fingerprint:{current_db_fingerprint:"current",checkpoint_fingerprint:"checkpoint"}},database:{exists:true,opened:true},rebuild:{active:false},recommended_action:"Run cass index"};
- const runner=async(r:any)=>{calls.push(r.args);return {exitCode:1,stdout:JSON.stringify(raw),stderr:"",timedOut:false,outputLimitExceeded:false};};
- const c=defaultConfig(),status=await cassStatus(c,runner),described=describeSource(c,{source:"agent-history",...status});
- expect(status.health.index.databaseFingerprint).toBe("current");expect(status.health.explanation).toContain("fingerprint");expect(described.state).toBe("stale");expect(described.recovery).toContain("Run cass index");expect(described.recovery).toContain("export indexes");
- await expect(searchCass(c,querySchema.parse({source:"agent-history",query:"fixture"}),runner)).rejects.toThrow("Refresh the configured CASS index");expect(calls.every(args=>!args.includes("index") && !args.includes("search"))).toBe(true);
- const fallback=await cassStatus(c,async(r:any)=>r.args.includes("status") ? {exitCode:1,stdout:"",stderr:"",timedOut:true,outputLimitExceeded:false} : runner(r));expect(fallback.available).toBe(false);expect(fallback.health.index.reason).toContain("fingerprint");expect(fallback.health.warnings[0]).toContain("readiness remains false");
-});
 
 test("Contacts default ordering and missing WhatsApp text give accurate guidance",async()=>{
  const p=progress({source:"contacts",status:"ok",items:[],warnings:[],observedAt:""},querySchema.parse({source:"contacts",query:""}));expect(p.query?.sort).toBe("source-order");

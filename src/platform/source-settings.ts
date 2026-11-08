@@ -7,6 +7,10 @@ import {adapterKinds, connectedKinds, groupIds, sourceKind, sourceCategory} from
 import {sourceId} from '../domain/contracts';
 
 const path = z.string().refine(isAbsolute, 'Source paths must be absolute');
+export const agentsviewServerSchema = z.string().max(2000).refine(value => {
+  try { const u=new URL(value); return ['http:','https:'].includes(u.protocol) && !u.username && !u.password && !u.search && !u.hash; }
+  catch { return false; }
+}, 'AgentsView server must be an http/https URL without credentials, query or fragment');
 export const timeZoneSchema = z.string().refine(value => {
   try { new Intl.DateTimeFormat('en', {timeZone:value}); return true; }
   catch { return false; }
@@ -101,13 +105,21 @@ export const sourceSettings = z.discriminatedUnion('adapter', [
   ...(['calendar','contacts'] as const).map(adapter=>z.object({...common,adapter:z.literal(adapter),helper:path.optional(),launcher:path.optional()}).strict()),
   z.object({...common,adapter:z.literal('ical'),paths:files,timeZone:timeZoneSchema.optional()}).strict(),
   z.object({...common,adapter:z.literal('vcard'),paths:files}).strict(),
-  z.object({...common,adapter:z.literal('agent-history'),data:path.optional(),binary:path.optional()}).strict(),
+  z.object({...common,adapter:z.literal('agent-history'),server:agentsviewServerSchema,tokenFile:path}).strict(),
   z.object({...common,adapter:z.literal('vault'),roots:z.record(sourceId,path).optional(),database:path.optional()}).strict(),
   ...single.map(adapter => z.object({...common, adapter:z.literal(adapter)}).strict()),
 ]);
 export type SourceSettings = z.infer<typeof sourceSettings>;
 export type MarkdownSettings = z.infer<typeof markdown>;
-export const sourcesSchema = z.record(sourceId, sourceSettings).default({}).superRefine((sources, ctx) => {
+export const sourcesSchema = z.preprocess((value,ctx) => {
+  if(value && typeof value==='object')for(const [id,s] of Object.entries(value)) {
+    if(s && s.adapter==='agent-history' && !s.server && ('data' in s || 'binary' in s)) {
+      ctx.addIssue({code:'custom',path:[id],message:'Agent history now uses AgentsView. Replace data/binary with server (http/https URL) and tokenFile (absolute path), then search again for new references.'});
+      return z.NEVER;
+    }
+  }
+  return value;
+}, z.record(sourceId, sourceSettings).default({}).superRefine((sources, ctx) => {
   if(Object.keys(sources).length > 100)ctx.addIssue({code:'custom', message:'At most 100 source instances are supported'});
   for(const [id, setting] of Object.entries(sources)) {
     if(groupIds.includes(id as typeof groupIds[number]))
@@ -117,7 +129,7 @@ export const sourcesSchema = z.record(sourceId, sourceSettings).default({}).supe
     if(adapterKinds.includes(id as typeof adapterKinds[number]) && !connectedKinds.includes(id as typeof connectedKinds[number]) && !['tasks','browser-history','browser-bookmarks','browser-downloads'].includes(id) && id !== setting.adapter)
       ctx.addIssue({code:'custom', path:[id], message:'Source ID is reserved for another integration'});
   }
-});
+}));
 export function sourceGroups(config:{sources:Record<string,SourceSettings>; enabledSources:string[]}) {
   const names = [...new Set([...Object.keys(config.sources), ...config.enabledSources])];
   const notes = names.filter(id => ['markdown','notes'].includes(sourceKind(id, config)));

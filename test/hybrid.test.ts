@@ -10,8 +10,6 @@ import { hash } from "../src/domain/identity";
 import { annotateDuplicates, progress } from "../src/domain/presentation";
 import { validateOptions } from "../src/domain/query";
 import { qmdPath, qmdStatus, searchQmd, readQmd } from "../src/search/qmd/vault";
-import { searchCass, readCass } from "../src/sources/agent-history/index";
-import type { CassRunnerRequest } from "../src/vendor/cass/contracts";
 
 async function fixture() {
   const dir=await mkdtemp(join(tmpdir(),"source-search-hybrid-")),root=join(dir,"notes");await mkdir(root);
@@ -65,14 +63,6 @@ test("search mode and unsupported filters never silently affect the wrong provid
  expect(()=>validateOptions(querySchema.parse({source:"mail-personal",query:"idea",mode:"hybrid"}))).not.toThrow();
  expect(()=>validateOptions(querySchema.parse({source:"vault",query:"idea",from:"2026-01-01T00:00:00Z"}))).toThrow("date/section");
  expect(()=>validateOptions(querySchema.parse({source:"vault",query:"idea",sort:"relevance",mode:"hybrid"}))).not.toThrow();
-});
-test("CASS preserves hybrid mode in context reads and exposes lexical fallback",async()=>{
- const calls:CassRunnerRequest[]=[];
- const runner=async(r:CassRunnerRequest)=>{calls.push(r);const data=r.args.includes("health")?{healthy:true,initialized:true,index:{exists:true,documents:10,stale:false},database:{exists:true,opened:true}}:r.args.includes("search")?{hits:[{title:"Fixture",snippet:"Synthetic result",source_path:"/synthetic/session",line_number:1,agent:"codex",source_id:"fixture",origin_kind:"local"}],total_matches:1,_meta:{search_mode:"lexical",requested_search_mode:"hybrid",fallback_reason:"Synthetic missing vectors",next_cursor:null}}:{path:"/synthetic/session",target_line:1,context:0,total_lines:1,source_exists:true,archive_only:false,lines:[{line:1,content:"Synthetic result",highlighted:true}]};return {exitCode:0,stdout:JSON.stringify(data),stderr:"",timedOut:false,outputLimitExceeded:false};};
- const q=querySchema.parse({source:"agent-history",query:"fixture"});const page=await searchCass(defaultConfig(),q,runner);
- expect(page.retrieval).toEqual({requestedMode:"hybrid",effectiveMode:"lexical",fallbackReason:"Synthetic missing vectors"});expect(page.warnings.some(w=>w.includes("Requested hybrid"))).toBe(true);
- await readCass(defaultConfig(),page.items[0]!.ref,false,runner);
- expect(calls.filter(c=>c.args.includes("search")).every(c=>c.args.includes("--mode=hybrid")&&c.args.includes("--no-maintenance"))).toBe(true);
 });
 
 test("QMD and a native journal hit are one lineage, and bounded ranking is not complete coverage",()=>{

@@ -78,7 +78,7 @@ Existing source IDs and flat configuration fields remain supported. For new sett
 - Move each `mailAccounts` entry to `sources.<same-id>` and add `adapter: "gmail"` or `"fastmail"`.
 - Move note paths to Markdown source definitions. Copy the filename pattern, date fields, content label and timezone you actually use. See the [Markdown settings](connectors.md#markdown-folders). Legacy voice/call notes used `content: "transcript"`, `reviewed: true`, and date fields `["source_started_at", "date"]`.
 - Move `muesli` to `sources.calls` with `adapter: "muesli"` and `database`; move `whatsapp` to `sources.whatsapp` similarly.
-- Move archive file lists to `sources.<id>.paths`, Things exports to `root` or `database`, Messages to `database`, CASS to `data`/`binary`, and vault collections to `roots`/`database`. Preserve IDs and selected locations.
+- Move archive file lists to `sources.<id>.paths`, Things exports to `root` or `database`, Messages to `database`, agent history to `server`/`tokenFile`, and vault collections to `roots`/`database`. Preserve IDs and selected locations.
 - Move browser profiles to `profiles: [{"id":"work","path":"/profile/path"}]`; retain the original numeric order in `legacyProfileIds`. New references use profile IDs.
 - Set `timeZone` explicitly. Older versions interpreted journal days in `America/Buenos_Aires`; new installations default to UTC. Use the old zone when preserving those dates.
 
@@ -93,3 +93,9 @@ New sources can use `jmap` or `imap` directly; see [mail setup](connectors.md#ma
 For an existing Fastmail source, keep its source ID, account, email and aliases, and select `adapter: "jmap"`, the provider session URL, `accountId` and private authentication. Set `recordFormat: "mailbridge-v1"` to retain the original body and metadata format used by saved references. New JMAP sources default to `complete`, which includes every text body part, CC and the message header ID.
 
 Changing the connector changes its cache scope. Migrate an existing cache only after comparing its saved IDs and record versions against the new connection: back up the private configuration and library, stop maintenance, and rebind the verified source's scope in cached state, chunk guards and raw-response envelopes. Preserve chunk IDs, content hashes and references. Otherwise use a fresh source ID for a new cache, while keeping the old source available for existing references. Changing only the adapter field does not migrate a cache.
+
+## Agent-history backend migration
+
+Agent history now uses AgentsView v0.46.1 over HTTP. Replace each source's old `data`/`binary` fields with `server` (an HTTP/HTTPS URL) and `tokenFile` (an absolute private bearer-token file path); see the [connector example](connectors.md#agent-history). Remove any old flat `cassData`/`cassBinary` settings as well. Source Search no longer invokes the CASS executable or reads its data directory. This update does not modify the user's configuration or start server ingestion.
+
+Search again to replace old query-bound references with stable session/message references. Transcript revisions become record versions; an index refresh alone leaves them usable, while transcript changes require new references. Agent-history change tracking now returns `UNSUPPORTED_CHANGE_TRACKING` because the server has no reliable whole-index generation. Existing cursors cannot be continued across this backend switch.

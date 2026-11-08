@@ -48,11 +48,11 @@ export function validateOptions(q: Query,catalog:SourceCatalog={}) {
     if(["contacts","vcard"].includes(source) && q.sort && q.sort !== "relevance")
         fail("UNSUPPORTED_SORT", "Contacts have no occurrence date; use relevance or omit sort");
     if (q.match && source === "agent-history")
-        fail("UNSUPPORTED_FILTER", "Agent history uses CASS native search syntax; omit match");
+        fail("UNSUPPORTED_FILTER", "Agent history uses AgentsView native search syntax; omit match");
     if (q.sort === "relevance" && !definition?.sort.includes('relevance'))
         fail("UNSUPPORTED_SORT", `${source} supports newest/oldest, not relevance ranking`);
     if (source === "agent-history" && q.sort && q.sort !== "relevance")
-        fail("UNSUPPORTED_SORT", "CASS uses native relevance ordering");
+        fail("UNSUPPORTED_SORT", "AgentsView uses native relevance ordering");
     if ((source === "gmail") && q.sort === "oldest")
         fail("UNSUPPORTED_SORT", "Gmail API orders newest first; use date windows to retrieve older mail");
 }

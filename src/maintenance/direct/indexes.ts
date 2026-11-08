@@ -11,7 +11,6 @@ import {regular} from '../../platform/source-files';
 import {sourceFiles} from '../../sources/local/notes';
 import {archiveSignature,exportPaths,exportProjectionVersion,type ArchiveSource} from '../../sources/archives/originals';
 import {indexStatus,rebuildArchive} from '../../sources/archives';
-import {createCassProvider} from '../../vendor/cass/provider';
 import {archiveConfig} from '../archives';
 import {state,stamped,type Reader} from './model';
 
@@ -48,10 +47,8 @@ export const vault:Reader=async(c,source)=>{
   state:state('indexed-document-fingerprints','Active documents in selected QMD collections; index refresh controls freshness and original reads verify file content'),
  };}finally{index.close();}
 };
-export const agentHistory:Reader=async(c,source)=>{
- const scoped=sourceConfig(c,source),health=await createCassProvider({binaryPath:scoped.cassBinary,dataDir:scoped.cassData}).health();
- if(!health.readyForSearch)fail('SOURCE_NOT_READY','CASS has no ready committed search index');
- const fingerprint=health.index.checkpointFingerprint;
- if(!fingerprint)fail('UNSUPPORTED_CHANGE_TRACKING','This CASS version does not expose a committed content fingerprint');
- return {entries:[],state:{...state('committed-index-fingerprint','CASS exposes index changes, not stable record deltas; reset means rerun relevant searches'),granularity:'index',generation:hash(fingerprint),checkpoint:{documents:health.index.documents}}};
+// data_version identifies the parser format, not an archive generation.
+// The newest session cannot detect edits or removals of older sessions.
+export const agentHistory:Reader=async()=>{
+ fail('UNSUPPORTED_CHANGE_TRACKING','AgentsView v0.46.1 exposes no reliable whole-index generation. Agent-history tracking needs index granularity: a reset means rerun relevant searches; newest-session sampling cannot guarantee that.');
 };
